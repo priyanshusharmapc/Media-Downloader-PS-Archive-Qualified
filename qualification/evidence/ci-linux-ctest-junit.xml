@@ -4,11 +4,11 @@
 	failures="0"
 	disabled="0"
 	skipped="0"
-	hostname="9b94521eef1d"
+	hostname="e5d23ce81fb5"
 	time="9"
-	timestamp="2026-09-15T14:28:08"
+	timestamp="2026-09-15T17:21:54"
 	>
-	<testcase name="archive-core" classname="archive-core" time="0.306175" status="run">
+	<testcase name="archive-core" classname="archive-core" time="0.433549" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -17,7 +17,7 @@ for more information.
 archive-core-tests: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-discovery-shape" classname="archive-discovery-shape" time="0.00524352" status="run">
+	<testcase name="archive-discovery-shape" classname="archive-discovery-shape" time="0.00506297" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -26,7 +26,7 @@ for more information.
 discovery-shape: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-discovery-null" classname="archive-discovery-null" time="0.00471383" status="run">
+	<testcase name="archive-discovery-null" classname="archive-discovery-null" time="0.00436603" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -35,7 +35,7 @@ for more information.
 discovery-null: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-discovery-count" classname="archive-discovery-count" time="0.00443114" status="run">
+	<testcase name="archive-discovery-count" classname="archive-discovery-count" time="0.00399942" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -44,7 +44,7 @@ for more information.
 discovery-count: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-discovery-error" classname="archive-discovery-error" time="0.00601887" status="run">
+	<testcase name="archive-discovery-error" classname="archive-discovery-error" time="0.00406953" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -53,7 +53,7 @@ for more information.
 discovery-error: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-portable-paths" classname="archive-portable-paths" time="0.0304883" status="run">
+	<testcase name="archive-portable-paths" classname="archive-portable-paths" time="0.0279449" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -62,7 +62,7 @@ for more information.
 portable-paths: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-source-traversal" classname="archive-source-traversal" time="0.0325287" status="run">
+	<testcase name="archive-source-traversal" classname="archive-source-traversal" time="0.033046" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -71,7 +71,7 @@ for more information.
 source-traversal: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-state-shape" classname="archive-state-shape" time="0.0314628" status="run">
+	<testcase name="archive-state-shape" classname="archive-state-shape" time="0.0366168" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -80,7 +80,7 @@ for more information.
 state-shape: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-source-state-corruption" classname="archive-source-state-corruption" time="0.0324716" status="run">
+	<testcase name="archive-source-state-corruption" classname="archive-source-state-corruption" time="0.0321152" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -89,7 +89,7 @@ for more information.
 source-state-corruption: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-snapshot-identity" classname="archive-snapshot-identity" time="0.0341926" status="run">
+	<testcase name="archive-snapshot-identity" classname="archive-snapshot-identity" time="0.0277025" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -98,7 +98,7 @@ for more information.
 snapshot-identity: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-import-identity" classname="archive-import-identity" time="0.0313653" status="run">
+	<testcase name="archive-import-identity" classname="archive-import-identity" time="0.0296326" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -107,7 +107,7 @@ for more information.
 import-identity: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-import-id-only" classname="archive-import-id-only" time="0.0313492" status="run">
+	<testcase name="archive-import-id-only" classname="archive-import-id-only" time="0.0319324" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -116,7 +116,7 @@ for more information.
 import-id-only: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-import-schema" classname="archive-import-schema" time="0.0326728" status="run">
+	<testcase name="archive-import-schema" classname="archive-import-schema" time="0.029831" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -125,7 +125,7 @@ for more information.
 import-schema: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-partial-recovery-status" classname="archive-partial-recovery-status" time="0.0519155" status="run">
+	<testcase name="archive-partial-recovery-status" classname="archive-partial-recovery-status" time="0.048881" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -134,7 +134,7 @@ for more information.
 partial-recovery-status: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-nested-redaction" classname="archive-nested-redaction" time="0.0307413" status="run">
+	<testcase name="archive-nested-redaction" classname="archive-nested-redaction" time="0.0322665" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -143,7 +143,7 @@ for more information.
 nested-redaction: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-deleted-title" classname="archive-deleted-title" time="0.047221" status="run">
+	<testcase name="archive-deleted-title" classname="archive-deleted-title" time="0.0436087" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -152,7 +152,7 @@ for more information.
 deleted-title: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-linked-package-file" classname="archive-linked-package-file" time="0.0307998" status="run">
+	<testcase name="archive-linked-package-file" classname="archive-linked-package-file" time="0.0287152" status="run">
 		<properties/>
 		<system-out>Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
 Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
@@ -161,7 +161,7 @@ for more information.
 linked-package-file: PASS
 </system-out>
 	</testcase>
-	<testcase name="archive-integration" classname="archive-integration" time="9.09364" status="run">
+	<testcase name="archive-integration" classname="archive-integration" time="8.89868" status="run">
 		<properties/>
 		<system-out>test_archive_skip_retry_argument_order (__main__.ArchiveIntegration.test_archive_skip_retry_argument_order) ... ok
 test_concurrent_writer_and_old_live_lock_are_rejected (__main__.ArchiveIntegration.test_concurrent_writer_and_old_live_lock_are_rejected) ... ok

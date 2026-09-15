@@ -28,7 +28,6 @@ Start here:
 - [Recovery package workflow](docs/ARCHIVE_RECOVERY.md)
 - [Testing, qualification, and acceptance](docs/ARCHIVE_TESTING.md)
 - [Archive Agent interoperability contract](resources/archive/ARCHIVE_AGENT.md)
-- [Qualification candidate documentation](docs/qualification/README.md)
 
 ## Archive Mode quick start
 

@@ -1,0 +1,35 @@
+﻿{
+    "observedAt":  "2026-09-15T23:38:54.8331959+05:30",
+    "evidenceKind":  "target-harness",
+    "sourceCommit":  "261fcef529be7982b9048a39161941c1572b3044",
+    "ciRunId":  "35000478514",
+    "originalEvidence":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\phase1-z-final-261f-rerun\\target-harness.json",
+    "processExitCode":  0,
+    "result":  {
+                   "executable":  "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+                   "arguments":  [
+                                     "-NoProfile",
+                                     "-ExecutionPolicy",
+                                     "Bypass",
+                                     "-File",
+                                     "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\release-output-ready-261f\\Media-Downloader-PS-Portable\\archive-local-harness.ps1",
+                                     "-ArchiveRoot",
+                                     "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\phase1-z-final-261f-rerun\\ArchiveRoot",
+                                     "-PlaylistUrl",
+                                     "https://www.youtube.com/playlist?list=PLMeLfdmeKNdY",
+                                     "-VideoUrl",
+                                     "https://www.youtube.com/watch?v=0fvbzgnVO2Y",
+                                     "-ExpectedCommit",
+                                     "261fcef529be7982b9048a39161941c1572b3044"
+                                 ],
+                   "workingDirectory":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\release-output-ready-261f\\Media-Downloader-PS-Portable",
+                   "started":  "2026-09-15T23:14:49.1755742+05:30",
+                   "completed":  "2026-09-15T23:15:32.9728566+05:30",
+                   "seconds":  43.798603899999996,
+                   "exitCode":  0,
+                   "timedOut":  false,
+                   "stdoutSha256":  "500FBB3A9E0327554EACADAB8505C099A8001335B96A48C1E0E0EB0013DF1A6B",
+                   "stderrSha256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+               },
+    "pass":  true
+}

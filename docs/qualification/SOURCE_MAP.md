@@ -19,7 +19,7 @@ The tested executable source and its schemas/contracts are authoritative for beh
 
 ## Repair
 
-The qualification repair is limited to the target-host harness reparse classifier and its regression test. It does not weaken application path safety or add a bypass switch. The repaired source is commit `ad7943b93b0458ff2764432ae67419104c43fff8`.
+The qualification repair includes the target-host harness reparse classifier, its regression test, and the Windows linked-package safety test/CI privilege probe. It does not weaken application path safety or add a bypass switch. The qualified source is commit `261fcef529be7982b9048a39161941c1572b3044`.
 
 ## Licensing
 

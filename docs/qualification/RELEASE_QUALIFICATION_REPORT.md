@@ -2,87 +2,78 @@
 
 ## FINAL STATUS
 
-**NOT RELEASE READY**
+**RELEASE READY**
 
-The tested software and sealed CI candidate pass the executed product, package, live, recovery, safety, GUI, sanitizer and documentation checks. Release is withheld because two mandatory gates remain blocked and cannot be represented as PASS:
-
-- `LUNA-MAX-DELEGATED-REVIEW`: Agent Manager resolved both requested dispatches to `GPT-5.6 Luna`, provider `openai`, variant `max`, but the overview exposed no session ID or runtime metadata. No delegated worker result was used as evidence.
-- `WINDOWS-SYMLINK-PRIVILEGE`: the exact Windows symlink test returned its documented host-dependent skip status. Direct Z-path junction/root/state/package rejection passed, and Linux sanitized coverage passed, but the missing Windows symlink privilege prevents closing this exact gate.
+All mandatory software, package, live, recovery, safety, GUI, sanitizer, documentation and independent-review gates passed for the candidate identified below. The earlier `MDPS-LIVE-001` defect and the Windows symlink privilege/test gap are closed. The previously accepted `MDH\Output` and first ready promotion remain immutable; this report belongs to the final ready promotion.
 
 ## Identity
 
-- Final source commit: `ad7943b93b0458ff2764432ae67419104c43fff8`
+- Final source commit: `261fcef529be7982b9048a39161941c1572b3044`
 - Source branch: `luna-max-mdps-live-001`
-- Known supplied baseline: `acfd2a86d5af6ae07c4352461071e73a08b2b000`
+- Supplied baseline: `acfd2a86d5af6ae07c4352461071e73a08b2b000`
 - Authoritative CI workflow: `Archive Qt6 qualification`
-- CI run: `34981539523`
-- CI URL: <https://github.com/priyanshusharmapc/Media-Downloader-PS/actions/runs/34981539523>
-- Portable candidate source identity: commit `ad7943b93b0458ff2764432ae67419104c43fff8`, CI run `34981539523`
+- CI run: `35000478514`
+- CI URL: <https://github.com/priyanshusharmapc/Media-Downloader-PS/actions/runs/35000478514>
+- Exact candidate target run: `MDH\_runs\phase1-z-final-261f-rerun\target-harness.json`
+- Exact candidate live run: `MDH\_runs\live\three-item-release-261f\acceptance.json`
+- Final independent review session: `ses_f59c3626fffeXmUD68zZVPRta1`
+- Independent review model: `openai/gpt-5.6-luna`, provider `openai`, variant `max`
 
-## Repair
+## Defect Resolution
 
-`MDPS-LIVE-001` was a real target-host harness defect. The old classifier rejected the OneDrive-style Cloud Files tag `0x9000601A`; its bit mask ignored the wrong nibble and its PowerShell comparison used signed literals. The repaired script uses uint32 constants with mask `0xFFFF0FFF`, accepts only the documented `0x9000n01A` family, and continues to reject symbolic links, junctions and unknown reparse tags.
+`MDPS-LIVE-001` rejected the OneDrive-style Cloud Files ancestor tag `0x9000601A`. The repaired target-host classifier uses uint32 constants and mask `0xFFFF0FFF`, accepts only the documented `0x9000n01A` family, and continues to reject links, junctions and unknown tags. The exact baseline regression is red; the repaired source and sealed candidate are green.
 
-The exact baseline regression exits nonzero. The repaired repository script and the repaired sealed candidate both pass. The repair was committed, pushed, built by CI and exercised by the exact candidate target harness.
+The Windows linked-package test now creates a real package-side symbolic link with `CreateSymbolicLinkW(link, target, 0x2)`, asserts `QFileInfo(link).isSymLink()`, and verifies that Recovery Package validation rejects it. CI enabled Developer Mode and executed this test; it was not skipped.
 
 ## Gate Results
 
 | Gate | Result | Evidence |
 |---|---|---|
-| Supplied ZIP, split parts and extracted bundle integrity | PASS | `Qualification-Evidence/input-verification.json`, `Qualification-Evidence/bundle-reverification.json` |
-| Baseline portable manifest | PASS | `Qualification-Evidence/bundle-reverification.json` |
+| Supplied ZIP, split parts, extracted bundle and baseline portable | PASS | `Qualification-Evidence/input-verification.json`, `Qualification-Evidence/bundle-reverification.json` |
 | Baseline source comparison | PASS after CRLF normalization; no substantive mismatch | `Qualification-Evidence/source-comparison.json` |
-| DOCX knowledge re-verification | PASS; 24 extracted text documents and 25 supplied DOCX files hashed | `Qualification-Evidence/docx-reverification.json` |
-| Source/parser regression for `MDPS-LIVE-001` | PASS; baseline red, repaired source and candidate green | `Qualification-Evidence/mdps-live-001-regression.json` |
-| Linux build, CTest, ASan and UBSan | PASS in CI | `Qualification-Evidence/ci-linux-LastTest.log`, `Qualification-Evidence/ci-linux-sanitized-LastTest.log`, `Qualification-Evidence/ci-linux-ctest-junit.xml`, `Qualification-Evidence/ci-linux-sanitized-ctest-junit.xml` |
-| Windows Qt6 build and package creation | PASS in CI | `Qualification-Evidence/ci-run.json`, `Qualification-Evidence/ci-windows-LastTest.log` |
-| Windows CTest | 18 PASS, 1 explicit symlink-privilege skip | `Qualification-Evidence/ci-windows-LastTest.log`, `Qualification-Evidence/ci-windows-ctest-junit.xml` |
-| Exact CI candidate manifest | PASS; 121/121 entries match, no unsealed file | `Qualification-Evidence/ci-candidate-seal.json` |
-| Exact repaired target-host harness on relocated Z path | PASS | `Qualification-Evidence/target-harness.json` |
-| Live playlist runtime probe | PASS; exactly three currently accessible items selected | `Qualification-Evidence/live-selection.json` |
-| Three-item video/audio, FFprobe, restart and idempotency | PASS | `Qualification-Evidence/three-item-acceptance.json`, `Qualification-Evidence/media-verification.json` |
-| Unavailable/private/deleted behavior | PASS; nine historical candidates unavailable, failed identity retained, partial scan non-destructive | `Qualification-Evidence/historical-unavailable.json`, `Qualification-Evidence/unavailable-acceptance.json`, CI CTest logs |
-| Crash recovery, transactions, locking, concurrency and corruption | PASS in deterministic integration suite | CI CTest logs and `Qualification-Evidence/ci-windows-ctest-junit.xml` |
-| Z filesystem safety and reparse rejection | PASS for fresh roots, junctions, linked state, linked package and long path | `Qualification-Evidence/filesystem-safety.json` |
-| Windows symlink-specific privilege gate | BLOCKED; documented CTest skip | `Qualification-Evidence/ci-windows-LastTest.log` |
-| Recovery Package validation, acceptance and rejection | PASS | `Qualification-Evidence/recovery-packages.json` |
-| Portable tamper and unsealed-file rejection | PASS | `Qualification-Evidence/package-tamper.json` |
-| Backup, restore and root relocation | PASS | `Qualification-Evidence/backup-relocation.json` |
+| DOCX knowledge re-verification | PASS; 24 extracted text documents and 25 DOCX files | `Qualification-Evidence/docx-reverification.json` |
+| MDPS-LIVE-001 regression | PASS; baseline red, repaired source/candidate green | `Qualification-Evidence/mdps-live-001-regression.json` |
+| Linux build, CTest, ASan and UBSan | PASS | `Qualification-Evidence/ci-linux-LastTest.log`, `Qualification-Evidence/ci-linux-sanitized-LastTest.log` |
+| Windows Qt6 build and package | PASS | `Qualification-Evidence/ci-run.json`, `Qualification-Evidence/ci-windows-LastTest.log` |
+| Windows CTest | PASS; 19 tests, 0 failures, 0 skips | `Qualification-Evidence/ci-windows-ctest-junit.xml`, `Qualification-Evidence/ci-windows-LastTest.log` |
+| Real Windows linked-package symbolic-link test | PASS | `Qualification-Evidence/ci-windows-ctest-junit.xml` |
+| Exact candidate package seal | PASS; 116/116 entries match, no unsealed files | `Qualification-Evidence/ci-candidate-seal.json` |
+| Exact candidate target-host harness on Z | PASS | `Qualification-Evidence/target-harness-binding.json` |
+| Exact candidate three-item live test | PASS; video/audio, FFprobe, restart and idempotency | `Qualification-Evidence/three-item-binding.json` |
+| Exact candidate unavailable-source test | PASS; failed identity retained, no media published | `Qualification-Evidence/unavailable-binding.json` |
+| Crash, transaction, locking, concurrency and corruption tests | PASS | CI CTest and integration evidence |
+| Filesystem, junction, linked package and long-path safety | PASS | `Qualification-Evidence/filesystem-safety.json`, CI CTest evidence |
+| Recovery Packages | PASS | `Qualification-Evidence/recovery-packages.json` |
+| Tamper and unsealed-file rejection | PASS | `Qualification-Evidence/package-tamper.json` |
+| Backup, restore and relocation | PASS | `Qualification-Evidence/backup-relocation.json` |
 | 1,000-item scale and 30-cycle soak | PASS | `Qualification-Evidence/scale.json`, `Qualification-Evidence/soak.json` |
-| GUI startup smoke | PASS locally and in CI; no fatal output | `Qualification-Evidence/gui-smoke.json`, `Qualification-Evidence/ci-run.json` |
-| Documentation completeness and leakage QA | PASS; seven curated documents, required topics present, no forbidden local paths/secrets | `Qualification-Evidence/documentation-qa.json` |
-| Publication source cleanliness | PASS; internal qualification logs and generated IDE metadata excluded | `Qualification-Evidence/source-cleanliness.json` |
-| Luna Max delegated-worker routing | BLOCKED; no effective Agent Manager session metadata | `Qualification-Evidence/model-routing.json` |
+| GUI startup smoke | PASS | `Qualification-Evidence/gui-smoke.json`, CI evidence |
+| Documentation and publication-source QA | PASS | `Qualification-Evidence/documentation-qa.json`, `Qualification-Evidence/source-cleanliness.json` |
+| Independent Luna Max review | PASS; no remaining release blocker | `Qualification-Evidence/model-routing.json` |
 
 ## Package Hashes
 
-- Portable ZIP: `Media-Downloader-PS-Portable-ad7943b9.zip` SHA-256 `D08AE88A5CF1CC8CB450B3B2B141B26D157F337B7452875C3D0A205111DB44E4`
-- Curated GitHub source ZIP: `Media-Downloader-PS-GitHub-Source-ad7943b9.zip` SHA-256 `80615BED1F7B7220DBDBF973BCFF9EA460754F1DBA52233866EB7445656BB17B`
-- Portable `archive-cli.exe`: `481abf073856253d81eda96c54c423ffa1be3eccd7d094abc832d249f19defd6`
-- Portable `media-downloader.exe`: `21c6be6f35020eddbcc9fd4d7f2653f377634b266edefa01379d056134d96c16`
+- Portable ZIP: `Media-Downloader-PS-Portable-261fcef5.zip` SHA-256 `07DEAD80E265FED9252FF6D38660E84430D20627A154A9C80A048D59629D1D8F`
+- Curated source ZIP: `Media-Downloader-PS-GitHub-Source-261fcef5.zip` SHA-256 `04893D2851AA5C48C97AD57728A61AFAB3F92204B84B5AC9F9B4BB215405B042`
+- Portable `archive-cli.exe`: `8388abd9f129fca9f45e77cf60d7e73ebf596b40816016d0fab3cdeab93ad0dc`
+- Portable `media-downloader.exe`: `cb890dd5542464d2b476b7844a1a169d1059e6d187cbb9702cb6bba5f1850516`
 - Portable `archive-local-harness.ps1`: `806d828fcb87bbb1265b6b2f34fa704dd74aceade6835bb781b9f00ff807c1f2`
-- Portable internal manifest: 121 files, all matched in `Qualification-Evidence/ci-candidate-seal.json`
-
-## Defects
-
-- `MDPS-LIVE-001`: resolved by the committed Cloud Files classifier repair and regression. No P0, P1 or P2 product defect remains in the executed evidence.
-- Local full-GUI CTest through the temporary drive alias showed Windows integration cleanup errors, while the direct Z archive suite and authoritative CI passed. This is retained as local toolchain/alias evidence and is not silently counted as a product PASS.
-- No supplied original, supplied qualified portable, DOCX, bundle ZIP or final candidate was modified.
+- Portable internal manifest: 116 files, all matched.
 
 ## Documentation
 
-The curated `Documentation/` directory contains installation and user/GUI/CLI operation, state and history, media verification, transaction and lock behavior, Recovery Packages, backup/restore, relocation, security, troubleshooting, limitations, build/test/qualification/release controls, source map, links, licensing and valid examples. It contains no local/private workspace path or credential pattern.
+The curated documentation covers installation, GUI and CLI operation, Archive Root state and history, media verification, transactions, locking, Recovery Packages, backup/restore, relocation, filesystem security, troubleshooting, limitations, testing, qualification, release, source mapping, licensing and valid examples. It contains no forbidden local paths or credential patterns.
 
-## Final Output Layout
+## Final Output
 
-The final Output directory is assembled only after this report and all staged files are complete:
+The final release-ready promotion is a new immutable directory:
 
 ```text
-Output/
+Output-Release-Ready-Final/
   Media-Downloader-PS-Portable/
-  Media-Downloader-PS-Portable-ad7943b9.zip
+  Media-Downloader-PS-Portable-261fcef5.zip
   GitHub-Source/
-  Media-Downloader-PS-GitHub-Source-ad7943b9.zip
+  Media-Downloader-PS-GitHub-Source-261fcef5.zip
   Documentation/
   Qualification-Evidence/
   RELEASE_NOTES.md
@@ -91,4 +82,4 @@ Output/
   SHA256SUMS-OUTPUT.txt
 ```
 
-`SHA256SUMS-OUTPUT.txt` is the outer manifest and excludes itself to avoid a self-referential digest. No file under `Output` may be changed after exact-byte acceptance begins.
+The outer manifest excludes itself to avoid a self-referential hash. No file in the release-ready Output may be modified after final acceptance.

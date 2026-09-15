@@ -1,10 +1,10 @@
-Start testing: Sep 15 14:28 UTC
+Start testing: Sep 15 17:21 UTC
 ----------------------------------------------------------
 1/18 Testing: archive-core
 1/18 Test: archive-core
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-core-tests"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-core" start time: Sep 15 14:28 UTC
+"archive-core" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -13,10 +13,10 @@ If this causes problems, reconfigure your locale. See the locale(1) manual
 for more information.
 archive-core-tests: PASS
 <end of output>
-Test time =   0.31 sec
+Test time =   0.43 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-core" end time: Sep 15 14:28 UTC
+"archive-core" end time: Sep 15 17:21 UTC
 "archive-core" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -24,7 +24,7 @@ Test Passed.
 2/18 Test: archive-discovery-shape
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "discovery-shape"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-discovery-shape" start time: Sep 15 14:28 UTC
+"archive-discovery-shape" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -36,7 +36,7 @@ discovery-shape: PASS
 Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-discovery-shape" end time: Sep 15 14:28 UTC
+"archive-discovery-shape" end time: Sep 15 17:21 UTC
 "archive-discovery-shape" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -44,7 +44,7 @@ Test Passed.
 3/18 Test: archive-discovery-null
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "discovery-null"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-discovery-null" start time: Sep 15 14:28 UTC
+"archive-discovery-null" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -56,7 +56,7 @@ discovery-null: PASS
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-discovery-null" end time: Sep 15 14:28 UTC
+"archive-discovery-null" end time: Sep 15 17:21 UTC
 "archive-discovery-null" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -64,7 +64,7 @@ Test Passed.
 4/18 Test: archive-discovery-count
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "discovery-count"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-discovery-count" start time: Sep 15 14:28 UTC
+"archive-discovery-count" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -76,7 +76,7 @@ discovery-count: PASS
 Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-discovery-count" end time: Sep 15 14:28 UTC
+"archive-discovery-count" end time: Sep 15 17:21 UTC
 "archive-discovery-count" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -84,7 +84,7 @@ Test Passed.
 5/18 Test: archive-discovery-error
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "discovery-error"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-discovery-error" start time: Sep 15 14:28 UTC
+"archive-discovery-error" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -93,10 +93,10 @@ If this causes problems, reconfigure your locale. See the locale(1) manual
 for more information.
 discovery-error: PASS
 <end of output>
-Test time =   0.01 sec
+Test time =   0.00 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-discovery-error" end time: Sep 15 14:28 UTC
+"archive-discovery-error" end time: Sep 15 17:21 UTC
 "archive-discovery-error" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -104,7 +104,7 @@ Test Passed.
 6/18 Test: archive-portable-paths
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "portable-paths"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-portable-paths" start time: Sep 15 14:28 UTC
+"archive-portable-paths" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -116,7 +116,7 @@ portable-paths: PASS
 Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-portable-paths" end time: Sep 15 14:28 UTC
+"archive-portable-paths" end time: Sep 15 17:21 UTC
 "archive-portable-paths" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -124,7 +124,7 @@ Test Passed.
 7/18 Test: archive-source-traversal
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "source-traversal"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-source-traversal" start time: Sep 15 14:28 UTC
+"archive-source-traversal" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -136,7 +136,7 @@ source-traversal: PASS
 Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-source-traversal" end time: Sep 15 14:28 UTC
+"archive-source-traversal" end time: Sep 15 17:21 UTC
 "archive-source-traversal" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -144,7 +144,7 @@ Test Passed.
 8/18 Test: archive-state-shape
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "state-shape"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-state-shape" start time: Sep 15 14:28 UTC
+"archive-state-shape" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -153,10 +153,10 @@ If this causes problems, reconfigure your locale. See the locale(1) manual
 for more information.
 state-shape: PASS
 <end of output>
-Test time =   0.03 sec
+Test time =   0.04 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-state-shape" end time: Sep 15 14:28 UTC
+"archive-state-shape" end time: Sep 15 17:21 UTC
 "archive-state-shape" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -164,7 +164,7 @@ Test Passed.
 9/18 Test: archive-source-state-corruption
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "source-state-corruption"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-source-state-corruption" start time: Sep 15 14:28 UTC
+"archive-source-state-corruption" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -176,7 +176,7 @@ source-state-corruption: PASS
 Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-source-state-corruption" end time: Sep 15 14:28 UTC
+"archive-source-state-corruption" end time: Sep 15 17:21 UTC
 "archive-source-state-corruption" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -184,7 +184,7 @@ Test Passed.
 10/18 Test: archive-snapshot-identity
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "snapshot-identity"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-snapshot-identity" start time: Sep 15 14:28 UTC
+"archive-snapshot-identity" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -196,7 +196,7 @@ snapshot-identity: PASS
 Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-snapshot-identity" end time: Sep 15 14:28 UTC
+"archive-snapshot-identity" end time: Sep 15 17:21 UTC
 "archive-snapshot-identity" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -204,7 +204,7 @@ Test Passed.
 11/18 Test: archive-import-identity
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "import-identity"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-import-identity" start time: Sep 15 14:28 UTC
+"archive-import-identity" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -216,7 +216,7 @@ import-identity: PASS
 Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-import-identity" end time: Sep 15 14:28 UTC
+"archive-import-identity" end time: Sep 15 17:21 UTC
 "archive-import-identity" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -224,7 +224,7 @@ Test Passed.
 12/18 Test: archive-import-id-only
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "import-id-only"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-import-id-only" start time: Sep 15 14:28 UTC
+"archive-import-id-only" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -236,7 +236,7 @@ import-id-only: PASS
 Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-import-id-only" end time: Sep 15 14:28 UTC
+"archive-import-id-only" end time: Sep 15 17:21 UTC
 "archive-import-id-only" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -244,7 +244,7 @@ Test Passed.
 13/18 Test: archive-import-schema
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "import-schema"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-import-schema" start time: Sep 15 14:28 UTC
+"archive-import-schema" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -256,7 +256,7 @@ import-schema: PASS
 Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-import-schema" end time: Sep 15 14:28 UTC
+"archive-import-schema" end time: Sep 15 17:21 UTC
 "archive-import-schema" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -264,7 +264,7 @@ Test Passed.
 14/18 Test: archive-partial-recovery-status
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "partial-recovery-status"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-partial-recovery-status" start time: Sep 15 14:28 UTC
+"archive-partial-recovery-status" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -276,7 +276,7 @@ partial-recovery-status: PASS
 Test time =   0.05 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-partial-recovery-status" end time: Sep 15 14:28 UTC
+"archive-partial-recovery-status" end time: Sep 15 17:21 UTC
 "archive-partial-recovery-status" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -284,7 +284,7 @@ Test Passed.
 15/18 Test: archive-nested-redaction
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "nested-redaction"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-nested-redaction" start time: Sep 15 14:28 UTC
+"archive-nested-redaction" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -296,7 +296,7 @@ nested-redaction: PASS
 Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-nested-redaction" end time: Sep 15 14:28 UTC
+"archive-nested-redaction" end time: Sep 15 17:21 UTC
 "archive-nested-redaction" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -304,7 +304,7 @@ Test Passed.
 16/18 Test: archive-deleted-title
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "deleted-title"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-deleted-title" start time: Sep 15 14:28 UTC
+"archive-deleted-title" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -313,10 +313,10 @@ If this causes problems, reconfigure your locale. See the locale(1) manual
 for more information.
 deleted-title: PASS
 <end of output>
-Test time =   0.05 sec
+Test time =   0.04 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-deleted-title" end time: Sep 15 14:28 UTC
+"archive-deleted-title" end time: Sep 15 17:21 UTC
 "archive-deleted-title" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -324,7 +324,7 @@ Test Passed.
 17/18 Test: archive-linked-package-file
 Command: "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests" "linked-package-file"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-linked-package-file" start time: Sep 15 14:28 UTC
+"archive-linked-package-file" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
@@ -336,7 +336,7 @@ linked-package-file: PASS
 Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-linked-package-file" end time: Sep 15 14:28 UTC
+"archive-linked-package-file" end time: Sep 15 17:21 UTC
 "archive-linked-package-file" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -344,7 +344,7 @@ Test Passed.
 18/18 Test: archive-integration
 Command: "/usr/bin/python3" "/__w/Media-Downloader-PS/Media-Downloader-PS/tests/archive-integration-tests.py" "--cli" "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-cli" "--fake-tool" "/__w/Media-Downloader-PS/Media-Downloader-PS/build/archive-fake-tool"
 Directory: /__w/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-integration" start time: Sep 15 14:28 UTC
+"archive-integration" start time: Sep 15 17:21 UTC
 Output:
 ----------------------------------------------------------
 test_archive_skip_retry_argument_order (__main__.ArchiveIntegration.test_archive_skip_retry_argument_order) ... ok
@@ -371,15 +371,15 @@ test_valid_existing_media_is_adopted_when_source_unavailable (__main__.ArchiveIn
 test_windows_harness_positive_and_tampered_package_negative (__main__.ArchiveIntegration.test_windows_harness_positive_and_tampered_package_negative) ... skipped 'Windows PowerShell acceptance wrapper'
 
 ----------------------------------------------------------------------
-Ran 22 tests in 9.033s
+Ran 22 tests in 8.839s
 
 OK (skipped=1)
 <end of output>
-Test time =   9.09 sec
+Test time =   8.90 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-integration" end time: Sep 15 14:28 UTC
-"archive-integration" time elapsed: 00:00:09
+"archive-integration" end time: Sep 15 17:22 UTC
+"archive-integration" time elapsed: 00:00:08
 ----------------------------------------------------------
 
-End testing: Sep 15 14:28 UTC
+End testing: Sep 15 17:22 UTC

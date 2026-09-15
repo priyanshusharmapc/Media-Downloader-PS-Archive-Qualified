@@ -1,6 +1,6 @@
 ﻿{
-    "observedAt":  "2026-09-15T20:42:39.4079965+05:30",
-    "documentationRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\release-output\\Documentation",
+    "observedAt":  "2026-09-15T23:21:14.1795178+05:30",
+    "documentationRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\release-output-ready-261f\\Documentation",
     "fileCount":  7,
     "files":  [
                   {
@@ -47,7 +47,7 @@
                   },
                   {
                       "file":  "README.md",
-                      "sha256":  "346a4882d6324d909375e1aa2e856ecc6f16c0ef9e8303a72cb202e9b2cfb18f",
+                      "sha256":  "f208f6e805477faeeafd760cc6d30705d1d07b74d6c5d08a266b93c4fc398631",
                       "missing":  [
                                       "transaction",
                                       "lock",
@@ -82,14 +82,16 @@
                   },
                   {
                       "file":  "RELEASE_NOTES.md",
-                      "sha256":  "40536a1ff46b34658fc840cc8597b0024ccafc76647b830db2a3d9929f6fbd10",
+                      "sha256":  "8578058632c91df5d04ce919916d10b948ffd4df6a93c463bd6cace1633ad1e3",
                       "missing":  [
                                       "installation",
                                       "Archive Root",
                                       "playlist",
+                                      "state",
                                       "history",
                                       "FFprobe",
                                       "transaction",
+                                      "lock",
                                       "security",
                                       "travers",
                                       "build",
@@ -102,7 +104,7 @@
                   },
                   {
                       "file":  "SOURCE_MAP.md",
-                      "sha256":  "3d5a82391f822a5114a7b387f3f5af6939a51091c4d3b9e04bd56a2520938364",
+                      "sha256":  "de69083a2009338d45c35bb3da45db70531b65342e2c99873a5d63265c6d419c",
                       "missing":  [
                                       "installation",
                                       "GUI",
@@ -128,13 +130,14 @@
                   },
                   {
                       "file":  "TESTING_QUALIFICATION.md",
-                      "sha256":  "e181e7a32144a3a2d9d129632720575f68483503dedeb1fd80c83dad2fc99d90",
+                      "sha256":  "d1731ad545920409f12b91c00b4fd425b328573ad0972329fce7ef44d1f6a568",
                       "missing":  [
                                       "installation",
                                       "CLI",
                                       "history",
                                       "security",
                                       "travers",
+                                      "symlink",
                                       "license",
                                       "https://"
                                   ],
@@ -146,9 +149,6 @@
     "requiredTermsMissing":  [
 
                              ],
-    "missingReferencedFiles":  [
-
-                               ],
     "forbiddenFiles":  [
 
                        ],

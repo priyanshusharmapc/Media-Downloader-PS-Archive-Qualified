@@ -2,12 +2,12 @@
 
 ## Candidate Identity
 
-- Source commit: `ad7943b93b0458ff2764432ae67419104c43fff8`
+- Source commit: `261fcef529be7982b9048a39161941c1572b3044`
 - Branch: `luna-max-mdps-live-001`
-- CI run: `34981539523`
+- CI run: `35000478514`
 - Portable candidate SHA-256 is recorded in the outer manifest.
-- Candidate `archive-cli.exe`: `481abf073856253d81eda96c54c423ffa1be3eccd7d094abc832d249f19defd6`
-- Candidate `media-downloader.exe`: `21c6be6f35020eddbcc9fd4d7f2653f377634b266edefa01379d056134d96c16`
+- Candidate `archive-cli.exe`: `8388abd9f129fca9f45e77cf60d7e73ebf596b40816016d0fab3cdeab93ad0dc`
+- Candidate `media-downloader.exe`: `cb890dd5542464d2b476b7844a1a169d1059e6d187cbb9702cb6bba5f1850516`
 - Candidate `archive-local-harness.ps1`: `806d828fcb87bbb1265b6b2f34fa704dd74aceade6835bb781b9f00ff807c1f2`
 
 ## Fixed
@@ -16,11 +16,11 @@
 
 ## Qualification Result
 
-The candidate passed CI, the exact Z-root target-host harness, live three-item acceptance, package sealing, tamper rejection, Recovery Package tests, backup/restore, relocation, scale, soak, media verification and GUI startup smoke. See the qualification report for mandatory gates that remain blocked.
+The candidate passed CI, the exact Z-root target-host harness, live three-item acceptance, package sealing, tamper rejection, Recovery Package tests, backup/restore, relocation, scale, soak, media verification and GUI startup smoke. The final qualification report records the release decision.
 
 ## Known Limitations
 
 - Provider availability, network access and extractor behavior can change.
 - A real OneDrive ancestor cannot be recreated under the mandated relocated Z workspace; the tag-family regression is synthetic and exact.
-- The Windows symlink privilege test is host-dependent and was skipped in the CI CTest report; junction and linked-state/package rejection were independently exercised.
-- Agent Manager resolved GPT-5.6 Luna `max` for dispatch but exposed no runtime session metadata for the requested independent worker. That routing limitation is recorded as a blocked gate, not a PASS.
+- The Windows symlink test requires Developer Mode or equivalent privilege; the authoritative CI runner enabled it and executed the real boundary test.
+- Provider availability, network access and extractor behavior remain external dependencies.

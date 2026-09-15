@@ -1,12 +1,9 @@
 ﻿{
-    "observedAt":  "2026-09-15T20:24:06.5974592+05:30",
-    "candidateRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\candidate-ad7943b9",
-    "sourceCommit":  "ad7943b93b0458ff2764432ae67419104c43fff8",
-    "ciRunId":  "34981539523",
-    "manifestEntries":  121,
-    "malformed":  [
-
-                  ],
+    "observedAt":  "2026-09-15T23:19:50.1166319+05:30",
+    "candidateRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\release-output-ready-261f\\Media-Downloader-PS-Portable",
+    "sourceCommit":  "261fcef529be7982b9048a39161941c1572b3044",
+    "ciRunId":  "35000478514",
+    "manifestEntries":  116,
     "missing":  [
 
                 ],
@@ -17,9 +14,10 @@
 
                  ],
     "keyHashes":  {
-                      "archiveCli":  "481abf073856253d81eda96c54c423ffa1be3eccd7d094abc832d249f19defd6",
-                      "mediaDownloader":  "21c6be6f35020eddbcc9fd4d7f2653f377634b266edefa01379d056134d96c16",
-                      "harness":  "806d828fcb87bbb1265b6b2f34fa704dd74aceade6835bb781b9f00ff807c1f2"
+                      "archiveCli":  "8388abd9f129fca9f45e77cf60d7e73ebf596b40816016d0fab3cdeab93ad0dc",
+                      "mediaDownloader":  "cb890dd5542464d2b476b7844a1a169d1059e6d187cbb9702cb6bba5f1850516",
+                      "harness":  "806d828fcb87bbb1265b6b2f34fa704dd74aceade6835bb781b9f00ff807c1f2",
+                      "manifest":  "a88c3040a614fd4865bb02f2f7a5cd8c3371641cc2c0852af9662faf3e473a4c"
                   },
     "pass":  true
 }

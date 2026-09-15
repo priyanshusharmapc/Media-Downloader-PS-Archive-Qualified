@@ -1,6 +1,6 @@
 # Media Downloader PS Archive Mode
 
-This documentation describes the Windows portable candidate built from source commit `ad7943b93b0458ff2764432ae67419104c43fff8`. It is the Archive Mode qualification candidate for GitHub Actions run `34981539523`.
+This documentation describes the Windows portable candidate built from source commit `261fcef529be7982b9048a39161941c1572b3044`. It is the Archive Mode qualification candidate for GitHub Actions run `35000478514`.
 
 ## Contents
 

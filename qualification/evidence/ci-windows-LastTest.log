@@ -1,18 +1,18 @@
-Start testing: Sep 15 14:30 Coordinated Universal Time
+Start testing: Sep 15 17:21 Coordinated Universal Time
 ----------------------------------------------------------
 1/19 Testing: archive-core
 1/19 Test: archive-core
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-core-tests.exe"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-core" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-core" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 archive-core-tests: PASS
 <end of output>
-Test time =   2.33 sec
+Test time =   2.16 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-core" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-core" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-core" time elapsed: 00:00:02
 ----------------------------------------------------------
 
@@ -20,15 +20,15 @@ Test Passed.
 2/19 Test: archive-discovery-shape
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "discovery-shape"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-discovery-shape" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-discovery-shape" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 discovery-shape: PASS
 <end of output>
-Test time =   0.02 sec
+Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-discovery-shape" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-discovery-shape" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-discovery-shape" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -36,15 +36,15 @@ Test Passed.
 3/19 Test: archive-discovery-null
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "discovery-null"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-discovery-null" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-discovery-null" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 discovery-null: PASS
 <end of output>
-Test time =   0.02 sec
+Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-discovery-null" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-discovery-null" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-discovery-null" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -52,15 +52,15 @@ Test Passed.
 4/19 Test: archive-discovery-count
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "discovery-count"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-discovery-count" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-discovery-count" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 discovery-count: PASS
 <end of output>
-Test time =   0.02 sec
+Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-discovery-count" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-discovery-count" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-discovery-count" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -68,15 +68,15 @@ Test Passed.
 5/19 Test: archive-discovery-error
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "discovery-error"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-discovery-error" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-discovery-error" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 discovery-error: PASS
 <end of output>
-Test time =   0.02 sec
+Test time =   0.01 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-discovery-error" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-discovery-error" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-discovery-error" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -84,15 +84,15 @@ Test Passed.
 6/19 Test: archive-portable-paths
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "portable-paths"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-portable-paths" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-portable-paths" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 portable-paths: PASS
 <end of output>
-Test time =   0.24 sec
+Test time =   0.59 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-portable-paths" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-portable-paths" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-portable-paths" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -100,15 +100,15 @@ Test Passed.
 7/19 Test: archive-source-traversal
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "source-traversal"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-source-traversal" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-source-traversal" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 source-traversal: PASS
 <end of output>
-Test time =   0.26 sec
+Test time =   0.21 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-source-traversal" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-source-traversal" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-source-traversal" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -116,15 +116,15 @@ Test Passed.
 8/19 Test: archive-state-shape
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "state-shape"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-state-shape" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-state-shape" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 state-shape: PASS
 <end of output>
-Test time =   0.29 sec
+Test time =   0.21 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-state-shape" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-state-shape" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-state-shape" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -132,15 +132,15 @@ Test Passed.
 9/19 Test: archive-source-state-corruption
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "source-state-corruption"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-source-state-corruption" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-source-state-corruption" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 source-state-corruption: PASS
 <end of output>
-Test time =   0.29 sec
+Test time =   0.25 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-source-state-corruption" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-source-state-corruption" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-source-state-corruption" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -148,15 +148,15 @@ Test Passed.
 10/19 Test: archive-snapshot-identity
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "snapshot-identity"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-snapshot-identity" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-snapshot-identity" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 snapshot-identity: PASS
 <end of output>
-Test time =   0.26 sec
+Test time =   0.25 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-snapshot-identity" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-snapshot-identity" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-snapshot-identity" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -164,15 +164,15 @@ Test Passed.
 11/19 Test: archive-import-identity
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "import-identity"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-import-identity" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-import-identity" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 import-identity: PASS
 <end of output>
-Test time =   0.27 sec
+Test time =   0.24 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-import-identity" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-import-identity" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-import-identity" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -180,15 +180,15 @@ Test Passed.
 12/19 Test: archive-import-id-only
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "import-id-only"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-import-id-only" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-import-id-only" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 import-id-only: PASS
 <end of output>
-Test time =   0.26 sec
+Test time =   0.51 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-import-id-only" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-import-id-only" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-import-id-only" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -196,15 +196,15 @@ Test Passed.
 13/19 Test: archive-import-schema
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "import-schema"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-import-schema" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-import-schema" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 import-schema: PASS
 <end of output>
-Test time =   0.33 sec
+Test time =   0.18 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-import-schema" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-import-schema" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-import-schema" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -212,63 +212,63 @@ Test Passed.
 14/19 Test: archive-partial-recovery-status
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "partial-recovery-status"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-partial-recovery-status" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-partial-recovery-status" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 partial-recovery-status: PASS
 <end of output>
-Test time =   1.43 sec
+Test time =   0.33 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-partial-recovery-status" end time: Sep 15 14:30 Coordinated Universal Time
-"archive-partial-recovery-status" time elapsed: 00:00:01
+"archive-partial-recovery-status" end time: Sep 15 17:21 Coordinated Universal Time
+"archive-partial-recovery-status" time elapsed: 00:00:00
 ----------------------------------------------------------
 
 15/19 Testing: archive-nested-redaction
 15/19 Test: archive-nested-redaction
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "nested-redaction"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-nested-redaction" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-nested-redaction" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 nested-redaction: PASS
 <end of output>
-Test time =   1.42 sec
+Test time =   0.20 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-nested-redaction" end time: Sep 15 14:30 Coordinated Universal Time
-"archive-nested-redaction" time elapsed: 00:00:01
+"archive-nested-redaction" end time: Sep 15 17:21 Coordinated Universal Time
+"archive-nested-redaction" time elapsed: 00:00:00
 ----------------------------------------------------------
 
 16/19 Testing: archive-deleted-title
 16/19 Test: archive-deleted-title
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "deleted-title"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-deleted-title" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-deleted-title" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 deleted-title: PASS
 <end of output>
-Test time =   3.12 sec
+Test time =   0.32 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-deleted-title" end time: Sep 15 14:30 Coordinated Universal Time
-"archive-deleted-title" time elapsed: 00:00:03
+"archive-deleted-title" end time: Sep 15 17:21 Coordinated Universal Time
+"archive-deleted-title" time elapsed: 00:00:00
 ----------------------------------------------------------
 
 17/19 Testing: archive-linked-package-file
 17/19 Test: archive-linked-package-file
 Command: "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-hardening-tests.exe" "linked-package-file"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-linked-package-file" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-linked-package-file" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
-SKIP: symlink privilege is host-dependent
+linked-package-file: PASS
 <end of output>
-Test time =   0.02 sec
+Test time =   0.59 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-linked-package-file" end time: Sep 15 14:30 Coordinated Universal Time
+"archive-linked-package-file" end time: Sep 15 17:21 Coordinated Universal Time
 "archive-linked-package-file" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -276,7 +276,7 @@ Test Passed.
 18/19 Test: archive-integration
 Command: "C:/hostedtoolcache/windows/Python/3.14.7/x64/python3.exe" "D:/a/Media-Downloader-PS/Media-Downloader-PS/tests/archive-integration-tests.py" "--cli" "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-cli.exe" "--fake-tool" "D:/a/Media-Downloader-PS/Media-Downloader-PS/build/archive-fake-tool.exe"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-integration" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-integration" start time: Sep 15 17:21 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 test_archive_skip_retry_argument_order (__main__.ArchiveIntegration.test_archive_skip_retry_argument_order) ... ok
@@ -303,31 +303,31 @@ test_valid_existing_media_is_adopted_when_source_unavailable (__main__.ArchiveIn
 test_windows_harness_positive_and_tampered_package_negative (__main__.ArchiveIntegration.test_windows_harness_positive_and_tampered_package_negative) ... ok
 
 ----------------------------------------------------------------------
-Ran 22 tests in 27.624s
+Ran 22 tests in 23.465s
 
 OK
 <end of output>
-Test time =  28.08 sec
+Test time =  23.71 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-integration" end time: Sep 15 14:30 Coordinated Universal Time
-"archive-integration" time elapsed: 00:00:28
+"archive-integration" end time: Sep 15 17:22 Coordinated Universal Time
+"archive-integration" time elapsed: 00:00:23
 ----------------------------------------------------------
 
 19/19 Testing: archive-local-harness-reparse
 19/19 Test: archive-local-harness-reparse
 Command: "C:/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" "-NoProfile" "-ExecutionPolicy" "Bypass" "-File" "D:/a/Media-Downloader-PS/Media-Downloader-PS/tests/archive-local-harness-reparse-tests.ps1" "-ScriptPath" "D:/a/Media-Downloader-PS/Media-Downloader-PS/scripts/archive-local-harness.ps1"
 Directory: D:/a/Media-Downloader-PS/Media-Downloader-PS/build
-"archive-local-harness-reparse" start time: Sep 15 14:30 Coordinated Universal Time
+"archive-local-harness-reparse" start time: Sep 15 17:22 Coordinated Universal Time
 Output:
 ----------------------------------------------------------
 archive-local-harness-reparse-tests PASS
 <end of output>
-Test time =   3.71 sec
+Test time =   5.19 sec
 ----------------------------------------------------------
 Test Passed.
-"archive-local-harness-reparse" end time: Sep 15 14:31 Coordinated Universal Time
-"archive-local-harness-reparse" time elapsed: 00:00:03
+"archive-local-harness-reparse" end time: Sep 15 17:22 Coordinated Universal Time
+"archive-local-harness-reparse" time elapsed: 00:00:05
 ----------------------------------------------------------
 
-End testing: Sep 15 14:31 Coordinated Universal Time
+End testing: Sep 15 17:22 Coordinated Universal Time

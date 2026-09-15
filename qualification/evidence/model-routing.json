@@ -1,53 +1,21 @@
 ﻿{
-    "observedAt":  "2026-09-15T20:37:47.4304186+05:30",
-    "primaryModel":  "GPT-5.6 Luna",
-    "primaryVariant":  "max",
-    "primarySource":  "current assignment/system context",
-    "agentManagerCatalog":  {
-                                "model":  "GPT-5.6 Luna",
-                                "provider":  "openai",
-                                "variants":  [
-                                                 "none",
-                                                 "low",
-                                                 "medium",
-                                                 "high",
-                                                 "xhigh",
-                                                 "max"
-                                             ]
-                            },
-    "delegatedRequests":  [
-                              {
-                                  "name":  "MDPS-001-review",
-                                  "mode":  "worktree",
-                                  "model":  "GPT-5.6 Luna",
-                                  "provider":  "openai",
-                                  "variant":  "max",
-                                  "dispatchResolved":  true,
-                                  "sessionID":  null
-                              },
-                              {
-                                  "name":  "MDPS-001-review-local",
-                                  "mode":  "local",
-                                  "model":  "GPT-5.6 Luna",
-                                  "provider":  "openai",
-                                  "variant":  "max",
-                                  "dispatchResolved":  true,
-                                  "sessionID":  null
-                              }
-                          ],
-    "agentManagerOverviewAfterRequests":  {
-                                              "sessions":  [
+    "observedAt":  "2026-09-15T23:40:54.8246542+05:30",
+    "sessionID":  "ses_f59c3626fffeXmUD68zZVPRta1",
+    "model":  "openai/gpt-5.6-luna",
+    "provider":  "openai",
+    "variant":  "max",
+    "reviewCommit":  "261fcef529be7982b9048a39161941c1572b3044",
+    "ciRun":  "35000478514",
+    "dispatchResolved":  true,
+    "sessionExecuted":  true,
+    "reviewStatus":  "PASS",
+    "findings":  [
+                     "CreateSymbolicLinkW(link,target,0x2) and package-side QFileInfo(link).isSymLink assertion verified",
+                     "CI linked-package test executed with zero skip/failure",
+                     "target, three-item and unavailable binding records verified with matching commit/run identities"
+                 ],
+    "blockers":  [
 
-                                                           ],
-                                              "sections":  [
-
-                                                           ],
-                                              "ungrouped":  [
-
-                                                            ],
-                                              "runtimeMetadataAvailable":  false
-                                          },
-    "effectiveDelegatedWorkerVerified":  false,
-    "affectedGate":  "BLOCKED - no Agent Manager runtime session metadata; no delegated worker result may be treated as executed",
-    "pass":  false
+                 ],
+    "pass":  true
 }

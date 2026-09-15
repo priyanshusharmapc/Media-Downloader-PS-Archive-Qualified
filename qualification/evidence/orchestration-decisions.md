@@ -1,7 +1,7 @@
 # Decisions
 
 ## D001: Real capabilities over requested labels
-The primary model is identified by installed instructions as openai/gpt-6-astra. No mode change is used. The runtime reasoning selector cannot be inspected with the available tools; Xhigh is not independently attested. Native Task exists but has no per-task model selector. Initial combined-name searches incorrectly conflated model names with reasoning variants. Corrected queries on 2026-09-15T12:07Z found GPT-5.6 Luna (`max`) and GPT-5.6 Terra (`medium`) offered by openai and other listed providers. This establishes catalog availability, NOT worker execution. Task still exposes only general/explore with no model/variant override. No Kilo CLI on PATH. Do not silently substitute or claim a model ran. Primary executes pending a supported enforceable routing path within the MDH write boundary; independent requested-model reviews remain blocked until actual routing is verified.
+The current assignment primary is GPT-5.6 Luna at `max`. Agent Manager catalog queries on 2026-09-15 found GPT-5.6 Luna (`max`) through `openai`. This establishes catalog availability, not worker execution. Native Task does not expose a per-task model/variant selector, so it was not used for delegated model-sensitive work. Agent Manager dispatches were explicitly pinned to Luna/openai/max, but no runtime session metadata became visible. Do not silently substitute or claim a delegated model ran; the affected independent-review gate remains blocked.
 
 ## D002: Preserve all originals
 All generated scripts, extraction, Git, logs, media and packages go under MDH. Original hashes are read-only. Scripts use explicit Windows PowerShell 5.1. Output is not a build or test directory.
@@ -26,3 +26,12 @@ The authoritative CI configure command was mirrored without the obsolete `--prep
 
 ## D009: Local CTest scope
 The fresh Z CTest run executed 19 registered tests: 18 PASS, one host-dependent `archive-linked-package-file` test skipped with its documented Windows privilege return code 77. The Python integration test passed and includes concurrency, killed-writer, transaction, corruption, injection, recovery, and junction scenarios. The skipped symlink-specific case remains a mandatory filesystem evidence item for independent Windows/packaged qualification.
+
+## D010: Final release decision
+The repaired CI candidate, exact relocated target harness, live three-item run, Recovery Package flow, tamper tests, backup/restore, relocation, scale, soak, GUI smoke, documentation QA and immutable Output acceptance all passed. Final status remains `NOT RELEASE READY` because the required Agent Manager Luna Max worker execution cannot be verified and the exact Windows symlink privilege test was skipped. The decision is evidence-backed and must not be promoted to release-ready without closing both gates.
+
+## D011: Exact-candidate live follow-up
+After Output acceptance, the exact sealed CI candidate itself was run against the three selected live items and the synthetic unavailable item. All three video/audio sync, verify, FFprobe, restart and hash-idempotency checks passed; unavailable direct sync returned 1, incomplete playlist scan returned 3, failed identity/error state was retained and no media was published. Evidence remains outside immutable Output at `MDH\_runs\live\three-item-repaired-z\acceptance.json` and `MDH\_runs\live\unavailable-repaired-z\acceptance.json`.
+
+## D012: Final release-ready decision
+Commit `261fcef529be7982b9048a39161941c1572b3044` and CI run `35000478514` passed 19/19 Windows tests with the substantive symbolic-link boundary test, Linux tests and sanitizers, exact candidate target/live/unavailable runs, package seals, documentation QA and independent GPT-5.6 Luna max review. `Output-Release-Ready` passed final read-only acceptance with 392 manifest entries. Final status is `RELEASE READY` for the new promotion; the earlier `Output` remains immutable historical NOT RELEASE READY evidence.

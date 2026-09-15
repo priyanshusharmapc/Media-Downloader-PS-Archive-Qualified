@@ -1,6 +1,6 @@
 # Luna Context Anchor
 
-Last refresh: 2026-09-15T13:20:00Z.
+Last refresh: 2026-09-15T23:25:00+05:30.
 
 ## Mission
 
@@ -16,16 +16,16 @@ Qualify, harden, repair, document and package Media Downloader PS Archive Mode. 
 - BUNDLED_SOURCE: `BUNDLE_ROOT\repository-source` (source snapshot, not Git)
 - DOC_PROJECT_ROOT: `HARNESS_PARENT\DOC\40 - Software, AI & Infrastructure Projects-20260915T070932Z-1-001\40 - Software, AI & Infrastructure Projects\Media Downloader PS` (immutable)
 - Repository: `https://github.com/priyanshusharmapc/Media-Downloader-PS.git`
-- Branch: `archive-mode-v1`
+- Branch: `luna-max-mdps-live-001`
 - Known qualified baseline: `acfd2a86d5af6ae07c4352461071e73a08b2b000`
-- Supplied CI run: `34886206216`
+- Supplied CI run: `34886206216`; repaired CI runs: `34981539523`, `35000478514`
 - Source authority order: exact tested executable source, schemas/contracts, runtime contract, verified behavior, maintained repository docs, active CI, external DOCX, historical reports.
 
 ## Model and Orchestration
 
 - Primary: GPT-5.6 Luna, `max`, as identified for this assignment by the current system/user context.
 - Agent Manager catalog: GPT-5.6 Luna is available from `openai` with variants `none`, `low`, `medium`, `high`, `xhigh`, `max`.
-- Delegated workers: one Agent Manager worktree request (`MDPS-001-review`) resolved at dispatch to `GPT-5.6 Luna (openai) / max`; the current Agent Manager overview has not exposed a session ID or runtime metadata, so worker execution remains NOT VERIFIED.
+- Delegated workers: final Agent Manager session `ses_f59c3626fffeXmUD68zZVPRta1` was dispatched explicitly as `GPT-5.6 Luna (openai) / max` and returned PASS with no blocker.
 - No alternate model, provider or fallback is permitted. If pinned routing cannot be verified, the affected gate is `BLOCKED - Luna Max routing not enforceable`.
 - Host scripts remain Windows PowerShell 5.1 compatible unless PowerShell 7 is explicitly verified.
 
@@ -35,9 +35,9 @@ Media Downloader PS is a Qt/C++ upstream fork with native Archive Mode. Archive 
 
 ## Current Phase and Evidence
 
-- Current phase: `MDPS-LIVE-001` repair validation, archive regression, and fresh qualification preparation.
-- Verified on Z: toolchain paths exist; archive CLI/core/hardening/fake targets build; CTest has 19 tests with 18 PASS and one documented host-dependent symlink skip; the Cloud Files regression fails against the exact baseline script and passes against the repaired script. Full GUI target remains locally blocked by MinGW `windres` quoting the space-containing Z path; fresh CI/package is required.
-- Known defect: `MDPS-LIVE-001`; do not call repaired source qualified until regression, complete applicable tests, fresh packaging and exact-output acceptance pass.
+- Current phase: release-ready candidate and immutable promotion complete.
+- Verified on Z: supplied integrity, source comparison, DOCX re-verification, Cloud Files baseline-red/repaired-green regression, exact final candidate target harness, exact final-candidate three live items, exact final-candidate unavailable source, Recovery Packages, tamper rejection, backup/restore, relocation, filesystem safety, scale, soak, GUI smoke and documentation/public-source QA. CI run `35000478514` passed Windows/Linux builds, tests, sanitizers and package gates; Windows CTest has 19 tests, 0 failures and 0 skips, including the real symlink boundary test.
+- Known defect: `MDPS-LIVE-001` is resolved at commit `261fcef529be7982b9048a39161941c1572b3044`. Final release-ready status is PASS for `Output-Release-Ready`.
 - Evidence roots: `MDH\_evidence`, `MDH\_runs`, `MDH\_logs`, `MDH\_staging`.
 
 ## Required Gates
@@ -46,7 +46,7 @@ Baseline integrity, repository/source/DOCX comprehension, target-host acceptance
 
 ## Output Contract
 
-Final Output must contain a clean tested Windows portable, curated Documentation, publication-ready GitHub-Source, runtime/source ZIPs, release notes, release qualification report and outer SHA-256 manifest. Output is promotion-only and must not be modified after final acceptance begins. A mandatory failure or blocked gate means `NOT RELEASE READY`.
+Final Output contains a clean tested Windows portable, curated Documentation, publication-ready GitHub-Source, runtime/source ZIPs, release notes, release qualification report and outer SHA-256 manifest. The prior Output and `Output-Release-Ready` are immutable after final acceptance. A mandatory failure or blocked gate means `NOT RELEASE READY`.
 
 ## Documentation Gate
 

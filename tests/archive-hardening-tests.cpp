@@ -5,8 +5,12 @@
 #include <QJsonDocument>
 #include <QTemporaryDir>
 #include <QTextStream>
+#include <QFileInfo>
 #include <functional>
 #include <stdexcept>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 using namespace archive;
 static void require(bool ok,const QString& message){if(!ok)throw std::runtime_error(message.toStdString());}
@@ -35,13 +39,20 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
  else if(name=="partial-recovery-status"){Fixture f;f.item.availability="deleted";Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(f.store.reconcile(f.source,s).committed,"deleted reconcile");Representation r;r.state="complete";r.path="Video/test.mp4";require(f.store.updateRepresentation(f.item.itemKey,"video",r),"update");require(f.store.loadCanonicalItems().first().recoveryStatus!="not_required","audio still missing but recovery cleared");}
  else if(name=="nested-redaction"){Fixture f;f.logger.event("INFO","test","redaction",{{"nested",QJsonObject{{"token","do-not-leak"}}}});const auto day=QDir(f.paths.activityLogs()).entryList(QDir::Dirs|QDir::NoDotAndDotDot).last();const auto dir=QDir(f.paths.activityLogs()).filePath(day);const auto file=QDir(dir).entryList(QDir::Files).last();require(!get(QDir(dir).filePath(file)).contains("do-not-leak"),"nested credential leaked");}
  else if(name=="deleted-title"){Fixture f;auto p=f.item;p.title="[Deleted video]";p.availability="deleted";Snapshot s;s.sourceKey=f.source.key;s.items={p};require(f.store.reconcile(f.source,s).committed,"deleted reconcile");require(get(QDir(f.paths.sourceDir(f.source.key)).filePath("missing.csv")).contains("Historical title"),"recovery report lost known title");}
- else if(name=="linked-package-file"){
+  else if(name=="linked-package-file"){
+   Fixture f;QTemporaryDir outside;const auto p=f.package({{"representations",QJsonObject{{"video",QJsonObject{{"file","linked.mp4"}}}}}});
 #ifdef Q_OS_WIN
-  QTextStream(stdout)<<"SKIP: symlink privilege is host-dependent\n";return 77;
+   const auto target=QDir::toNativeSeparators(outside.filePath("secret.mp4"));
+   const auto link=QDir::toNativeSeparators(QDir(p).filePath("linked.mp4"));
+   const auto created=CreateSymbolicLinkW(reinterpret_cast<LPCWSTR>(link.utf16()),reinterpret_cast<LPCWSTR>(target.utf16()),0x2);
+   const auto error=GetLastError();
+   require(created!=0,QString("make symlink error=%1 target=%2 link=%3").arg(error).arg(target).arg(link));
+   require(QFileInfo(link).isSymLink(),"package-side symlink missing");
 #else
-  Fixture f;QTemporaryDir outside;put(outside.filePath("secret.mp4"),"secret");const auto p=f.package({{"representations",QJsonObject{{"video",QJsonObject{{"file","linked.mp4"}}}}}});require(QFile::link(outside.filePath("secret.mp4"),QDir(p).filePath("linked.mp4")),"make symlink");RecoveryImporter i(f.config,f.store,f.logger);require(!i.validate(p).ok,"symlink escaped package boundary");
+   require(QFile::link(outside.filePath("secret.mp4"),QDir(p).filePath("linked.mp4")),"make symlink");
 #endif
- }
+   RecoveryImporter i(f.config,f.store,f.logger);require(!i.validate(p).ok,"symlink escaped package boundary");
+  }
  else {QTextStream(stderr)<<"Unknown case\n";return 2;}
  QTextStream(stdout)<<name<<": PASS\n";return 0;
  }catch(const std::exception& e){QTextStream(stderr)<<name<<": FAIL: "<<e.what()<<"\n";return 1;}}
