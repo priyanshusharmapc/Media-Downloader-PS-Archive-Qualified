@@ -1,0 +1,25 @@
+﻿{
+    "observedAt":  "2026-09-15T20:24:06.5974592+05:30",
+    "candidateRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\candidate-ad7943b9",
+    "sourceCommit":  "ad7943b93b0458ff2764432ae67419104c43fff8",
+    "ciRunId":  "34981539523",
+    "manifestEntries":  121,
+    "malformed":  [
+
+                  ],
+    "missing":  [
+
+                ],
+    "mismatches":  [
+
+                   ],
+    "unsealed":  [
+
+                 ],
+    "keyHashes":  {
+                      "archiveCli":  "481abf073856253d81eda96c54c423ffa1be3eccd7d094abc832d249f19defd6",
+                      "mediaDownloader":  "21c6be6f35020eddbcc9fd4d7f2653f377634b266edefa01379d056134d96c16",
+                      "harness":  "806d828fcb87bbb1265b6b2f34fa704dd74aceade6835bb781b9f00ff807c1f2"
+                  },
+    "pass":  true
+}

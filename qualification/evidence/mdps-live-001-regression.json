@@ -1,0 +1,13 @@
+﻿{
+    "observedAt":  "2026-09-15T20:35:15.8176464+05:30",
+    "baselineScript":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\adversarial\\mdps-live-001\\baseline-script.ps1",
+    "repairedSource":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\repo\\scripts\\archive-local-harness.ps1",
+    "repairedCandidate":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\candidate-ad7943b9\\archive-local-harness.ps1",
+    "baselineExit":  1,
+    "repairedSourceExit":  0,
+    "repairedCandidateExit":  0,
+    "baselineExpectedFailure":  true,
+    "repairedSourcePass":  true,
+    "repairedCandidatePass":  true,
+    "pass":  true
+}

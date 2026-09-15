@@ -1,0 +1,31 @@
+﻿{
+    "observedAt":  "2026-09-15T19:25:45.2256985+05:30",
+    "archiveRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\live\\unavailable-z\\ArchiveRoot",
+    "directUnavailable":  {
+                              "url":  "https://www.youtube.com/watch?v=ZZZZZZZZZZZ",
+                              "noMediaPublished":  true,
+                              "expectedNonzero":  true,
+                              "canonicalRecordCount":  1,
+                              "videoState":  "failed",
+                              "availability":  "unknown",
+                              "audioState":  "failed",
+                              "errorRecorded":  true,
+                              "exitCode":  1
+                          },
+    "invalidPlaylist":  {
+                            "expectedPartial":  true,
+                            "lastScanStatus":  "partial",
+                            "exitCode":  3,
+                            "lastError":  "illegal value",
+                            "existingCanonicalRetained":  true,
+                            "sourceRecordCount":  1,
+                            "url":  "https://www.youtube.com/playlist?list=INVALID_PLAYLIST_ZZZ"
+                        },
+    "diagnostics":  {
+                        "diagnosticLogFiles":  1,
+                        "activityLogFiles":  6,
+                        "tempEntries":  2,
+                        "transactionJournalPresent":  false
+                    },
+    "pass":  true
+}

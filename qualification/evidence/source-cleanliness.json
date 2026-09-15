@@ -1,0 +1,17 @@
+﻿{
+    "observedAt":  "2026-09-15T20:40:48.1142730+05:30",
+    "publishedSource":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\release-output\\GitHub-Source",
+    "publishedFileCount":  226,
+    "textFilesScanned":  167,
+    "excludedFromPublication":  [
+                                    "qualification/pre-harness/* internal CI logs",
+                                    "src/FnVrwo.json generated IDE metadata"
+                                ],
+    "forbiddenFindings":  [
+
+                          ],
+    "zipUnsafeEntryNames":  [
+
+                            ],
+    "pass":  true
+}

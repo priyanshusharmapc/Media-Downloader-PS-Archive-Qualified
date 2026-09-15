@@ -1,0 +1,72 @@
+﻿{
+    "observedAt":  "2026-09-15T19:27:29.8099228+05:30",
+    "candidateCount":  9,
+    "candidates":  [
+                       {
+                           "id":  "gZPSuwvz4ro",
+                           "exitCode":  1,
+                           "timedOut":  false,
+                           "stderr":  "ERROR: [youtube] gZPSuwvz4ro: This video is unavailable",
+                           "classification":  "unavailable"
+                       },
+                       {
+                           "id":  "UqHb_NtArMA",
+                           "exitCode":  1,
+                           "timedOut":  false,
+                           "stderr":  "ERROR: [youtube] UqHb_NtArMA: This video is unavailable",
+                           "classification":  "unavailable"
+                       },
+                       {
+                           "id":  "mQXb6Gp1h9U",
+                           "exitCode":  1,
+                           "timedOut":  false,
+                           "stderr":  "ERROR: [youtube] mQXb6Gp1h9U: Video unavailable",
+                           "classification":  "unavailable"
+                       },
+                       {
+                           "id":  "vYn1b8gcmrY",
+                           "exitCode":  1,
+                           "timedOut":  false,
+                           "stderr":  "ERROR: [youtube] vYn1b8gcmrY: Video unavailable",
+                           "classification":  "unavailable"
+                       },
+                       {
+                           "id":  "gsG6jkkuC00",
+                           "exitCode":  1,
+                           "timedOut":  false,
+                           "stderr":  "ERROR: [youtube] gsG6jkkuC00: Video unavailable",
+                           "classification":  "unavailable"
+                       },
+                       {
+                           "id":  "tJTjr_suT1g",
+                           "exitCode":  1,
+                           "timedOut":  false,
+                           "stderr":  "ERROR: [youtube] tJTjr_suT1g: Video unavailable",
+                           "classification":  "unavailable"
+                       },
+                       {
+                           "id":  "OHw5I5JIVc8",
+                           "exitCode":  1,
+                           "timedOut":  false,
+                           "stderr":  "ERROR: [youtube] OHw5I5JIVc8: Video unavailable",
+                           "classification":  "unavailable"
+                       },
+                       {
+                           "id":  "dG73yRzB9mQ",
+                           "exitCode":  1,
+                           "timedOut":  false,
+                           "stderr":  "ERROR: [youtube] dG73yRzB9mQ: Video unavailable",
+                           "classification":  "unavailable"
+                       },
+                       {
+                           "id":  "l0CbhG-P1UA",
+                           "exitCode":  1,
+                           "timedOut":  false,
+                           "stderr":  "ERROR: [youtube] l0CbhG-P1UA: Video unavailable",
+                           "classification":  "unavailable"
+                       }
+                   ],
+    "allNonzero":  true,
+    "allExplicitUnavailable":  true,
+    "pass":  true
+}

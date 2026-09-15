@@ -1,0 +1,56 @@
+﻿{
+    "observedAt":  "2026-09-15T19:14:01.6132892+05:30",
+    "playlistUrl":  "https://www.youtube.com/playlist?list=PLMeLfdmeKNdY",
+    "playlistId":  "PLMeLfdmeKNdY",
+    "observed":  4,
+    "entries":  [
+                    {
+                        "id":  "0fvbzgnVO2Y",
+                        "title":  "FPV in Bodycam #fpv #fpvdrone #drone #fpvfreestyle",
+                        "duration":  21,
+                        "availability":  null
+                    },
+                    {
+                        "id":  "g3Mh8Hws-jo",
+                        "title":  "This Anthropic Hackathon Winner Just Released His Entire Claude Code Setup for Free - ECC",
+                        "duration":  107,
+                        "availability":  null
+                    },
+                    {
+                        "id":  "Ynv_WYO_slw",
+                        "title":  "Understand-Anything vs Graphify: I Tested Both on My SaaS",
+                        "duration":  981,
+                        "availability":  null
+                    },
+                    {
+                        "id":  "vPG6a2gAFeo",
+                        "title":  "OpenAI Is Lying...",
+                        "duration":  780,
+                        "availability":  null
+                    }
+                ],
+    "selectedExactlyThree":  [
+                                 {
+                                     "id":  "0fvbzgnVO2Y",
+                                     "title":  "FPV in Bodycam #fpv #fpvdrone #drone #fpvfreestyle",
+                                     "duration":  20,
+                                     "availability":  "public",
+                                     "probe":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\live\\live-z\\item-0fvbzgnVO2Y.json"
+                                 },
+                                 {
+                                     "id":  "g3Mh8Hws-jo",
+                                     "title":  "This Anthropic Hackathon Winner Just Released His Entire Claude Code Setup for Free - ECC",
+                                     "duration":  106,
+                                     "availability":  "public",
+                                     "probe":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\live\\live-z\\item-g3Mh8Hws-jo.json"
+                                 },
+                                 {
+                                     "id":  "Ynv_WYO_slw",
+                                     "title":  "Understand-Anything vs Graphify: I Tested Both on My SaaS",
+                                     "duration":  980,
+                                     "availability":  "public",
+                                     "probe":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\live\\live-z\\item-Ynv_WYO_slw.json"
+                                 }
+                             ],
+    "explanation":  "Fallback playlist resolved at runtime; it has four entries. Exactly three currently accessible entries were selected for three-item acceptance."
+}

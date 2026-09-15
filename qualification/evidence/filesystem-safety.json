@@ -1,0 +1,16 @@
+﻿{
+    "observedAt":  "2026-09-15T20:17:32.6494445+05:30",
+    "freshPreflightExit":  0,
+    "rootJunctionExit":  1,
+    "statePreflightExit":  0,
+    "stateJunctionExit":  1,
+    "packagePreflightExit":  0,
+    "linkedPackageValidateExit":  1,
+    "longPathPreflightExit":  0,
+    "longPathOutcome":  "accepted",
+    "junctionsCreated":  true,
+    "outsideRootEntries":  0,
+    "outsideStateEntries":  0,
+    "outsidePackageEntries":  1,
+    "pass":  true
+}

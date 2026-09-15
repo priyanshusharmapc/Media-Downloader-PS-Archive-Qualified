@@ -1,0 +1,13 @@
+﻿{
+    "observedAt":  "2026-09-15T20:23:40.5503805+05:30",
+    "itemKey":  "youtube:0fvbzgnVO2Y",
+    "videoPath":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\phase1-z-repaired\\ArchiveRoot\\Video\\FPV in Bodycam #fpv #fpvdrone #drone #fpvfreestyle [UNKNOWN] [854p 20s 260906] [0fvbzgnVO2Y].mp4",
+    "audioPath":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\phase1-z-repaired\\ArchiveRoot\\Audio\\FPV in Bodycam #fpv #fpvdrone #drone #fpvfreestyle [UNKNOWN] [m4a 20s 260906] [0fvbzgnVO2Y].m4a",
+    "videoBytes":  2888631,
+    "audioBytes":  696121,
+    "videoSha256":  "7cd86261da22e5e385ad6a0ca6dbd91c460348ef94c5b2182254f3f436e1f630",
+    "audioSha256":  "9c93d808b7d52c65fd083ab4ee07b9f433e9192e7098a6bd9311e0ddf2176e4a",
+    "videoFfprobeExit":  0,
+    "audioFfprobeExit":  0,
+    "pass":  true
+}

@@ -1,0 +1,53 @@
+﻿{
+    "observedAt":  "2026-09-15T20:37:47.4304186+05:30",
+    "primaryModel":  "GPT-5.6 Luna",
+    "primaryVariant":  "max",
+    "primarySource":  "current assignment/system context",
+    "agentManagerCatalog":  {
+                                "model":  "GPT-5.6 Luna",
+                                "provider":  "openai",
+                                "variants":  [
+                                                 "none",
+                                                 "low",
+                                                 "medium",
+                                                 "high",
+                                                 "xhigh",
+                                                 "max"
+                                             ]
+                            },
+    "delegatedRequests":  [
+                              {
+                                  "name":  "MDPS-001-review",
+                                  "mode":  "worktree",
+                                  "model":  "GPT-5.6 Luna",
+                                  "provider":  "openai",
+                                  "variant":  "max",
+                                  "dispatchResolved":  true,
+                                  "sessionID":  null
+                              },
+                              {
+                                  "name":  "MDPS-001-review-local",
+                                  "mode":  "local",
+                                  "model":  "GPT-5.6 Luna",
+                                  "provider":  "openai",
+                                  "variant":  "max",
+                                  "dispatchResolved":  true,
+                                  "sessionID":  null
+                              }
+                          ],
+    "agentManagerOverviewAfterRequests":  {
+                                              "sessions":  [
+
+                                                           ],
+                                              "sections":  [
+
+                                                           ],
+                                              "ungrouped":  [
+
+                                                            ],
+                                              "runtimeMetadataAvailable":  false
+                                          },
+    "effectiveDelegatedWorkerVerified":  false,
+    "affectedGate":  "BLOCKED - no Agent Manager runtime session metadata; no delegated worker result may be treated as executed",
+    "pass":  false
+}

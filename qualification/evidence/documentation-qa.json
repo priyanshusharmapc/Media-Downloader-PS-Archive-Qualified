@@ -1,0 +1,156 @@
+﻿{
+    "observedAt":  "2026-09-15T20:42:39.4079965+05:30",
+    "documentationRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\release-output\\Documentation",
+    "fileCount":  7,
+    "files":  [
+                  {
+                      "file":  "ARCHIVE_MODE_AND_STATE.md",
+                      "sha256":  "1e18a9f58b6296b51640df4f14bdf01bea9f047c9925ecd98b926d7762a08de7",
+                      "missing":  [
+                                      "installation",
+                                      "GUI",
+                                      "CLI",
+                                      "Archive Root",
+                                      "Recovery Package",
+                                      "backup",
+                                      "restore",
+                                      "relocat",
+                                      "security",
+                                      "symlink",
+                                      "test",
+                                      "qualification",
+                                      "release",
+                                      "license",
+                                      "https://"
+                                  ],
+                      "forbidden":  [
+
+                                    ]
+                  },
+                  {
+                      "file":  "INSTALLATION_AND_USER_GUIDE.md",
+                      "sha256":  "c92fc2aa0a5ba6a78e7444038f9ccf232852140d631d30c38a0dc7df248ceb35",
+                      "missing":  [
+                                      "restore",
+                                      "travers",
+                                      "symlink",
+                                      "build",
+                                      "test",
+                                      "qualification",
+                                      "release",
+                                      "license",
+                                      "https://"
+                                  ],
+                      "forbidden":  [
+
+                                    ]
+                  },
+                  {
+                      "file":  "README.md",
+                      "sha256":  "346a4882d6324d909375e1aa2e856ecc6f16c0ef9e8303a72cb202e9b2cfb18f",
+                      "missing":  [
+                                      "transaction",
+                                      "lock",
+                                      "restore",
+                                      "travers",
+                                      "symlink",
+                                      "license"
+                                  ],
+                      "forbidden":  [
+
+                                    ]
+                  },
+                  {
+                      "file":  "RECOVERY_BACKUP_SECURITY.md",
+                      "sha256":  "ad8929a3c94373ce449e68040461b3082e079d919d1a220c8fcd9eb19e4062e6",
+                      "missing":  [
+                                      "installation",
+                                      "GUI",
+                                      "CLI",
+                                      "history",
+                                      "transaction",
+                                      "symlink",
+                                      "build",
+                                      "test",
+                                      "release",
+                                      "license",
+                                      "https://"
+                                  ],
+                      "forbidden":  [
+
+                                    ]
+                  },
+                  {
+                      "file":  "RELEASE_NOTES.md",
+                      "sha256":  "40536a1ff46b34658fc840cc8597b0024ccafc76647b830db2a3d9929f6fbd10",
+                      "missing":  [
+                                      "installation",
+                                      "Archive Root",
+                                      "playlist",
+                                      "history",
+                                      "FFprobe",
+                                      "transaction",
+                                      "security",
+                                      "travers",
+                                      "build",
+                                      "license",
+                                      "https://"
+                                  ],
+                      "forbidden":  [
+
+                                    ]
+                  },
+                  {
+                      "file":  "SOURCE_MAP.md",
+                      "sha256":  "3d5a82391f822a5114a7b387f3f5af6939a51091c4d3b9e04bd56a2520938364",
+                      "missing":  [
+                                      "installation",
+                                      "GUI",
+                                      "Archive Root",
+                                      "playlist",
+                                      "history",
+                                      "FFprobe",
+                                      "transaction",
+                                      "lock",
+                                      "backup",
+                                      "restore",
+                                      "relocat",
+                                      "security",
+                                      "travers",
+                                      "symlink",
+                                      "build",
+                                      "release",
+                                      "https://"
+                                  ],
+                      "forbidden":  [
+
+                                    ]
+                  },
+                  {
+                      "file":  "TESTING_QUALIFICATION.md",
+                      "sha256":  "e181e7a32144a3a2d9d129632720575f68483503dedeb1fd80c83dad2fc99d90",
+                      "missing":  [
+                                      "installation",
+                                      "CLI",
+                                      "history",
+                                      "security",
+                                      "travers",
+                                      "license",
+                                      "https://"
+                                  ],
+                      "forbidden":  [
+
+                                    ]
+                  }
+              ],
+    "requiredTermsMissing":  [
+
+                             ],
+    "missingReferencedFiles":  [
+
+                               ],
+    "forbiddenFiles":  [
+
+                       ],
+    "pass":  true
+}

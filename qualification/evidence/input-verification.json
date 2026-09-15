@@ -1,0 +1,34 @@
+﻿{
+    "observedAt":  "2026-09-15T20:29:44.6443517+05:30",
+    "completeZip":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\Media-Downloader-PS-Harness-Complete-acfd2a86-2026-09-15.zip",
+    "expectedCompleteHash":  "634d47afe4ac865c798922d268b4619bab679caa3713f4eff759038a164ac138",
+    "completeZipHash":  "634d47afe4ac865c798922d268b4619bab679caa3713f4eff759038a164ac138",
+    "completeZipMatches":  true,
+    "parts":  [
+                  {
+                      "path":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\Media-Downloader-PS-Harness-Complete-acfd2a86-2026-09-15.zip.part00",
+                      "bytes":  83886080,
+                      "expected":  "b29751db926692d1c891ab79d3cc632fcc927d925064c7f73505c880afe6a447",
+                      "actual":  "b29751db926692d1c891ab79d3cc632fcc927d925064c7f73505c880afe6a447",
+                      "match":  true
+                  },
+                  {
+                      "path":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\Media-Downloader-PS-Harness-Complete-acfd2a86-2026-09-15.zip.part01",
+                      "bytes":  83886080,
+                      "expected":  "5274ac9de8bcecd7374e625b96aa14a8c804c8114f74e7c010d51e65386be989",
+                      "actual":  "5274ac9de8bcecd7374e625b96aa14a8c804c8114f74e7c010d51e65386be989",
+                      "match":  true
+                  },
+                  {
+                      "path":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\Media-Downloader-PS-Harness-Complete-acfd2a86-2026-09-15.zip.part02",
+                      "bytes":  6226727,
+                      "expected":  "ed9aafaf7c59058f59dbc6b34e06b186dab1ca5cc4983a1818dbd2a5334829e3",
+                      "actual":  "ed9aafaf7c59058f59dbc6b34e06b186dab1ca5cc4983a1818dbd2a5334829e3",
+                      "match":  true
+                  }
+              ],
+    "reassembledZip":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\input-verification-z\\reassembled.zip",
+    "reassembledHash":  "634d47afe4ac865c798922d268b4619bab679caa3713f4eff759038a164ac138",
+    "reassembledMatchesComplete":  true,
+    "pass":  true
+}

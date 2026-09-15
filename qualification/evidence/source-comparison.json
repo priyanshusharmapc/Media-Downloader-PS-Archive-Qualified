@@ -1,0 +1,17 @@
+﻿{
+    "observedAt":  "2026-09-15T20:33:43.1979879+05:30",
+    "baselineCommit":  "acfd2a86d5af6ae07c4352461071e73a08b2b000",
+    "gitTrackedFileCount":  239,
+    "bundleSourceFileCount":  239,
+    "commonFileCount":  239,
+    "byteMismatchCount":  186,
+    "normalizedLineEndingMatches":  186,
+    "trueContentMismatches":  [
+
+                              ],
+    "binaryMismatches":  [
+
+                         ],
+    "note":  "Bundle source snapshot uses CRLF while Git archive blobs use LF; text mismatches are classified after CRLF normalization.",
+    "pass":  true
+}
