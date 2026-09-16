@@ -18,6 +18,7 @@
  */
 
 #include "mainwindow.h"
+#include "archive/archivesettings.h"
 #include "settings.h"
 #include "translator.h"
 #include "utility.h"
@@ -87,7 +88,6 @@ int start( int argc,char * argv[],
 		auto json = utility::event::toJson( cargs ) ;
 
 		myApp::args args{ mqApp,ss,paths,cargs } ;
-
 		utils::app::appInfo< myApp,myApp::args > m( args,spath,mqApp,json ) ;
 
 		if( cargs.contains( "-s" ) || !ss.singleInstance() ){
@@ -102,6 +102,11 @@ int start( int argc,char * argv[],
 int main( int argc,char * argv[] )
 {
 	utility::cliArguments cargs( argc,argv ) ;
+	if(qEnvironmentVariable("ARCHIVE_GUI_TEST_HOOK")=="1"){
+		QCoreApplication qualificationApp(argc,argv);
+		archive::ui::persistRoot(qEnvironmentVariable("ARCHIVE_GUI_TEST_ROOT"));
+		return 0;
+	}
 
 	if( utility::onlyWantedVersionInfo( cargs ) ){
 
