@@ -1,5 +1,5 @@
 ﻿{
-    "observedAt":  "2026-09-16T23:04:52.8833138+05:30",
+    "observedAt":  "2026-09-16T23:26:43.0623395+05:30",
     "sourceCommit":  "4c72054465697b899ede0555e48aff8a7c91c225",
     "ciRun":  "35116148963",
     "reviews":  [
@@ -8,21 +8,23 @@
                         "model":  "GPT-5.6 Luna",
                         "provider":  "openai",
                         "variant":  "max",
-                        "result":  "PASS",
-                        "blockers":  [
-
-                                     ]
+                        "dispatchResolved":  true,
+                        "executedReviewActivity":  true,
+                        "result":  "BLOCKED",
+                        "reason":  "Agent Manager did not expose a final response"
                     },
                     {
                         "sessionID":  "ses_f54ca4ee4ffeF9GCchwI0pmFZv",
                         "model":  "Grok 4.6",
                         "provider":  "xai",
                         "variant":  "high",
+                        "dispatchResolved":  true,
+                        "executedReviewActivity":  true,
                         "result":  "PASS",
-                        "blockers":  [
+                        "findings":  [
 
                                      ]
                     }
                 ],
-    "pass":  true
+    "pass":  false
 }

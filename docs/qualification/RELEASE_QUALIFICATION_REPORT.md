@@ -2,9 +2,9 @@
 
 ## FINAL STATUS
 
-**RELEASE READY**
+**NOT RELEASE READY**
 
-The final candidate passed the repaired implementation, regression, Windows/Linux, sanitizer, package, target-host, live-media, recovery, filesystem, GUI-settings and endurance gates. The final source/package identity is unambiguous below. No P0, P1 or release-blocking P2 defect remains in the audited scope.
+The final candidate passed the repaired implementation, regression, Windows/Linux, sanitizer, package, target-host, live-media, recovery, filesystem, GUI-settings and endurance gates. The final source/package identity is unambiguous below. No P0, P1 or release-blocking P2 product defect remains; release is withheld because the required final Luna Max review response was not captured by Agent Manager.
 
 ## Identity
 
@@ -54,8 +54,8 @@ The final candidate passed the repaired implementation, regression, Windows/Linu
 | Scale and soak regressions | PASS | `Qualification-Evidence/scale.json`, `Qualification-Evidence/soak.json` |
 | 60-minute endurance | PASS; 1,102 iterations, zero failures; code-equivalent binding proves no executable/test-code delta afterward | `Qualification-Evidence/endurance.json`, `Qualification-Evidence/endurance-binding.json` |
 | GUI startup and bundled runtime smoke | PASS | `Qualification-Evidence/gui-smoke.json`, CI Windows job evidence |
-| Independent Luna Max final review | PASS | Agent Manager session `ses_f54bbcb4affe01rcqVLUPjVX1s`; final review record |
-| Independent Grok 4.6 XAI high critique | PASS | Agent Manager session `ses_f54ca4ee4ffeF9GCchwI0pmFZv`; final critique record |
+| Independent Luna Max final review | BLOCKED; response not captured | `Qualification-Evidence/final-reviews.json` |
+| Independent Grok 4.6 XAI high critique | PASS | `Qualification-Evidence/final-reviews.json` |
 
 ## Package Hashes
 
