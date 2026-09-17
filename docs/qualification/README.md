@@ -1,32 +1,26 @@
 # Media Downloader PS Archive Mode
 
-This documentation describes the Windows portable candidate built from source commit `261fcef529be7982b9048a39161941c1572b3044`. It is the Archive Mode qualification candidate for GitHub Actions run `35000478514`.
+This release candidate is built from source commit `4c72054465697b899ede0555e48aff8a7c91c225` by CI run `35116148963`.
+
+The portable application directory is sealed and should not be modified. Archive Root is separate writable operator data. The GUI initializes Archive Root automatically; CLI or scripted use may run `archive-cli.exe preflight <archive-root>` before the first operation.
+
+The portable manifest contains 116 sealed entries. The final report and evidence identify the exact package, source and CI run selected for release.
+
+Security includes traversal, symlink, junction and reparse-point rejection. The project license and third-party notices remain part of the source/package distribution.
 
 ## Contents
 
-- `INSTALLATION_AND_USER_GUIDE.md`: installation, GUI and CLI operation.
-- `ARCHIVE_MODE_AND_STATE.md`: persistent state, playlist history and media rules.
-- `RECOVERY_BACKUP_SECURITY.md`: Recovery Packages, backup, relocation and filesystem safety.
-- `TESTING_QUALIFICATION.md`: build, test, evidence and release controls.
-- `SOURCE_MAP.md`: repository map and authority boundaries.
-- `RELEASE_NOTES.md`: candidate identity, hashes, limitations and decision.
-
-## Quick Start
-
-1. Extract the portable folder to a user-writable location.
-2. Keep the application folder and Archive Root separate. The Archive Root contains persistent operator data.
-3. Start `media-downloader.exe` for the GUI, or use `archive-cli.exe` for scripted Archive Mode operations.
-4. For CLI or scripted use, run `archive-cli.exe preflight <archive-root>` before the first operation. The GUI initializes the Archive Root automatically when the Archive tab opens.
-
-The portable package is commit- and hash-bound. Do not add, remove or replace files inside it after extraction. Keep backups of the Archive Root, not only the application folder.
+- `INSTALLATION_AND_USER_GUIDE.md`
+- `ARCHIVE_MODE_AND_STATE.md`
+- `RECOVERY_BACKUP_SECURITY.md`
+- `TESTING_QUALIFICATION.md`
+- `SOURCE_MAP.md`
+- `RELEASE_NOTES.md`
+- `AUDIT_REMEDIATION.md`
 
 ## References
 
-- [Repository](https://github.com/priyanshusharmapc/Media-Downloader-PS)
-- [Qt licensing](https://www.qt.io/licensing/)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
-- [FFmpeg](https://ffmpeg.org/legal.html)
-
-## Support Boundary
-
-The package supports Windows x64 and depends on the bundled yt-dlp, Deno, FFmpeg and FFprobe tools. YouTube availability, extractor behavior, network access and provider policy remain external dependencies. A failed or unavailable source is retained as history; it is not treated as playlist deletion.
+- https://github.com/priyanshusharmapc/Media-Downloader-PS
+- https://github.com/yt-dlp/yt-dlp
+- https://ffmpeg.org/legal.html
+- https://www.qt.io/licensing/

@@ -1,0 +1,19 @@
+﻿{
+    "observedAt":  "2026-09-16T21:56:55.0492234+05:30",
+    "harvestEvidence":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\live\\three-item-final-22910\\acceptance.json",
+    "harvestSourceCommit":  "22910bd5057e6ca30bcd0e8a84b21d928509413e",
+    "harvestCiRun":  "35087925054",
+    "finalSourceCommit":  "4c72054465697b899ede0555e48aff8a7c91c225",
+    "finalCiRun":  "35116148963",
+    "postHarvestChangedFiles":  [
+                                    "AUDIT-FIX-LIST.md"
+                                ],
+    "postHarvestExecutableOrTestCodeChanged":  false,
+    "selectedExactlyThree":  [
+                                 "0fvbzgnVO2Y",
+                                 "g3Mh8Hws-jo",
+                                 "Ynv_WYO_slw"
+                             ],
+    "harvestPass":  true,
+    "pass":  true
+}

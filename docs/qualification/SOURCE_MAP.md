@@ -1,26 +1,15 @@
 # Source Map
 
-## Repository
+- `src/archive/`: Archive Mode core, state, reconciliation, media verification, locks, transactions and Recovery Packages.
+- `src/archive/archivesafety.h`: shared filesystem and Windows reparse safety.
+- `src/archive/archivesettings.cpp`: user configuration persistence outside the package.
+- `src/archive/archivetab.cpp`: GUI Archive Mode integration.
+- `tests/archive-core-tests.cpp`: canonical state and identity tests.
+- `tests/archive-hardening-tests.cpp`: path, reparse, state, import and recovery tests.
+- `tests/archive-media-integrity-tests.cpp`: real media profile/truncation/integrity tests.
+- `tests/archive-integration-tests.py`: deterministic end-to-end tests with real FFmpeg.
+- `scripts/archive-local-harness.ps1`: sealed Windows target-host harness.
+- `scripts/archive-endurance.ps1`: identity-bound endurance runner.
+- `.github/workflows/archive-qt6.yml`: maintained build, test, sanitizer, package and evidence workflow.
 
-- `src/archive/`: Archive Mode core, CLI, state, discovery, media verification and Recovery Package implementation.
-- `tests/archive-core-tests.cpp`: core state and identity tests.
-- `tests/archive-hardening-tests.cpp`: path, state, discovery, import, recovery and linked-path tests.
-- `tests/archive-integration-tests.py`: deterministic end-to-end tests with real FFmpeg and a fake downloader boundary.
-- `scripts/archive-local-harness.ps1`: sealed Windows target-host harness and manifest verifier.
-- `resources/archive/`: operator contract, schema and example Recovery Package.
-- `docs/`: maintained repository documentation.
-- `.github/workflows/archive-qt6.yml`: Windows package and Linux sanitizer workflow.
-
-The publication copy is curated from the exact commit: internal historical `qualification/pre-harness` logs and generated IDE metadata are kept in the evidence workspace rather than published, and generic developer paths in the Flatpak helper are replaced with repository-relative examples.
-
-## Authority
-
-The tested executable source and its schemas/contracts are authoritative for behavior. Runtime evidence establishes what was executed. Repository documentation describes maintained behavior. External design documents are requirements and rationale, not proof of implementation.
-
-## Repair
-
-The qualification repair includes the target-host harness reparse classifier, its regression test, and the Windows linked-package safety test/CI privilege probe. It does not weaken application path safety or add a bypass switch. The qualified source is commit `261fcef529be7982b9048a39161941c1572b3044`.
-
-## Licensing
-
-The portable package includes `LICENSE.txt`. Bundled third-party components retain their own notices and licenses. Consult the repository license and bundled notices before redistribution.
+The publication copy excludes internal historical qualification logs and generated IDE metadata. The qualified implementation source remains bound to commit `4c72054465697b899ede0555e48aff8a7c91c225`.

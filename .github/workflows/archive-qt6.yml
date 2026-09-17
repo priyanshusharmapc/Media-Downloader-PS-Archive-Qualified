@@ -2,7 +2,7 @@ name: Archive Qt6 qualification
 
 on:
   push:
-    branches: [main, archive-mode-v1, archive-mode-v1-qualification-wip, 'ci/**']
+    branches: [main, archive-mode-v1, archive-mode-v1-qualification-wip, audit-remediation-20260916, 'ci/**']
   pull_request:
   workflow_dispatch:
 
@@ -49,17 +49,22 @@ jobs:
       - name: Build
         run: cmake --build build --parallel 2
       - name: Test
-        run: ctest --test-dir build --output-on-failure --output-junit Testing/Temporary/ctest-junit.xml
+        env:
+          ARCHIVE_TEST_TMP: ${{ github.workspace }}/archive-test-tmp
+          ARCHIVE_TEST_CONFIG_ROOT: ${{ github.workspace }}/archive-test-config
+        run: mkdir -p "$ARCHIVE_TEST_TMP" "$ARCHIVE_TEST_CONFIG_ROOT" && ctest --test-dir build --output-on-failure --output-junit Testing/Temporary/ctest-junit.xml
       - name: Configure address and undefined-behavior sanitizer tests
         run: cmake -S . -B build-sanitized -G Ninja -DBUILD_WITH_QT6=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
       - name: Build instrumented Archive executables
-        run: cmake --build build-sanitized --target archive-core-tests archive-hardening-tests archive-cli archive-fake-tool --parallel 2
+        run: cmake --build build-sanitized --target archive-core-tests archive-hardening-tests archive-media-integrity-tests archive-gui-settings-tests archive-cli archive-fake-tool --parallel 2
       - name: Sanitizer regression and integration tests
         env:
           ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
           QT_QPA_PLATFORM: offscreen
-        run: ctest --test-dir build-sanitized --output-on-failure --output-junit Testing/Temporary/ctest-junit.xml
+          ARCHIVE_TEST_TMP: ${{ github.workspace }}/archive-test-tmp-sanitized
+          ARCHIVE_TEST_CONFIG_ROOT: ${{ github.workspace }}/archive-test-config-sanitized
+        run: mkdir -p "$ARCHIVE_TEST_TMP" "$ARCHIVE_TEST_CONFIG_ROOT" && ctest --test-dir build-sanitized --output-on-failure --output-junit Testing/Temporary/ctest-junit.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -182,6 +187,12 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $out = Join-Path $env:GITHUB_WORKSPACE 'portable/Media-Downloader-PS'
+          $testRoot = Join-Path $env:GITHUB_WORKSPACE 'archive-test-tmp'
+          $configRoot = Join-Path $env:GITHUB_WORKSPACE 'archive-test-config'
+          New-Item -ItemType Directory -Path $testRoot,$configRoot -Force | Out-Null
+          $env:ARCHIVE_TEST_TMP = $testRoot
+          $env:ARCHIVE_TEST_CONFIG_ROOT = $configRoot
+          $env:PATH = "$out/3rdParty/ffmpeg/bin;$env:PATH"
           $env:ARCHIVE_TEST_FFMPEG = "$out/3rdParty/ffmpeg/bin/ffmpeg.exe"
           $env:ARCHIVE_TEST_FFPROBE = "$out/3rdParty/ffmpeg/bin/ffprobe.exe"
           ctest --test-dir build --output-on-failure --output-junit Testing/Temporary/ctest-junit.xml
@@ -256,6 +267,15 @@ jobs:
             $relative = [IO.Path]::GetRelativePath($out,$_.Path).Replace('\','/')
             "$($_.Hash.ToLowerInvariant())  $relative"
           } | Sort-Object | Set-Content "$out/SHA256SUMS.txt" -Encoding ascii
+      - name: GUI settings preserve package seal
+        shell: pwsh
+        run: |
+          $testRoot = Join-Path $env:GITHUB_WORKSPACE 'gui-settings-test'
+          $archiveRoot = Join-Path $testRoot 'ArchiveRoot'
+          $configRoot = Join-Path $testRoot 'Config'
+          New-Item -ItemType Directory -Path $archiveRoot,$configRoot -Force | Out-Null
+          $env:ARCHIVE_TEST_CONFIG_ROOT = $configRoot
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE/tests/archive-gui-package-immutability.ps1" -PackageRoot "$env:GITHUB_WORKSPACE/portable/Media-Downloader-PS" -ArchiveRoot $archiveRoot -OutputJson "$testRoot/results.json"
       - uses: actions/upload-artifact@v4
         with:
           name: Media-Downloader-PS-Windows-Qt6-${{ github.sha }}
@@ -264,5 +284,7 @@ jobs:
         if: always()
         with:
           name: windows-test-evidence-${{ github.sha }}
-          path: build/Testing/Temporary
+          path: |
+            build/Testing/Temporary
+            gui-settings-test
           if-no-files-found: ignore

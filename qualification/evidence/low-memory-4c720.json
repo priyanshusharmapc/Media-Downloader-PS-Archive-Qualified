@@ -1,0 +1,27 @@
+﻿{
+    "observedAt":  "2026-09-17T06:33:21.3959964+05:30",
+    "buildCommand":  "cmake --build build --target archive-cli archive-core-tests archive-hardening-tests archive-media-integrity-tests archive-gui-settings-tests archive-fake-tool --parallel 1",
+    "ctestCommand":  "ctest --test-dir build --output-on-failure --parallel 1",
+    "buildExit":  0,
+    "ctestExit":  0,
+    "skippedCases": [
+        "archive-root-symlink",
+        "archive-parent-symlink",
+        "archive-linked-state",
+        "archive-linked-media",
+        "archive-linked-package-file"
+    ],
+    "tempRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\low-memory-tmp",
+    "configRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\low-memory-config",
+    "pass":  true,
+    "localPass": true,
+    "qualificationPass": true,
+    "localSkipStatus": "SKIPPED_LOCALLY_COVERED_BY_CI",
+    "ciSymlinkCoverage": {
+        "run": "35116148963",
+        "sourceCommit": "4c72054465697b899ede0555e48aff8a7c91c225",
+        "status": "PASS",
+        "skips": 0
+    },
+    "note": "Build and ordinary local CTest passed with --parallel 1. Five link-fixture cases were skipped locally because fixture creation privilege is unavailable; authoritative Windows CI executed those same cases with zero skips."
+}
