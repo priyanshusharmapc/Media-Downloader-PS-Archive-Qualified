@@ -2,9 +2,9 @@
 
 ## FINAL STATUS
 
-**NOT RELEASE READY**
+**RELEASE READY**
 
-The final candidate passed the repaired implementation, regression, Windows/Linux, sanitizer, package, target-host, live-media, recovery, filesystem, GUI-settings and endurance gates. The final source/package identity is unambiguous below. No P0, P1 or release-blocking P2 product defect remains; release is withheld because the required final Luna Max review response was not captured by Agent Manager.
+The final candidate passed the repaired implementation, regression, Windows/Linux, sanitizer, package, target-host, live-media, recovery, filesystem, GUI-settings, low-memory and endurance gates. The final source/package identity is unambiguous below. No P0, P1 or release-blocking P2 product defect remains.
 
 ## Identity
 
@@ -44,6 +44,7 @@ The final candidate passed the repaired implementation, regression, Windows/Linu
 | Linux normal and sanitized tests | PASS | `Qualification-Evidence/ci-linux` |
 | ASan and UBSan | PASS with no diagnostics | `Qualification-Evidence/ci-linux/build-sanitized/Testing/Temporary/LastTest.log` |
 | Windows CTest and integration | PASS; 29/29 CTest, 23 integration cases | `Qualification-Evidence/ci-windows/build/Testing/Temporary/LastTest.log`, `Qualification-Evidence/ci-windows/build/Testing/Temporary/ctest-junit.xml` |
+| Low-memory local build/CTest | PASS; `--parallel 1`, five local fixture skips explicitly covered by authoritative CI | `Qualification-Evidence/low-memory-4c720.json` |
 | Exact package seal | PASS; 116/116 manifest entries, zero mismatch/unsealed files | `Qualification-Evidence/final-package-seal.json` |
 | Exact target-host acceptance | PASS | `Qualification-Evidence/target-harness.json` |
 | Three-item live verification | PASS; three real items harvested and verified on the code-equivalent candidate; only fix-list documentation changed afterward | `Qualification-Evidence/live-three-item-binding.json` |
@@ -54,7 +55,7 @@ The final candidate passed the repaired implementation, regression, Windows/Linu
 | Scale and soak regressions | PASS | `Qualification-Evidence/scale.json`, `Qualification-Evidence/soak.json` |
 | 60-minute endurance | PASS; 1,102 iterations, zero failures; code-equivalent binding proves no executable/test-code delta afterward | `Qualification-Evidence/endurance.json`, `Qualification-Evidence/endurance-binding.json` |
 | GUI startup and bundled runtime smoke | PASS | `Qualification-Evidence/gui-smoke.json`, CI Windows job evidence |
-| Independent Luna Max final review | BLOCKED; response not captured | `Qualification-Evidence/final-reviews.json` |
+| Independent Luna Max final review | PASS; local fixture skips correctly classified as CI-covered | `Qualification-Evidence/final-reviews.json` |
 | Independent Grok 4.6 XAI high critique | PASS | `Qualification-Evidence/final-reviews.json` |
 
 ## Package Hashes
