@@ -6,11 +6,14 @@
 #include <QApplication>
 #include <QBoxLayout>
 #include <QComboBox>
+#include <QDateTime>
 #include <QDesktopServices>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFuture>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -20,9 +23,13 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMetaObject>
 #include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QPushButton>
+#include <QSet>
 #include <QSplitter>
+#include <QStorageInfo>
 #include <QTableWidget>
 #include <QTabWidget>
 #include <QTextEdit>
@@ -39,6 +46,32 @@ QString readText(const QString& path)
     QFile f(path); if(!f.open(QIODevice::ReadOnly|QIODevice::Text)) return {}; return QString::fromUtf8(f.readAll());
 }
 QString pretty(const QString& s){return s.isEmpty()?QStringLiteral("-"):s;}
+
+QString humanBytes(qint64 bytes)
+{
+    const char* units[]={"B","KB","MB","GB","TB"};
+    double value=bytes;int unit=0;
+    while(value>=1024.0&&unit<4){value/=1024.0;++unit;}
+    return unit==0?QString("%1 %2").arg(bytes).arg(units[unit]):QString("%1 %2").arg(value,0,'f',1).arg(units[unit]);
+}
+
+int childDirectoryCount(const QString& path)
+{
+    return QDir(path).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name).size();
+}
+
+bool pathInside(const QString& baseDir,const QString& path)
+{
+    if(baseDir.isEmpty()||path.isEmpty())return false;
+    const auto base=QDir::cleanPath(QFileInfo(baseDir).absoluteFilePath());
+    const auto child=QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+#ifdef Q_OS_WIN
+    const auto cs=Qt::CaseInsensitive;
+#else
+    const auto cs=Qt::CaseSensitive;
+#endif
+    return child.compare(base,cs)==0||child.startsWith(base+QDir::separator(),cs);
+}
 }
 
 ArchiveTab::ArchiveTab(const Context& ctx):QObject(&ctx.mainWidget()),m_ctx(ctx)
@@ -60,6 +93,37 @@ void ArchiveTab::buildUi()
     auto* browse=new QPushButton(tr("Browse…"),m_page); browse->setObjectName("archiveBrowseRoot");
     rootRow->addWidget(rootTitle); rootRow->addWidget(m_rootLabel,1); rootRow->addWidget(browse); rootLayout->addLayout(rootRow);
     QObject::connect(browse,&QPushButton::clicked,this,&ArchiveTab::browseRoot);
+
+    auto* overviewRow=new QHBoxLayout;
+    auto* systemGroup=new QGroupBox(tr("SYSTEM HEALTH"),m_page);
+    auto* systemGrid=new QGridLayout(systemGroup);
+    systemGrid->setColumnStretch(1,1);
+    auto addSystemRow=[&](int row,const QString& name,QLabel*& value){
+        auto* label=new QLabel(name,systemGroup); value=new QLabel(tr("Not checked"),systemGroup); value->setTextInteractionFlags(Qt::TextSelectableByMouse); value->setWordWrap(true);
+        systemGrid->addWidget(label,row,0);systemGrid->addWidget(value,row,1);
+    };
+    addSystemRow(0,tr("Overall"),m_systemOverall);
+    addSystemRow(1,tr("Archive root"),m_systemRoot);
+    addSystemRow(2,tr("Canonical state"),m_systemState);
+    addSystemRow(3,tr("Runtime tools"),m_systemTools);
+    addSystemRow(4,tr("Disk"),m_systemDisk);
+    addSystemRow(5,tr("Writer lock"),m_systemLock);
+    addSystemRow(6,tr("Recovery imports"),m_systemImports);
+    addSystemRow(7,tr("Latest scan"),m_systemLastScan);
+    QFont overallFont=m_systemOverall->font();overallFont.setBold(true);m_systemOverall->setFont(overallFont);
+    m_systemAttention=new QLabel(tr("Attention: Not checked"),systemGroup);m_systemAttention->setWordWrap(true);
+    m_systemWorkload=new QLabel(tr("Archive workload: Not checked"),systemGroup);m_systemWorkload->setWordWrap(true);
+    systemGrid->addWidget(m_systemAttention,8,0,1,2);systemGrid->addWidget(m_systemWorkload,9,0,1,2);
+
+    auto* operationGroup=new QGroupBox(tr("CURRENT OPERATION"),m_page);
+    auto* operationLayout=new QVBoxLayout(operationGroup);
+    m_operationName=new QLabel(tr("Idle"),operationGroup);QFont opFont=m_operationName->font();opFont.setBold(true);m_operationName->setFont(opFont);
+    m_operationStage=new QLabel(tr("No operation running"),operationGroup);
+    m_operationDetail=new QLabel(tr("Archive Mode is idle."),operationGroup);m_operationDetail->setWordWrap(true);
+    m_operationProgress=new QProgressBar(operationGroup);m_operationProgress->setRange(0,1);m_operationProgress->setValue(0);m_operationProgress->setFormat(tr("Idle"));
+    m_operationFailures=new QLabel(tr("Failures: 0"),operationGroup);
+    operationLayout->addWidget(m_operationName);operationLayout->addWidget(m_operationStage);operationLayout->addWidget(m_operationDetail);operationLayout->addWidget(m_operationProgress);operationLayout->addWidget(m_operationFailures);operationLayout->addStretch();
+    overviewRow->addWidget(systemGroup,3);overviewRow->addWidget(operationGroup,2);rootLayout->addLayout(overviewRow);
 
     auto* actions=new QHBoxLayout;
     m_add=new QPushButton(tr("Add Playlist"),m_page); m_remove=new QPushButton(tr("Remove"),m_page); m_scan=new QPushButton(tr("Scan"),m_page);
@@ -160,7 +224,88 @@ void ArchiveTab::tabExited(){}
 void ArchiveTab::keyPressed(utility::mainWindowKeyCombo){}
 void ArchiveTab::textAlignmentChanged(Qt::LayoutDirection d){m_page->setLayoutDirection(d);}
 
-void ArchiveTab::refreshAll(){if(m_busy)return;QString e;if(!ensureReady(&e)){m_statusLabel->setText(e);return;}refreshSources();refreshTable();refreshDetails();if(m_activityToggle->isChecked())refreshActivity();}
+void ArchiveTab::refreshAll()
+{
+    if(m_root.isEmpty())m_root=configuredRoot();
+    if(m_busy){refreshSystemHealth();return;}
+    QString e;if(!ensureReady(&e)){m_statusLabel->setText(e);refreshSystemHealth();return;}
+    refreshSystemHealth();refreshSources();refreshTable();refreshDetails();if(m_activityToggle->isChecked())refreshActivity();
+}
+
+void ArchiveTab::refreshSystemHealth()
+{
+    if(!m_systemOverall)return;
+    if(m_root.isEmpty()){
+        m_systemOverall->setText(tr("NOT CONFIGURED"));m_systemRoot->setText(tr("No Archive Root selected"));m_systemState->setText(tr("Not checked"));
+        m_systemTools->setText(tr("Not checked"));m_systemDisk->setText(tr("Not checked"));m_systemLock->setText(tr("Not checked"));m_systemImports->setText(tr("Not checked"));m_systemLastScan->setText(tr("Never"));
+        m_systemAttention->setText(tr("Attention: Select an Archive Root."));m_systemWorkload->setText(tr("Archive workload: unavailable until a root is selected."));return;
+    }
+
+    archive::Paths paths(m_root);archive::Store store(paths);QStringList alerts;
+    const QFileInfo rootInfo(m_root);const bool rootExists=rootInfo.exists()&&rootInfo.isDir();const bool rootWritable=rootExists&&rootInfo.isWritable();
+    m_systemRoot->setText(rootExists?(rootWritable?tr("Ready and writable"):tr("Readable but not writable")):tr("Missing or inaccessible"));
+    if(!rootExists)alerts<<tr("Archive Root is missing or inaccessible");else if(!rootWritable)alerts<<tr("Archive Root is not writable");
+
+    QString error;const auto sources=store.loadSources(&error);bool stateOk=error.isEmpty();if(!error.isEmpty())alerts<<tr("sources.json: %1").arg(error);
+    error.clear();const auto canonical=store.loadCanonicalItems(&error);if(!error.isEmpty()){stateOk=false;alerts<<tr("items.json: %1").arg(error);}
+    QSet<QString> canonicalKeys;int duplicateCanonical=0;int incomplete=0;int failed=0;int interrupted=0;int staleRunning=0;int unrecovered=0;int unavailable=0;
+    for(const auto& c:canonical){
+        if(canonicalKeys.contains(c.key))++duplicateCanonical;else canonicalKeys.insert(c.key);
+        if(c.video.state!="complete"||c.audio.state!="complete")++incomplete;
+        if(c.video.state=="failed"||c.audio.state=="failed")++failed;
+        if(c.video.state=="interrupted"||c.audio.state=="interrupted")++interrupted;
+        if(!m_busy&&(c.video.state=="running"||c.audio.state=="running"))++staleRunning;
+        if(c.recoveryStatus=="unrecovered")++unrecovered;
+        if(c.availability!="public")++unavailable;
+    }
+    if(duplicateCanonical>0){stateOk=false;alerts<<tr("%1 duplicate canonical key(s)").arg(duplicateCanonical);}
+
+    int occurrenceRefs=0;int missingRefs=0;int invalidEntryKeys=0;int failedSources=0;QDateTime latestScan;
+    for(const auto& source:sources){
+        if(!source.lastScanAt.isEmpty()){
+            auto dt=QDateTime::fromString(source.lastScanAt,Qt::ISODateWithMs);if(!dt.isValid())dt=QDateTime::fromString(source.lastScanAt,Qt::ISODate);if(dt.isValid()&&(!latestScan.isValid()||dt>latestScan))latestScan=dt;
+            if(!QFileInfo::exists(paths.playlistItemsFile(source.key))){stateOk=false;alerts<<tr("Managed source %1 is missing items.json").arg(source.title.isEmpty()?source.key:source.title);}
+        }
+        const auto status=source.lastScanStatus.toLower();if(!source.lastError.trimmed().isEmpty()||status.contains("fail")||status.contains("error")||status.contains("incomplete"))++failedSources;
+        QString playlistError;const auto playlist=store.loadPlaylistItems(source.key,&playlistError);if(!playlistError.isEmpty()){stateOk=false;alerts<<tr("Playlist state %1: %2").arg(source.key,playlistError);continue;}
+        QSet<QString> entryKeys;
+        for(const auto& p:playlist){
+            ++occurrenceRefs;if(!canonicalKeys.contains(p.itemKey))++missingRefs;
+            if(p.entryKey.isEmpty()||entryKeys.contains(p.entryKey))++invalidEntryKeys;else entryKeys.insert(p.entryKey);
+        }
+    }
+    if(missingRefs>0){stateOk=false;alerts<<tr("%1 playlist reference(s) have no canonical item").arg(missingRefs);}
+    if(invalidEntryKeys>0){stateOk=false;alerts<<tr("%1 missing or duplicate occurrence key(s)").arg(invalidEntryKeys);}
+    if(failed>0)alerts<<tr("%1 canonical item(s) contain failed representations").arg(failed);
+    if(interrupted>0)alerts<<tr("%1 canonical item(s) contain interrupted representations").arg(interrupted);
+    if(staleRunning>0)alerts<<tr("%1 representation(s) still say running while the GUI is idle").arg(staleRunning);
+    if(failedSources>0)alerts<<tr("%1 source(s) report a failed or incomplete latest scan").arg(failedSources);
+    m_systemState->setText(stateOk?tr("OK | %1 sources | %2 canonical items | %3 occurrence refs").arg(sources.size()).arg(canonical.size()).arg(occurrenceRefs):tr("INTEGRITY ATTENTION | %1 sources | %2 canonical items").arg(sources.size()).arg(canonical.size()));
+
+    archive::ToolResolver tools(runtimeConfig());const QStringList toolPaths={tools.ytDlp(),tools.ffmpeg(),tools.ffprobe(),tools.deno()};int resolvedTools=0;int packagedTools=0;
+    for(const auto& tool:toolPaths){if(!tool.isEmpty()&&QFileInfo::exists(tool)){++resolvedTools;if(pathInside(QCoreApplication::applicationDirPath(),tool))++packagedTools;}}
+    const bool toolsOk=resolvedTools==toolPaths.size();m_systemTools->setText(tr("%1/4 resolved | %2 packaged").arg(resolvedTools).arg(packagedTools));
+    if(!toolsOk)alerts<<tr("One or more required runtimes are missing");else if(packagedTools<resolvedTools)alerts<<tr("%1 runtime tool(s) resolve outside the application package").arg(resolvedTools-packagedTools);
+
+    QStorageInfo storage(m_root);if(storage.isValid()&&storage.isReady()){
+        const auto available=storage.bytesAvailable();const auto total=storage.bytesTotal();const double pct=total>0?(100.0*double(available)/double(total)):0.0;
+        m_systemDisk->setText(tr("%1 free | %2% available").arg(humanBytes(available)).arg(pct,0,'f',1));
+        const qint64 fiveGiB=5LL*1024LL*1024LL*1024LL;if(available<fiveGiB||(total>0&&pct<5.0))alerts<<tr("Disk headroom is low");
+    }else{m_systemDisk->setText(tr("Storage status unavailable"));alerts<<tr("Storage status could not be read");}
+
+    if(m_busy)m_systemLock->setText(tr("Held by this GUI operation"));
+    else if(rootExists&&rootWritable){archive::SyncLock lock(paths);if(lock.tryLock(0)){m_systemLock->setText(tr("Available"));lock.unlock();}else{m_systemLock->setText(tr("Held by another writer"));alerts<<tr("Another archive writer currently owns the lock");}}
+    else m_systemLock->setText(tr("Unavailable"));
+
+    const int pending=childDirectoryCount(paths.importsPending());const int accepted=childDirectoryCount(paths.importsAccepted());const int rejected=childDirectoryCount(paths.importsRejected());
+    m_systemImports->setText(tr("Pending %1 | Accepted %2 | Rejected %3").arg(pending).arg(accepted).arg(rejected));
+    if(sources.isEmpty())m_systemLastScan->setText(tr("No sources registered"));else if(latestScan.isValid())m_systemLastScan->setText(tr("%1 | %2 source issue(s)").arg(latestScan.toLocalTime().toString(Qt::ISODate)).arg(failedSources));else m_systemLastScan->setText(tr("Never"));
+
+    const bool hardError=!rootExists||!rootWritable||!stateOk||!toolsOk;
+    m_systemOverall->setText(hardError?tr("ERROR"):(!alerts.isEmpty()?tr("ATTENTION"):tr("HEALTHY")));
+    m_systemAttention->setText(alerts.isEmpty()?tr("Attention: No system-level alerts detected."):tr("Attention: %1").arg(alerts.join(tr(" | "))));
+    m_systemWorkload->setText(tr("Archive workload: %1 incomplete media item(s) | %2 unrecovered | %3 unavailable | %4 pending import(s) | %5 rejected import(s)").arg(incomplete).arg(unrecovered).arg(unavailable).arg(pending).arg(rejected));
+}
 
 void ArchiveTab::refreshSources()
 {
@@ -214,12 +359,21 @@ void ArchiveTab::refreshActivity()
 void ArchiveTab::setBusy(bool busy,const QString& text)
 {
     m_busy=busy;const QList<QWidget*> controls={m_add,m_remove,m_scan,m_syncSelected,m_syncAll,m_retry,m_more,m_sources,m_search,m_filter};
-    for(auto* w:controls) w->setEnabled(!busy);m_stop->setEnabled(busy);if(!text.isEmpty())m_statusLabel->setText(text);else if(!busy)m_statusLabel->setText(tr("Idle"));
+    for(auto* w:controls) w->setEnabled(!busy);m_stop->setEnabled(busy);if(!text.isEmpty())m_statusLabel->setText(text);else if(!busy)m_statusLabel->setText(tr("Idle"));refreshSystemHealth();
+}
+
+void ArchiveTab::postOperationProgress(const QString& stage,const QString& detail,int current,int total,int failures)
+{
+    QMetaObject::invokeMethod(this,[this,stage,detail,current,total,failures]{
+        if(!m_operationStage)return;m_operationStage->setText(stage);m_operationDetail->setText(detail);m_operationFailures->setText(tr("Failures: %1").arg(failures));
+        if(total>0){m_operationProgress->setRange(0,total);m_operationProgress->setValue(qBound(0,current,total));m_operationProgress->setFormat(QStringLiteral("%v / %m"));}
+        else{m_operationProgress->setRange(0,0);m_operationProgress->setFormat(tr("Working…"));}
+    },Qt::QueuedConnection);
 }
 
 void ArchiveTab::browseRoot()
 {
-    if(m_busy)return;const auto p=QFileDialog::getExistingDirectory(m_page,tr("Select Archive Root"),m_root,QFileDialog::ShowDirsOnly);if(p.isEmpty())return;m_root=QDir::cleanPath(p);persistRoot(m_root);QString e;if(!ensureReady(&e)){QMessageBox::critical(m_page,tr("Archive Root"),e);return;}refreshAll();
+    if(m_busy)return;const auto p=QFileDialog::getExistingDirectory(m_page,tr("Select Archive Root"),m_root,QFileDialog::ShowDirsOnly);if(p.isEmpty())return;m_root=QDir::cleanPath(p);persistRoot(m_root);QString e;if(!ensureReady(&e)){QMessageBox::critical(m_page,tr("Archive Root"),e);refreshSystemHealth();return;}refreshAll();
 }
 
 void ArchiveTab::addPlaylist()
@@ -251,11 +405,11 @@ void ArchiveTab::scanSelected(){const auto s=selectedSource();if(!s.key.isEmpty(
 void ArchiveTab::syncSelected(){const auto s=selectedSource();if(!s.key.isEmpty())runSources({s},true,tr("Syncing %1").arg(s.title));}
 void ArchiveTab::retryFailed(){syncSelected();}
 void ArchiveTab::syncAll(){archive::Store store{archive::Paths(m_root)};const auto sources=store.loadSources();if(!sources.isEmpty())runSources(sources,true,tr("Syncing all playlists"));}
-void ArchiveTab::stopAfterCurrent(){m_stopRequested=true;m_statusLabel->setText(tr("Stop requested. The current item will finish safely."));}
+void ArchiveTab::stopAfterCurrent(){m_stopRequested=true;m_statusLabel->setText(tr("Stop requested. The current item will finish safely."));if(m_operationDetail)m_operationDetail->setText(tr("Stop requested. The current item will finish safely, then the queue will stop."));refreshSystemHealth();}
 
 void ArchiveTab::processImports()
 {
-    if(m_busy)return;m_stopRequested=false;runAsync(tr("Processing external imports"),[this]{archive::Paths p(m_root);archive::Store store(p);archive::ActivityLogger logger(p);archive::RecoveryImporter importer(runtimeConfig(),store,logger);QStringList failures;const auto accepted=importer.ingestPending(&failures,[this]{return m_stopRequested.load();});QJsonObject o{{"accepted",accepted},{"failure_count",failures.size()},{"stopped",m_stopRequested.load()},{"failures",QJsonArray::fromStringList(failures)}};return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));});
+    if(m_busy)return;m_stopRequested=false;runAsync(tr("Processing external imports"),[this]{postOperationProgress(tr("Recovery imports"),tr("Validating and ingesting Pending recovery packages"),0,0,0);archive::Paths p(m_root);archive::Store store(p);archive::ActivityLogger logger(p);archive::RecoveryImporter importer(runtimeConfig(),store,logger);QStringList failures;const auto accepted=importer.ingestPending(&failures,[this]{return m_stopRequested.load();});QJsonObject o{{"accepted",accepted},{"failure_count",failures.size()},{"stopped",m_stopRequested.load()},{"failures",QJsonArray::fromStringList(failures)}};return QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact));});
 }
 
 void ArchiveTab::runSources(const QVector<archive::Source>& sources,bool downloads,const QString& name)
@@ -267,26 +421,48 @@ QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool do
 {
     archive::Paths paths(m_root);archive::Store store(paths);QString error;if(!store.initialize(&error))return QString("ERROR:")+error;archive::ActivityLogger logger(paths);archive::SyncLock lock(paths);if(!lock.tryLock())return "ERROR:"+lock.errorString();QJsonObject result;int totalObserved=0,totalFailures=0,totalDownloaded=0;QStringList failures;
     logger.event("INFO","application",doDownloads?"sync_session_started":"scan_session_started",{{"source_count",sources.size()}});
-    for(auto& source:sources){if(m_stopRequested.load())break;archive::PlaylistDiscovery discovery(runtimeConfig(),logger);auto snapshot=discovery.discover(source);auto sum=store.reconcile(source,snapshot,&logger);if(!sum.committed){failures<<source.key+": "+sum.error;++totalFailures;continue;}totalObserved+=sum.observed;if(!snapshot.complete){++totalFailures;failures<<source.key+": "+snapshot.error;continue;}if(!doDownloads)continue;
+    int sourceIndex=0;
+    for(auto& source:sources){
+        if(m_stopRequested.load())break;++sourceIndex;const auto sourceName=source.title.isEmpty()?source.key:source.title;
+        postOperationProgress(tr("Discovery"),tr("Source %1/%2: %3").arg(sourceIndex).arg(sources.size()).arg(sourceName),sourceIndex-1,sources.size(),totalFailures);
+        archive::PlaylistDiscovery discovery(runtimeConfig(),logger);auto snapshot=discovery.discover(source);
+        postOperationProgress(tr("Reconcile"),tr("Reconciling %1 observed item(s) for %2").arg(snapshot.items.size()).arg(sourceName),sourceIndex-1,sources.size(),totalFailures);
+        auto sum=store.reconcile(source,snapshot,&logger);if(!sum.committed){failures<<source.key+": "+sum.error;++totalFailures;postOperationProgress(tr("Reconcile failed"),sum.error,sourceIndex,sources.size(),totalFailures);continue;}
+        totalObserved+=sum.observed;if(!snapshot.complete){++totalFailures;failures<<source.key+": "+snapshot.error;postOperationProgress(tr("Discovery incomplete"),snapshot.error,sourceIndex,sources.size(),totalFailures);continue;}
+        if(!doDownloads){postOperationProgress(tr("Source complete"),tr("%1 scanned successfully").arg(sourceName),sourceIndex,sources.size(),totalFailures);continue;}
+
         auto playlist=store.loadPlaylistItems(source.key);auto canonical=store.loadCanonicalItems();QHash<QString,archive::CanonicalItem> map;for(const auto& c:canonical)map[c.key]=c;
-        for(const auto& p:playlist){if(m_stopRequested.load())break;if(p.membership!="active"||!map.contains(p.itemKey))continue;auto c=map[p.itemKey];if(p.availability!="public"&&c.video.state!="complete"&&c.audio.state!="complete")continue;archive::MediaExecutor executor(runtimeConfig(),store,logger);QString e;if(executor.syncItem(c,true,true,&e))++totalDownloaded;else{++totalFailures;failures<<p.itemKey+": "+e;}}
+        int eligible=0;for(const auto& p:playlist){if(p.membership!="active"||!map.contains(p.itemKey))continue;const auto c=map[p.itemKey];if(p.availability!="public"&&c.video.state!="complete"&&c.audio.state!="complete")continue;++eligible;}
+        int itemIndex=0;
+        for(const auto& p:playlist){
+            if(m_stopRequested.load())break;if(p.membership!="active"||!map.contains(p.itemKey))continue;auto c=map[p.itemKey];if(p.availability!="public"&&c.video.state!="complete"&&c.audio.state!="complete")continue;++itemIndex;
+            const auto itemName=p.title.isEmpty()?p.itemKey:p.title;postOperationProgress(tr("Media sync + verify + commit"),tr("%1 | source %2/%3 | item %4/%5").arg(itemName).arg(sourceIndex).arg(sources.size()).arg(itemIndex).arg(eligible),itemIndex-1,eligible,totalFailures);
+            archive::MediaExecutor executor(runtimeConfig(),store,logger);QString e;if(executor.syncItem(c,true,true,&e))++totalDownloaded;else{++totalFailures;failures<<p.itemKey+": "+e;}
+            postOperationProgress(tr("Media sync + verify + commit"),tr("Processed %1/%2 for %3").arg(itemIndex).arg(eligible).arg(sourceName),itemIndex,eligible,totalFailures);
+        }
+        postOperationProgress(tr("Projection"),tr("Regenerating reports for %1").arg(sourceName),sourceIndex-1,sources.size(),totalFailures);
         QString projectionError;if(!store.writeAllProjections(&projectionError)){++totalFailures;failures<<projectionError;}
+        postOperationProgress(tr("Source complete"),tr("Completed %1").arg(sourceName),sourceIndex,sources.size(),totalFailures);
     }
+    postOperationProgress(tr("Finalizing"),tr("Writing final session result"),sources.size(),sources.size(),totalFailures);
     lock.unlock();result["observed"]=totalObserved;result["completed_items"]=totalDownloaded;result["failure_count"]=totalFailures;result["stopped"]=m_stopRequested.load();result["failures"]=QJsonArray::fromStringList(failures);logger.event(totalFailures?"WARNING":"INFO","application",doDownloads?"sync_session_completed":"scan_session_completed",result);return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
 }
 
 void ArchiveTab::runAsync(const QString& operationName,const std::function<QString()>& fn)
 {
-    if(m_busy)return;setBusy(true,operationName);m_watcher=new QFutureWatcher<QString>(this);
+    if(m_busy)return;m_operationName->setText(operationName);m_operationStage->setText(tr("Starting"));m_operationDetail->setText(tr("Preparing Archive Mode operation"));m_operationFailures->setText(tr("Failures: 0"));m_operationProgress->setRange(0,0);m_operationProgress->setFormat(tr("Working…"));setBusy(true,operationName);m_watcher=new QFutureWatcher<QString>(this);
     QObject::connect(m_watcher,&QFutureWatcher<QString>::finished,this,[this,operationName]{
         const auto result=m_watcher->result();m_watcher->deleteLater();m_watcher=nullptr;setBusy(false);
-        if(result.startsWith("ERROR:")){m_statusLabel->setText(result);QMessageBox::warning(m_page,tr("Archive Operation"),result.mid(6));}
+        bool stopped=false;int failures=0;QString detail;
+        if(result.startsWith("ERROR:")){failures=1;detail=result.mid(6);m_statusLabel->setText(result);QMessageBox::warning(m_page,tr("Archive Operation"),detail);}
         else {
-            const auto report=QJsonDocument::fromJson(result.toUtf8()).object();const auto failures=report.value("failure_count").toInt();
-            if(report.value("stopped").toBool())m_statusLabel->setText(tr("Stopped safely after the current item. Remaining work is not complete."));
+            const auto report=QJsonDocument::fromJson(result.toUtf8()).object();failures=report.value("failure_count").toInt();stopped=report.value("stopped").toBool();QStringList parts;
+            if(report.contains("observed"))parts<<tr("Observed %1").arg(report.value("observed").toInt());if(report.contains("completed_items"))parts<<tr("Completed media %1").arg(report.value("completed_items").toInt());if(report.contains("accepted"))parts<<tr("Accepted imports %1").arg(report.value("accepted").toInt());detail=parts.isEmpty()?tr("Operation finished"):parts.join(tr(" | "));
+            if(stopped)m_statusLabel->setText(tr("Stopped safely after the current item. Remaining work is not complete."));
             else if(failures>0){m_statusLabel->setText(tr("Finished with %1 failure(s). Review Activity and retry.").arg(failures));QMessageBox box(QMessageBox::Warning,tr("Archive Operation"),m_statusLabel->text(),QMessageBox::Ok,m_page);box.setDetailedText(result);box.exec();}
             else m_statusLabel->setText(operationName+tr(" completed successfully"));
         }
+        m_operationName->setText(operationName);m_operationStage->setText(result.startsWith("ERROR:")?tr("ERROR"):(stopped?tr("STOPPED"):failures>0?tr("COMPLETED WITH FAILURES"):tr("COMPLETED")));m_operationDetail->setText(detail);m_operationFailures->setText(tr("Failures: %1").arg(failures));m_operationProgress->setRange(0,1);m_operationProgress->setValue(1);m_operationProgress->setFormat(stopped?tr("Stopped"):failures>0?tr("Finished with failures"):tr("Complete"));
         refreshAll();
     });
     m_watcher->setFuture(QtConcurrent::run([fn]{try{return fn();}catch(const std::exception& e){return QString("ERROR:")+QString::fromUtf8(e.what());}catch(...){return QString("ERROR:Unexpected archive worker exception");}}));
