@@ -6,13 +6,13 @@ This directory contains the maintained documentation for Media Downloader PS Arc
 
 ### Operator or tester
 
-Read [ARCHIVE_OPERATIONS.md](ARCHIVE_OPERATIONS.md), then [ARCHIVE_TESTING.md](ARCHIVE_TESTING.md). These explain how to run the portable candidate, preflight the runtime, scan playlists, sync and verify items, interpret failures, and execute the target Windows local harness.
+Read [ARCHIVE_OPERATIONS.md](ARCHIVE_OPERATIONS.md), then [ARCHIVE_SYSTEM_HEALTH_DASHBOARD.md](ARCHIVE_SYSTEM_HEALTH_DASHBOARD.md), then [ARCHIVE_TESTING.md](ARCHIVE_TESTING.md). These explain how to run the portable candidate, interpret the GUI's software-health and live-operation telemetry, preflight the runtime, scan playlists, sync and verify items, interpret failures, and execute the target Windows local harness.
 
 ### Developer or reviewer
 
 Read [ARCHIVE_MODE.md](ARCHIVE_MODE.md) first. It documents the architecture, state model, path layout, safety invariants, transaction behavior, media contract, generated projections, and command-line surface.
 
-Then read [ARCHIVE_TESTING.md](ARCHIVE_TESTING.md) for the qualification strategy and evidence chain, and [DOCUMENTATION_CHECKLIST.md](DOCUMENTATION_CHECKLIST.md) before changing an Archive contract.
+Then read [ARCHIVE_SYSTEM_HEALTH_DASHBOARD.md](ARCHIVE_SYSTEM_HEALTH_DASHBOARD.md) for the GUI observability contract, [ARCHIVE_TESTING.md](ARCHIVE_TESTING.md) for the qualification strategy and evidence chain, and [DOCUMENTATION_CHECKLIST.md](DOCUMENTATION_CHECKLIST.md) before changing an Archive contract.
 
 ### Recovery agent, script, or human researcher
 
@@ -37,6 +37,7 @@ If those sources disagree, stop and resolve the identity mismatch before using t
 | --- | --- |
 | [ARCHIVE_MODE.md](ARCHIVE_MODE.md) | Architecture, invariants, state, layout, media contract, CLI behavior |
 | [ARCHIVE_OPERATIONS.md](ARCHIVE_OPERATIONS.md) | Routine operation, first run, troubleshooting, backup, incident handling, Kilo handoff |
+| [ARCHIVE_SYSTEM_HEALTH_DASHBOARD.md](ARCHIVE_SYSTEM_HEALTH_DASHBOARD.md) | GUI system-health checks, operational telemetry, alert semantics, workload separation, current-operation stages |
 | [ARCHIVE_RECOVERY.md](ARCHIVE_RECOVERY.md) | Recovery Package creation, validation, provenance, retry, acceptance, rejection |
 | [ARCHIVE_TESTING.md](ARCHIVE_TESTING.md) | Regression, integration, sanitizers, Windows qualification, package sealing, local acceptance |
 | [DOCUMENTATION_CHECKLIST.md](DOCUMENTATION_CHECKLIST.md) | Contract-change checklist to keep documentation synchronized with implementation |
@@ -62,6 +63,7 @@ Documentation should be updated whenever any of the following changes:
 - media compatibility requirements
 - CLI command syntax or exit semantics
 - transaction or locking behavior
+- GUI health/observability semantics or operation-stage reporting
 - portable package sealing and identity checks
 - local harness parameters or acceptance criteria
 - CI test layers or artifact structure
