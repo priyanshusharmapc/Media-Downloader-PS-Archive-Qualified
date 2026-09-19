@@ -56,7 +56,8 @@ the application directory, including while offline. A successful explicit
 selection migrates it to `ArchiveRoot`. Unrelated valid INI settings survive that
 commit. Reading a setting does not migrate or rewrite the file.
 
-The writer serializes a private INI snapshot, then uses `QSaveFile` with direct
+The writer serializes a private INI snapshot in an owned temporary directory,
+with file handles closed before replacement on Windows, then uses `QSaveFile` with direct
 write fallback disabled to atomically replace the live settings file. The live
 file never has pending `QSettings` changes that a destructor could later retry.
 Settings-path links are refused rather than followed to another file. Failures to

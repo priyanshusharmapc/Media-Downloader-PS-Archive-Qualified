@@ -10,7 +10,7 @@
 #include <QSaveFile>
 #include <QSettings>
 #include <QStandardPaths>
-#include <QTemporaryFile>
+#include <QTemporaryDir>
 
 namespace archive { namespace ui {
 namespace {
@@ -33,14 +33,20 @@ QString settingsPath()
 // QSettings shares file-backed caches and can flush pending changes from its
 // destructor. Work on a private snapshot instead: a failed live-file commit
 // must not leave a rejected root queued for a later implicit retry.
-bool stageSettings(const QString& path,QTemporaryFile& staged,QString* error)
+bool stageSettings(const QString& path,const QTemporaryDir& directory,QString* error)
 {
     if(!detail::noLinks(path))return detail::reject(error,message("Linked Archive settings path refused: %1").arg(path));
     QByteArray bytes;
     if(QFileInfo::exists(path)&&!detail::readBytes(path,&bytes,error))return false;
-    if(!staged.open()||staged.write(bytes)!=bytes.size()||!staged.flush())
+    if(!directory.isValid())
+        return detail::reject(error,message("Cannot create private Archive settings staging directory: %1").arg(directory.errorString()));
+    // QTemporaryFile::close() retains its native handle. On Windows that
+    // handle denies deletion, so QSettings cannot atomically replace it.
+    // A regular file inside an exclusively owned temporary directory closes
+    // for real at this function boundary; the directory owns all cleanup.
+    QFile staged(directory.filePath("snapshot.ini"));
+    if(!staged.open(QIODevice::WriteOnly)||staged.write(bytes)!=bytes.size()||!staged.flush())
         return detail::reject(error,message("Cannot stage Archive settings: %1").arg(staged.errorString()));
-    staged.close();
     return true;
 }
 
@@ -71,9 +77,9 @@ QString configuredRoot(const QString& applicationDir,const QString& downloadFold
     if(error)error->clear();
     const auto path=settingsPath();
     if(!QFileInfo::exists(path)&&detail::noLinks(path))return {};
-    QTemporaryFile staged(QDir::tempPath()+"/mdps-settings-read-XXXXXX.ini");
+    QTemporaryDir staged(QDir::tempPath()+"/mdps-settings-read-XXXXXX");
     if(!stageSettings(path,staged,error))return {};
-    QSettings settings(staged.fileName(),QSettings::IniFormat);
+    QSettings settings(staged.filePath("snapshot.ini"),QSettings::IniFormat);
     settings.setFallbacksEnabled(false);
     if(!validSettings(settings,error))return {};
 
@@ -121,10 +127,10 @@ bool persistRoot(const QString& root,QString* error)
     // indefinitely for another process or overwrite a concurrent selection.
     QLockFile lock(path+".lock");
     if(!lock.tryLock(0))return detail::reject(error,message("Archive settings are busy or cannot be locked. The selected root was not changed."));
-    QTemporaryFile staged(QDir::tempPath()+"/mdps-settings-write-XXXXXX.ini");
+    QTemporaryDir staged(QDir::tempPath()+"/mdps-settings-write-XXXXXX");
     if(!stageSettings(path,staged,error))return false;
     {
-        QSettings settings(staged.fileName(),QSettings::IniFormat);
+        QSettings settings(staged.filePath("snapshot.ini"),QSettings::IniFormat);
         settings.setFallbacksEnabled(false);
         if(!validSettings(settings,error))return false;
         settings.setValue("ArchiveRoot",QDir::cleanPath(root));
@@ -133,7 +139,7 @@ bool persistRoot(const QString& root,QString* error)
         if(settings.status()!=QSettings::NoError)
             return detail::reject(error,message("Cannot serialize Archive settings. The selected root was not changed."));
     }
-    QFile serialized(staged.fileName());
+    QFile serialized(staged.filePath("snapshot.ini"));
     if(!serialized.open(QIODevice::ReadOnly))return detail::reject(error,serialized.errorString());
     const auto bytes=serialized.readAll();
     if(serialized.error()!=QFileDevice::NoError)return detail::reject(error,serialized.errorString());
