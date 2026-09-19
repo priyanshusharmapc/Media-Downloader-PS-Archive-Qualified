@@ -54,6 +54,7 @@ class engines
 {
 public:
 	static bool filePathIsValid( const QFileInfo& ) ;
+	static bool executableOwnedByBinRoot( const QString& executable,const QString& binRoot ) ;
 
 	// Rendering helpers are intentionally separate from process arguments and
 	// environment. They scrub credentials only from diagnostics, never from the
