@@ -66,9 +66,29 @@ public:
 private:
 	std::wstring setPath( const QString& path )
 	{
-		auto e = QDir::cleanPath( path.startsWith( "\\\\?\\" ) ? path : "\\\\?\\" + path ) ;
-		auto m = QDir::toNativeSeparators( e ) ;
-		return m.toStdWString() ;
+		// Win32 extended paths have different namespaces for local drives and
+		// UNC shares. Blindly prepending "\\\\?\\" to a normal UNC path
+		// produces an invalid path such as "\\\\?\\\\server\\share".
+		// Keep already-qualified paths unchanged, translate UNC paths through
+		// the UNC namespace, and reject relative paths instead of inventing an
+		// absolute identity for them.
+		auto clean = QDir::cleanPath( QDir::fromNativeSeparators( path ) ) ;
+
+		if( clean.startsWith( "//?/" ) ){
+			return QDir::toNativeSeparators( clean ).toStdWString() ;
+		}
+
+		QString qualified ;
+
+		if( clean.startsWith( "//" ) ){
+			qualified = "//?/UNC/" + clean.mid( 2 ) ;
+		}else if( QDir::isAbsolutePath( clean ) ){
+			qualified = "//?/" + clean ;
+		}else{
+			return {} ;
+		}
+
+		return QDir::toNativeSeparators( qualified ).toStdWString() ;
 	}
 	class handle
 	{
