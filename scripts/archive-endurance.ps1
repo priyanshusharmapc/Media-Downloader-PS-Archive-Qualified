@@ -44,27 +44,35 @@ function Assert-PackageSeal([string]$path){
 }
 
 function Assert-ExecutionPackage([string]$base,[string]$execution,$seal,[string[]]$allowedOverlay){
+    # The sealed manifest is authoritative for every byte it names. An overlay
+    # may add declared test-fixture files, but it may never replace or suppress
+    # validation of a sealed runtime file such as archive-cli.exe or FFmpeg.
+    $listed=@{}
+    foreach($entry in $seal.entries){
+        $listed[[string]$entry.Path]=[string]$entry.Expected
+    }
+
     $allowed=@{}
     foreach($item in $allowedOverlay){
         if([string]::IsNullOrWhiteSpace($item)){continue}
         $relative=$item.Replace('\','/').TrimStart('/')
         if($relative.Contains('../') -or $relative -eq '..'){throw "Unsafe allowed overlay path: $item"}
+        if($listed.ContainsKey($relative)){
+            throw "Allowed overlay cannot replace sealed package path: $relative"
+        }
         $allowed[$relative]=$true
     }
 
-    $listed=@{}
     $differences=@()
     foreach($entry in $seal.entries){
         $relative=[string]$entry.Path
-        $listed[$relative]=$true
-        if($allowed.ContainsKey($relative)){continue}
         $file=Join-Path $execution ($relative.Replace('/','\'))
         if(!(Test-Path -LiteralPath $file -PathType Leaf)){
             $differences+="missing:$relative"
             continue
         }
         $actual=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-        if($actual -ne $entry.Expected){$differences+="modified:$relative"}
+        if($actual -ne [string]$entry.Expected){$differences+="modified:$relative"}
     }
 
     foreach($file in Get-ChildItem -LiteralPath $execution -Recurse -File -Force){
@@ -79,11 +87,18 @@ function Assert-ExecutionPackage([string]$base,[string]$execution,$seal,[string[
         throw "Execution package differs from sealed base outside declared overlay: $($differences -join ', ')"
     }
 
-    $cliPath=Join-Path $execution 'archive-cli.exe'
+    $cliRelative='archive-cli.exe'
+    if(!$listed.ContainsKey($cliRelative)){throw "Sealed package manifest does not contain archive-cli.exe"}
+    $cliPath=Join-Path $execution $cliRelative
+    $actualCli=(Get-FileHash -LiteralPath $cliPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $expectedCli=[string]$listed[$cliRelative]
+    if($actualCli -ne $expectedCli){throw "Executed archive-cli.exe does not match sealed package"}
+
     return [ordered]@{
         root=$execution
         allowedOverlay=@($allowed.Keys | Sort-Object)
-        archiveCliSha256=(Get-FileHash -LiteralPath $cliPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        expectedArchiveCliSha256=$expectedCli
+        archiveCliSha256=$actualCli
     }
 }
 
