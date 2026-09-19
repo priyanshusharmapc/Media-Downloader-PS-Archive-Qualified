@@ -27,6 +27,7 @@
 #include "translator.h"
 
 #include <csignal>
+#include <QTimer>
 
 MainWindow::MainWindow( QApplication& app,
 			settings& s,
@@ -48,6 +49,19 @@ MainWindow::MainWindow( QApplication& app,
 	m_logger.setContext( m_tabManager.ctx() ) ;
 
 	MainWindow::setUpSignals( this ) ;
+
+	// C signal handlers may run at arbitrary instruction boundaries. They only
+	// set a sig_atomic_t flag; ordinary Qt shutdown is performed from the event
+	// loop where settings, filesystem and object access are safe.
+	auto signalTimer = new QTimer( this ) ;
+	signalTimer->setInterval( 50 ) ;
+	connect( signalTimer,&QTimer::timeout,[ this ](){
+		if( MainWindow::m_signalPending != 0 ){
+			MainWindow::m_signalPending = 0 ;
+			this->quitApp() ;
+		}
+	} ) ;
+	signalTimer->start() ;
 
 	this->setTitle( m_appName ) ;
 
@@ -237,16 +251,22 @@ MainWindow::~MainWindow()
 }
 
 MainWindow * MainWindow::m_mainWindow ;
+volatile std::sig_atomic_t MainWindow::m_signalPending = 0 ;
 
 void MainWindow::setUpSignals( MainWindow * m )
 {
 	m_mainWindow = m ;
-	MainWindow::setUpSignal( SIGTERM,SIGSEGV,SIGINT,SIGABRT ) ;
+
+	// Graceful termination signals are handed off to the Qt event loop.
+	// Fatal synchronous signals deliberately keep their default disposition:
+	// attempting autosave/UI work from corrupted process state is unsafe and
+	// returning from SIGSEGV/SIGABRT can immediately re-enter the fault.
+	MainWindow::setUpSignal( SIGTERM,SIGINT ) ;
 }
 
-void MainWindow::signalHandler( int )
+void MainWindow::signalHandler( int sig )
 {
-	m_mainWindow->quitApp() ;
+	m_signalPending = sig ;
 }
 
 void MainWindow::setUpSignal( int sig )
