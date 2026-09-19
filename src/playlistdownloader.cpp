@@ -1654,7 +1654,21 @@ bool playlistdownloader::subscription::load()
 		if( error.error != QJsonParseError::NoError || !doc.isArray() ){
 			m_storeValid = false ;
 		}else{
-			m_array = doc.array() ;
+			const auto array = doc.array() ;
+			for( const auto& value : array ){
+				if( !value.isObject() ){
+					m_storeValid = false ;
+					break ;
+				}
+				const auto object = value.toObject() ;
+				const auto options = object.value( "getListOptions" ) ;
+				if( !object.value( "uiName" ).isString() || !object.value( "url" ).isString() ||
+				    ( !options.isUndefined() && !options.isString() ) ){
+					m_storeValid = false ;
+					break ;
+				}
+			}
+			if( m_storeValid )m_array = array ;
 		}
 	}
 
