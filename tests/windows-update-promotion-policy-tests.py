@@ -13,7 +13,7 @@ body=source[start:end]
 assert "const auto hadCurrentUpdate" in body
 assert "if( !dir.rename( update,updated_old ) )" in body
 assert "if( !dir.rename( update_new,update ) )" in body
-assert "dir.rename( updated_old,update )" in body
+assert "hadCurrentUpdate && !dir.rename( updated_old,update )" in body
 first=body.index("if( !dir.rename( update,updated_old ) )")
 second=body.index("if( !dir.rename( update_new,update ) )")
 exe=body.index('QString exePath = update + "/media-downloader.exe"')
