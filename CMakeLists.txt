@@ -326,7 +326,7 @@ Source: {#MySourcesPath}\\src\\media-downloader.ico; DestDir: {app}\\icons; Flag
 Name: \"{commonprograms}\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"
 ;Name: \"{commonprograms}\\Uninstall {#MyAppName}\"; Filename: \"{uninstallexe}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"
 Name: \"{commondesktop}\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"; Tasks: desktopicon
-Name: \"{userappdata}\\Microsoft\\Internet Explorer\\Quick Launch\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloade.ico\"; WorkingDir: \"{app}\"; Tasks: quicklaunchicon
+Name: \"{userappdata}\\Microsoft\\Internet Explorer\\Quick Launch\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"; Tasks: quicklaunchicon
 
 [Run]
 Filename: \"{app}\\{#MyAppExeName}\"; Description: \"{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}\"; Flags: nowait postinstall skipifsilent
@@ -426,7 +426,7 @@ Source: {#MySourcesPath}\\src\\media-downloader.ico; DestDir: {app}\\icons; Flag
 Name: \"{commonprograms}\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"
 ;Name: \"{commonprograms}\\Uninstall {#MyAppName}\"; Filename: \"{uninstallexe}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"
 Name: \"{commondesktop}\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"; Tasks: desktopicon
-Name: \"{userappdata}\\Microsoft\\Internet Explorer\\Quick Launch\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloade.ico\"; WorkingDir: \"{app}\"; Tasks: quicklaunchicon
+Name: \"{userappdata}\\Microsoft\\Internet Explorer\\Quick Launch\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"; Tasks: quicklaunchicon
 
 [Run]
 Filename: \"{app}\\{#MyAppExeName}\"; Description: \"{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}\"; Flags: nowait postinstall skipifsilent
@@ -549,6 +549,8 @@ if(BUILD_TESTING)
         target_link_libraries(archive-fake-tool Qt5::Core)
     endif()
     find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME installer-shortcut-policy COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/installer-shortcut-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
+    set_tests_properties(installer-shortcut-policy PROPERTIES TIMEOUT 30)
     add_test(NAME archive-integration COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/archive-integration-tests.py --cli $<TARGET_FILE:archive-cli> --fake-tool $<TARGET_FILE:archive-fake-tool>)
     set_tests_properties(archive-integration PROPERTIES TIMEOUT 180)
     if(WIN32)
