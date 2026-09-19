@@ -44,6 +44,9 @@ library::library( const Context& ctx ) :
 	connect( m_ui.pbLibraryCancel,&QPushButton::clicked,[ this ](){
 
 		m_continue = false ;
+		if( m_scanContinue ){
+			*m_scanContinue = false ;
+		}
 	} ) ;
 
 	connect( m_ui.pbLibraryCancelRename,&QPushButton::clicked,[ this ](){
@@ -211,6 +214,11 @@ void library::resetMenu()
 
 void library::exiting()
 {
+	m_continue = false ;
+	if( m_scanContinue ){
+		*m_scanContinue = false ;
+		m_scanContinue.reset() ;
+	}
 }
 
 void library::retranslateUi()
@@ -228,6 +236,9 @@ void library::tabEntered()
 void library::tabExited()
 {
 	m_continue = false ;
+	if( m_scanContinue ){
+		*m_scanContinue = false ;
+	}
 }
 
 void library::textAlignmentChanged( Qt::LayoutDirection )
@@ -733,27 +744,44 @@ void library::showContents( const QString& path )
 
 	m_ui.pbLibraryCancel->setEnabled( true ) ;
 
+	// Supersede any earlier scan without leaving its worker tied to this
+	// QObject's lifetime. The worker owns only its path and cancellation token.
+	if( m_scanContinue ){
+		*m_scanContinue = false ;
+	}
+	m_scanContinue = std::make_shared< std::atomic_bool >( true ) ;
+	auto scanContinue = m_scanContinue ;
+
 	class meaw
 	{
 	public:
-		meaw( library& library,const QString& path ) :
+		meaw( library * library,const QString& path,std::shared_ptr< std::atomic_bool > keepGoing ) :
 			m_parent( library ),
-			m_path( path )
+			m_path( path ),
+			m_continue( std::move( keepGoing ) )
 		{
 		}
-		void bg()
+		directoryEntries bg()
 		{
-			auto& m = m_parent.m_continue ;
-			m_parent.m_directoryEntries = directoryManager::readAll( m_path,m ) ;
+			return directoryManager::readAll( m_path,*m_continue ) ;
 		}
-		void fg()
+		void fg( directoryEntries&& entries )
 		{
-			m_parent.arrangeAndShow() ;
+			// QPointer becomes null as soon as the QObject is destroyed. The token
+			// also prevents an obsolete scan from publishing after a newer scan,
+			// tab exit or application shutdown has superseded it.
+			if( !m_parent || !m_continue->load() || m_parent->m_scanContinue != m_continue ){
+				return ;
+			}
+
+			m_parent->m_directoryEntries = std::move( entries ) ;
+			m_parent->arrangeAndShow() ;
 		}
 	private:
-		library& m_parent ;
+		QPointer< library > m_parent ;
 		QString m_path ;
+		std::shared_ptr< std::atomic_bool > m_continue ;
 	} ;
 
-	utils::qthread::run( meaw( *this,path ) ) ;
+	utils::qthread::run( meaw( this,path,std::move( scanContinue ) ) ) ;
 }
