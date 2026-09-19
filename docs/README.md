@@ -105,3 +105,9 @@ boundary, and how unavailable media becomes durably `blocked_unavailable`.
 [Sealed runtime tool resolution](remediation/005.md) documents the default
 package-only resolver and the explicit, non-qualified development opt-in for
 system `PATH` tools.
+
+## Existing-media provider binding
+
+[Existing-media provenance](remediation/006.md) documents the provider-ID,
+path and SHA-256 binding required before an existing file can be adopted into
+canonical history.
