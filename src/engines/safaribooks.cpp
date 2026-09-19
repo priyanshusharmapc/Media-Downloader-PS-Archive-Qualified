@@ -253,6 +253,13 @@ void safaribooks::updateDownLoadCmdOptions( const engines::engine::baseEngine::u
 
 		const auto m = util::split( s.urls[ 0 ],'/',true ) ;
 
+		// Slash-only or otherwise component-less input is malformed. Do not
+		// dereference QStringList::last() unless a real book identifier exists.
+		if( m.isEmpty() ){
+			s.urls.clear() ;
+			return ;
+		}
+
 		s.urls[ 0 ] = m.last() ;
 	}
 
