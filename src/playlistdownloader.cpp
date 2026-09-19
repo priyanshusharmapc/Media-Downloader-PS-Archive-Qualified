@@ -26,6 +26,8 @@
 #include <QFileDialog>
 #include <QClipboard>
 #include <QMetaObject>
+#include <QSaveFile>
+#include <QMessageBox>
 
 playlistdownloader::playlistdownloader( Context& ctx ) :
 	m_ctx( ctx ),
@@ -1582,7 +1584,12 @@ void playlistdownloader::subscription::add( const QString& uiName,const QString&
 
 	m_table.selectLast() ;
 
-	this->save() ;
+	if( !this->save() ){
+
+		QMessageBox::warning( &m_ui,
+				      QObject::tr( "Save Failed" ),
+				      QObject::tr( "The subscription change could not be saved. The previous file was preserved." ) ) ;
+	}
 }
 
 void playlistdownloader::subscription::remove( int s )
@@ -1590,7 +1597,12 @@ void playlistdownloader::subscription::remove( int s )
 	m_array.removeAt( s ) ;
 	m_table.removeRow( s ) ;
 
-	this->save() ;
+	if( !this->save() ){
+
+		QMessageBox::warning( &m_ui,
+				      QObject::tr( "Save Failed" ),
+				      QObject::tr( "The subscription change could not be saved. The previous file was preserved." ) ) ;
+	}
 }
 
 void playlistdownloader::subscription::setVisible( bool e )
@@ -1652,14 +1664,24 @@ utility::vector< playlistdownloader::subscription::entry > playlistdownloader::s
 	return e ;
 }
 
-void playlistdownloader::subscription::save()
+bool playlistdownloader::subscription::save()
 {
-	QFile f( m_path ) ;
+	QSaveFile f( m_path ) ;
 
-	if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
+	if( !f.open( QIODevice::WriteOnly ) ){
 
-		f.write( QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ) ;
+		return false ;
 	}
+
+	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
+
+	if( f.write( data ) != data.size() ){
+
+		f.cancelWriting() ;
+		return false ;
+	}
+
+	return f.commit() ;
 }
 
 void playlistdownloader::banner::updateProgress( const QString& progress )
