@@ -739,7 +739,7 @@ bool Store::appendHistory(const QString& sourceKey,const QJsonObject& e,QString*
     return appendLine(m_paths.playlistHistoryFile(sourceKey),QJsonDocument(e).toJson(QJsonDocument::Compact),error);
 }
 
-bool Store::updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error)
+bool Store::updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error,const QString& metadataPath)
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
     QString stateError;auto items=loadCanonicalItems(&stateError);
@@ -749,6 +749,14 @@ bool Store::updateRepresentation(const QString& itemKey,const QString& kind,cons
             if(kind=="video") item.video=representation;
             else if(kind=="audio") item.audio=representation;
             else { if(error) *error="Unknown representation kind"; return false; }
+            if(!metadataPath.isEmpty()){
+                if(!m_paths.isSafeRelative(metadataPath)||!metadataPath.startsWith("Metadata/"))
+                    return detail::reject(error,"Unsafe metadata path");
+                const auto absoluteMetadata=m_paths.absoluteFromRelative(metadataPath);
+                if(absoluteMetadata.isEmpty()||!detail::noLinks(absoluteMetadata)||!QFileInfo(absoluteMetadata).isDir())
+                    return detail::reject(error,"Missing or linked metadata directory");
+                item.metadataPath=metadataPath;
+            }
             if(item.video.state=="complete"&&item.audio.state=="complete") item.recoveryStatus="not_required";
             else if(isUnavailable(item.availability)) item.recoveryStatus="unrecovered";
             return saveCanonicalItems(items,error);
@@ -1455,8 +1463,19 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     }
     if(!verify.ok) return fail("Video verification failed: "+verify.errors.join("; "),rel);
     if(!writeMediaBinding(rel,item,"video",error))return false;
+    QString metadataPath;
+    const auto metadataRoot=Paths(m_config.archiveRoot).metadata();
+    for(const auto& info:QDir(metadataRoot).entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
+        if(info.fileName().contains("["+item.providerId+"]")&&detail::noLinks(info.absoluteFilePath())){
+            const auto candidate="Metadata/"+info.fileName();
+            if(Paths(m_config.archiveRoot).isSafeRelative(candidate)){
+                metadataPath=candidate;
+                break;
+            }
+        }
+    }
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
-    if(!m_store.updateRepresentation(item.key,"video",done,error))return false;
+    if(!m_store.updateRepresentation(item.key,"video",done,error,metadataPath))return false;
     m_logger.event("INFO","verification","video_complete",{{"item_key",item.key},{"path",rel}});
     return true;
 }
