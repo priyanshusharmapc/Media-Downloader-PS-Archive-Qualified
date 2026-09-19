@@ -136,6 +136,12 @@ private:
 
 	int m_networkRunning = 0 ;
 
+	// Row materialization is distinct from network-request accounting. Every
+	// accepted media item increments this counter until networkData() has
+	// actually inserted its table row, including no-thumbnail synthetic paths.
+	int m_pendingRowMaterializations = 0 ;
+	bool m_autoDownloadAfterMaterialization = false ;
+
 	utility::Terminator m_terminator ;
 
 	QPixmap m_defaultVideoThumbnailIcon ;
