@@ -12,7 +12,9 @@ body=source[start:end]
 
 assert 'QRegularExpression("(?im)^\\\\s*ERROR:")' in body
 assert '(?:ERROR|WARNING)' not in body
-assert "s.complete=!transient && !malformed && !truncated && !reportedError && exitCode==0" in body
+assert "incompleteWarning" in body
+assert "WARNING:" in body and "incomplete" in body and "truncat" in body
+assert "s.complete=!transient && !malformed && !truncated && !reportedError && !incompleteWarning && exitCode==0" in body
 assert "playlist_count" in body and "n_entries" in body
 assert "source.key" in body and 'root.value("id")' in body
 
