@@ -23,3 +23,10 @@ assert 'metadataPath="Metadata/"+info.fileName()' in video
 assert 'updateRepresentation(item.key,"video",done,error,metadataPath)' in video
 
 print("Canonical metadata linkage policy: PASS")
+
+# Persisted linkage is validated again on reopen, not only when first assigned.
+safety=(root/"src/archive/archivesafety.h").read_text(encoding="utf-8")
+assert 'metadataPath.startsWith("Metadata/")' in safety
+assert '"Invalid canonical metadata path"' in safety
+assert 'Canonical item metadata directory is missing or linked' in cpp
+assert 'QFileInfo(absolute).isDir()' in cpp
