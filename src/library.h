@@ -84,6 +84,11 @@ private:
 	} ;
 	void deleteEntries( library::iter ) ;
 	bool hasMultipleSelections() ;
+	void capturePendingRows( const std::vector< int >& ) ;
+	void capturePendingRow( int ) ;
+	void capturePendingDirectory() ;
+	std::vector< int > pendingRows() ;
+	void clearPendingAction() ;
 	bool deletePath( const QString& ) ;
 	void setRenameUiVisible( bool ) ;
 	void renameFile( int ) ;
@@ -103,6 +108,10 @@ private:
 	tableMiniWidget< directoryEntries::ICON,2 > m_table ;
 	QString m_downloadFolder ;
 	QString m_currentPath ;
+	// Confirmation actions are bound to this immutable view/identity snapshot,
+	// never to the table's mutable current row at confirmation time.
+	QString m_pendingActionDirectory ;
+	QStringList m_pendingActionNames ;
 	QPixmap m_folderIcon ;
 	QPixmap m_videoIcon ;
 	directoryEntries m_directoryEntries ;
