@@ -124,7 +124,12 @@ namespace utils
 				m_exec( [ this ](){ this->run() ; } ),
 				m_lockFile( m_info.socketPath + ".lock" )
 			{
-				m_lockFile.lock() ;
+				m_lockOwned = m_lockFile.lock() ;
+				if( !m_lockOwned ){
+					std::cerr << "Failed to acquire single-instance startup lock: "
+						  << m_lockFile.error() << std::endl ;
+					m_info.app.exit( 1 ) ;
+				}
 			}
 			~oneinstance()
 			{
@@ -141,6 +146,8 @@ namespace utils
 		private:
 			void run()
 			{
+				if( !m_lockOwned )return ;
+
 				if( QFile::exists( m_info.socketPath ) ){
 
 					QObject::connect( &m_localSocket,&QLocalSocket::connected,[ this ](){
@@ -219,6 +226,7 @@ namespace utils
 			InstanceArgs m_iargs ;
 			details::exec m_exec ;
 			QLockFile m_lockFile ;
+			bool m_lockOwned = false ;
 		} ;
 
 		class AppTypeInterface
