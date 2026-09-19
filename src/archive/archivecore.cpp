@@ -623,6 +623,61 @@ bool validateStoreGraph(const Paths& paths,const QJsonArray& sources,const QJson
 }
 }
 
+namespace
+{
+bool verifyAcceptedEvidence(const Paths& paths,QString* error)
+{
+    const QDir accepted(paths.importsAccepted());
+    for(const auto& packageName:accepted.entryList(QDir::Dirs|QDir::NoDotAndDotDot)){
+        if(!detail::sourceKeySafe(packageName))
+            return detail::reject(error,"Unsafe Accepted recovery package name: "+packageName);
+
+        const auto packageDir=accepted.filePath(packageName);
+        if(!detail::noLinks(packageDir))
+            return detail::reject(error,"Accepted recovery package is linked: "+packageName);
+
+        QByteArray receiptBytes;
+        const auto receiptPath=QDir(packageDir).filePath("receipt.json");
+        if(!detail::readBytes(receiptPath,&receiptBytes,error))return false;
+
+        QString parseError;
+        const auto receiptDoc=parseJson(receiptBytes,&parseError);
+        if(!receiptDoc.isObject())
+            return detail::reject(error,"Invalid Accepted receipt for "+packageName+": "+parseError);
+
+        const auto receipt=receiptDoc.object();
+        if(receipt.value("package_id").toString()!=packageName)
+            return detail::reject(error,"Accepted receipt package identity mismatch: "+packageName);
+        if(!receipt.value("file_sha256").isObject())
+            return detail::reject(error,"Accepted receipt is missing file hashes: "+packageName);
+
+        const auto expected=receipt.value("file_sha256").toObject();
+        QSet<QString> observed;
+        QDirIterator files(packageDir,QDir::Files|QDir::Hidden,QDirIterator::Subdirectories);
+        while(files.hasNext()){
+            const auto file=files.next();
+            const auto rel=QDir(packageDir).relativeFilePath(file);
+            if(rel=="receipt.json")continue;
+            if(!detail::relativeSafe(rel)||!detail::noLinks(file))
+                return detail::reject(error,"Unsafe file in Accepted recovery package: "+packageName+"/"+rel);
+            observed.insert(rel);
+            if(!expected.contains(rel)||!expected.value(rel).isString())
+                return detail::reject(error,"Unrecorded file in Accepted recovery package: "+packageName+"/"+rel);
+            const auto digest=detail::fileDigest(file,error);
+            if(digest.isEmpty())return false;
+            if(digest!=expected.value(rel).toString())
+                return detail::reject(error,"Accepted recovery evidence hash mismatch: "+packageName+"/"+rel);
+        }
+
+        for(auto it=expected.begin();it!=expected.end();++it){
+            if(!observed.contains(it.key()))
+                return detail::reject(error,"Accepted recovery evidence file is missing: "+packageName+"/"+it.key());
+        }
+    }
+    return true;
+}
+}
+
 bool Store::initialize(QString* error,bool recoverStaleRunning)
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
@@ -653,6 +708,7 @@ bool Store::initialize(QString* error,bool recoverStaleRunning)
     }
 
     if(!validateStoreGraph(m_paths,sourcesArray,canonicalArray,error))return false;
+    if(!verifyAcceptedEvidence(m_paths,error))return false;
 
     if(recoverStaleRunning){
         // A persisted "running" state is a lease owned by the process that held
