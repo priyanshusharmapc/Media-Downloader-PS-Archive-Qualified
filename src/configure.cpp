@@ -147,23 +147,23 @@ configure::configure( const Context& ctx ) :
 		this->setVisibilityEditConfigFeature( false ) ;
 	} ) ;
 
-	connect( m_ui.pbOpenThemeFolder,&QPushButton::clicked,[ themesFolderPath ](){
+	connect( m_ui.pbOpenThemeFolder,&QPushButton::clicked,[ this,themesFolderPath ](){
 
-		QDesktopServices::openUrl( QUrl( "file:///" + themesFolderPath,QUrl::TolerantMode ) ) ;
+		m_settings.openUrl( themesFolderPath ) ;
 	} ) ;
 
 	connect( m_ui.pbOpenBinFolder,&QPushButton::clicked,[ this,themesFolderPath ](){
 
 		const auto& m = m_engines.engineDirPaths().binPath() ;
 
-		QDesktopServices::openUrl( QUrl( "file:///" + m,QUrl::TolerantMode ) ) ;
+		m_settings.openUrl( m ) ;
 	} ) ;
 
 	connect( m_ui.pbOpenExtensionFolder,&QPushButton::clicked,[ this,themesFolderPath ](){
 
 		const auto& m = m_engines.engineDirPaths().enginePath() ;
 
-		QDesktopServices::openUrl( QUrl( "file:///" + m,QUrl::TolerantMode ) ) ;
+		m_settings.openUrl( m ) ;
 	} ) ;
 
 	class scaleUi
