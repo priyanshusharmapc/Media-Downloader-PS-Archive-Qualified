@@ -11,6 +11,7 @@ param(
     [Parameter(Mandatory=$true)][string]$ExpectedCommit,
     [Parameter(Mandatory=$true)][string]$ExpectedCiRun,
     [string[]]$AllowedOverlayPath = @(),
+    [string[]]$AllowedOverlaySha256 = @(),
     [switch]$SkipPreflight,
     [string]$OutputJson
 )
@@ -43,13 +44,23 @@ function Assert-PackageSeal([string]$path){
     return [ordered]@{root=$path;commit=$identity.commit;ciRunId=[string]$identity.run_id;manifestEntries=$entries.Count;manifestSha256=(Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant();unsealed=$unsealed;entries=$entries}
 }
 
-function Assert-ExecutionPackage([string]$base,[string]$execution,$seal,[string[]]$allowedOverlay){
-    # The sealed manifest is authoritative for every byte it names. An overlay
-    # may add declared test-fixture files, but it may never replace or suppress
-    # validation of a sealed runtime file such as archive-cli.exe or FFmpeg.
+function Assert-ExecutionPackage([string]$base,[string]$execution,$seal,[string[]]$allowedOverlay,[string[]]$allowedOverlaySha256){
+    # Every sealed file remains immutable. Overlay additions require both an
+    # explicit relative path and an independently supplied SHA-256 digest.
     $listed=@{}
     foreach($entry in $seal.entries){
         $listed[[string]$entry.Path]=[string]$entry.Expected
+    }
+
+    $overlayHashes=@{}
+    foreach($spec in $allowedOverlaySha256){
+        if([string]::IsNullOrWhiteSpace($spec)){continue}
+        $separator=$spec.LastIndexOf('=')
+        if($separator -le 0){throw "Overlay SHA-256 must use relative/path=<sha256>: $spec"}
+        $relative=$spec.Substring(0,$separator).Replace('\','/').TrimStart('/')
+        $expected=$spec.Substring($separator+1).ToLowerInvariant()
+        if($expected -notmatch '^[0-9a-f]{64}$'){throw "Invalid overlay SHA-256 for $relative"}
+        $overlayHashes[$relative]=$expected
     }
 
     $allowed=@{}
@@ -57,10 +68,12 @@ function Assert-ExecutionPackage([string]$base,[string]$execution,$seal,[string[
         if([string]::IsNullOrWhiteSpace($item)){continue}
         $relative=$item.Replace('\','/').TrimStart('/')
         if($relative.Contains('../') -or $relative -eq '..'){throw "Unsafe allowed overlay path: $item"}
-        if($listed.ContainsKey($relative)){
-            throw "Allowed overlay cannot replace sealed package path: $relative"
-        }
+        if($listed.ContainsKey($relative)){throw "Allowed overlay cannot replace sealed package path: $relative"}
+        if(!$overlayHashes.ContainsKey($relative)){throw "Allowed overlay is missing expected SHA-256: $relative"}
         $allowed[$relative]=$true
+    }
+    foreach($relative in $overlayHashes.Keys){
+        if(!$allowed.ContainsKey($relative)){throw "Overlay SHA-256 supplied for undeclared path: $relative"}
     }
 
     $differences=@()
@@ -73,6 +86,16 @@ function Assert-ExecutionPackage([string]$base,[string]$execution,$seal,[string[
         }
         $actual=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
         if($actual -ne [string]$entry.Expected){$differences+="modified:$relative"}
+    }
+
+    foreach($relative in $allowed.Keys){
+        $file=Join-Path $execution ($relative.Replace('/','\'))
+        if(!(Test-Path -LiteralPath $file -PathType Leaf)){
+            $differences+="missing-overlay:$relative"
+            continue
+        }
+        $actual=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        if($actual -ne [string]$overlayHashes[$relative]){$differences+="overlay-hash-mismatch:$relative"}
     }
 
     foreach($file in Get-ChildItem -LiteralPath $execution -Recurse -File -Force){
@@ -97,13 +120,14 @@ function Assert-ExecutionPackage([string]$base,[string]$execution,$seal,[string[
     return [ordered]@{
         root=$execution
         allowedOverlay=@($allowed.Keys | Sort-Object)
+        overlaySha256=$overlayHashes
         expectedArchiveCliSha256=$expectedCli
         archiveCliSha256=$actualCli
     }
 }
 
 $packageSeal=Assert-PackageSeal $basePackage
-$executionSeal=Assert-ExecutionPackage $basePackage ([IO.Path]::GetFullPath($PackageRoot)) $packageSeal $AllowedOverlayPath
+$executionSeal=Assert-ExecutionPackage $basePackage ([IO.Path]::GetFullPath($PackageRoot)) $packageSeal $AllowedOverlayPath $AllowedOverlaySha256
 $packageFfmpeg=Join-Path $PackageRoot '3rdParty\ffmpeg\bin'
 if(Test-Path -LiteralPath $packageFfmpeg -PathType Container){$env:PATH=$packageFfmpeg+';'+$env:PATH}
 
