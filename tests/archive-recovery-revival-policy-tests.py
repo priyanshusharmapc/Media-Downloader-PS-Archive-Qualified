@@ -8,7 +8,9 @@ p.add_argument("--source-root",required=True,type=Path)
 source=(p.parse_args().source_root/"src/archive/archivecore.cpp").read_text(encoding="utf-8")
 
 assert "bool isSourceAccessible" in source
-assert 'availability!="unknown"' in source
+accessible=source[source.index("bool isSourceAccessible"):source.index("void updateRecoveryStatus")]
+assert 'return availability=="public"' in accessible
+assert 'availability!="unknown"' not in accessible
 assert "void updateRecoveryStatus(CanonicalItem& item)" in source
 assert 'item.recoveryStatus="unrecovered"' in source
 assert 'item.recoveryStatus="not_required"' in source
