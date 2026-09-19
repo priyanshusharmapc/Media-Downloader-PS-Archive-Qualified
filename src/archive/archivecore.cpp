@@ -619,7 +619,48 @@ QVector<PlaylistItem> Store::loadPlaylistItems(const QString& sourceKey,QString*
 {
     if(!detail::sourceKeySafe(sourceKey)){detail::reject(error,"Invalid source key");return {};}
     SyncLock lock(m_paths);if(!lock.tryLock()){detail::reject(error,lock.errorString());return {};}
-    QJsonArray a;QVector<PlaylistItem> out;if(!detail::readArray(m_paths.playlistItemsFile(sourceKey),"playlist",&a,error,true))return out;
+    const auto path=m_paths.playlistItemsFile(sourceKey);
+    QJsonArray a;QVector<PlaylistItem> out;
+    if(!detail::readArray(path,"playlist",&a,error,true)){
+        // Compatibility is intentionally narrow: the only supported legacy
+        // playlist shape is one where every otherwise-valid row predates
+        // entry_key. Mixed old/new rows or duplicate current identities are
+        // ambiguous corruption and must remain untouched.
+        QByteArray bytes;QString legacyError;
+        if(!detail::readBytes(path,&bytes,&legacyError))return out;
+        QJsonParseError pe;const auto doc=QJsonDocument::fromJson(bytes,&pe);
+        if(pe.error!=QJsonParseError::NoError||!doc.isArray())return out;
+        auto legacy=doc.array();
+        if(legacy.isEmpty())return out;
+        for(const auto& value:legacy){
+            if(!value.isObject()||!value.toObject().value("entry_key").toString().isEmpty())return out;
+        }
+        QHash<QString,int> ordinals;
+        for(int i=0;i<legacy.size();++i){
+            auto row=legacy[i].toObject();
+            const auto itemKey=row.value("item_key").toString();
+            if(itemKey.isEmpty())return out;
+            row["entry_key"]=itemKey+"#"+QString::number(++ordinals[itemKey]);
+            legacy[i]=row;
+        }
+        QString shapeError;
+        if(!detail::arrayShape(legacy,"playlist",&shapeError))return out;
+
+        QByteArray history;
+        const auto historyPath=m_paths.playlistHistoryFile(sourceKey);
+        if(QFileInfo::exists(historyPath)){
+            if(!detail::readBytes(historyPath,&history,&legacyError)||!detail::historyValid(history,&legacyError))return out;
+        }
+        history+=QJsonDocument(historyEvent("playlist_entry_key_migrated","",{
+            {"source_key",sourceKey},{"rows",legacy.size()},{"method","item_key_ordinal"}})).toJson(QJsonDocument::Compact)+"\n";
+        if(!detail::commitTransaction(m_paths.root(),{
+            {"Playlists/"+sourceKey+"/items.json",QJsonDocument(legacy).toJson()},
+            {"Playlists/"+sourceKey+"/history.jsonl",history}},&legacyError)){
+            detail::reject(error,legacyError);return out;
+        }
+        a=legacy;
+        if(error)error->clear();
+    }
     for(const auto& e:a)out.append(playlistItemFromJson(e.toObject()));return out;
 }
 bool Store::savePlaylistItems(const QString& sourceKey,const QVector<PlaylistItem>& items,QString* error) const
@@ -701,8 +742,9 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
     QHash<QString,QVector<int>> priorPlaceholders;
     QHash<QString,int> priorOccurrences;
     for(int i=0;i<prior.size();++i){
-        const int ordinal=++priorOccurrences[prior[i].itemKey];
-        if(prior[i].entryKey.isEmpty())prior[i].entryKey=prior[i].itemKey+"#"+QString::number(ordinal);
+        ++priorOccurrences[prior[i].itemKey];
+        // loadPlaylistItems has already validated or explicitly migrated every
+        // occurrence identity. Never synthesize identities silently here.
         priorIndex[prior[i].entryKey]=i;
         if(prior[i].providerId.isEmpty()&&prior[i].itemKey.startsWith("placeholder:"))
             priorPlaceholders[placeholderFingerprint(source.key,prior[i].title,prior[i].url)].append(i);
