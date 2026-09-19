@@ -1609,7 +1609,10 @@ bool MediaExecutor::syncItems(const QVector<CanonicalItem>& items,const std::fun
     }
 
     bool all=true;
+    QSet<QString> processedKeys;
     for(const auto& item:items){
+        if(processedKeys.contains(item.key))continue;
+        processedKeys.insert(item.key);
         if(shouldStop && shouldStop()){
             all=false;
             if(failures)failures->append("Stopped before all items completed");
