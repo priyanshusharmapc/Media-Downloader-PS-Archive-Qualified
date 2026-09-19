@@ -106,24 +106,38 @@ quickjs::~quickjs()
 
 QString quickjs::namePrefix()
 {
+	const utility::CPU cpu ;
+
+	// Bellard's native OS-specific QuickJS binary archives currently expose
+	// i686/x86_64 naming. ARM64 is packaged separately (Cosmopolitan), so do
+	// not silently install an x86_64 archive as though it were native ARM64.
+	if( cpu.aarch64() ){
+		return {} ;
+	}
+
 	QString platform = utility::platformIsWindows() ? "win" : "linux" ;
-	QString arch     = utility::CPU().x86_32() ? "-i686" : "-x86_64" ;
+	QString arch     = cpu.x86_32() ? "-i686" : "-x86_64" ;
 
 	return "quickjs-" + platform + arch ;
 }
 
 QString quickjs::urlFileName( const QString& version )
 {
-	return this->namePrefix() + "-" + version + ".zip" ;
+	const auto prefix = this->namePrefix() ;
+
+	return prefix.isEmpty() ? QString() : prefix + "-" + version + ".zip" ;
 }
 
 engines::metadata quickjs::parseJsonDataFromGitHub( const QJsonDocument& e )
 {
 	auto version = e.object().value( "version" ).toString() ;
+	const auto prefix = this->namePrefix() ;
 
-	if( !version.isEmpty() && ( utility::platformIsLinux() || utility::platformIsWindows() ) ){
+	if( !version.isEmpty() &&
+	    !prefix.isEmpty() &&
+	    ( utility::platformIsLinux() || utility::platformIsWindows() ) ){
 
-		auto fileName = QString( "%1-%2.zip" ).arg( this->namePrefix(),version ) ;
+		auto fileName = QString( "%1-%2.zip" ).arg( prefix,version ) ;
 		auto url      = "https://bellard.org/quickjs/binary_releases/" + fileName ;
 
 		QJsonObject obj ;
@@ -158,7 +172,9 @@ engines::engine::baseEngine::removeFilesStatus quickjs::removeFiles( const QStri
 
 bool quickjs::foundNetworkUrl( const QString& s )
 {
-	return s.startsWith( this->namePrefix() ) && s.endsWith( ".zip" ) ;
+	const auto prefix = this->namePrefix() ;
+
+	return !prefix.isEmpty() && s.startsWith( prefix ) && s.endsWith( ".zip" ) ;
 }
 
 QString quickjs::parseVersionInfo( const utils::qprocess::outPut& r )
