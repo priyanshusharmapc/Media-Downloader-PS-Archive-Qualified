@@ -469,6 +469,9 @@ private:
 		networkAccess::downloadSpeed speed ;
 		QString filePath ;
 		QString tempPath ;
+		// Archive updates extract here and touch the live engine tree only
+		// during the final rollback-capable promotion.
+		QString updateStagePath ;
 		cmdArgs exeArgs ;
 		class NetworkError
 		{
