@@ -812,24 +812,25 @@ void configure::confirmResetMakeVisible( bool e )
 
 void configure::setCookieSourceLabel( bool e )
 {
-	auto name = m_ui.cbConfigureEngines->currentText() ;
+	const auto name = m_ui.cbConfigureEngines->currentText() ;
+	const auto& engine = m_engines.getEngineByName( name ) ;
+	const auto enable = engine && !engine->cookieArgument().isEmpty() ;
 
+	// This field represents two different per-engine settings. Always reload
+	// the value that corresponds to the active source mode so switching engines
+	// cannot overwrite a valid cookie-file path with the browser-name setting.
 	if( e ){
 
-		auto m = m_settings.cookieBrowserName( name ) ;
-
-		m_ui.lineEditConfigureCookieBrowserName->setText( m ) ;
-
+		m_ui.lineEditConfigureCookieBrowserName->setText( m_settings.cookieBrowserName( name ) ) ;
 		m_ui.labelPathToCookieFile->setText( tr( "Name Of Web Browser To Get Cookies From" ) ) ;
 	}else{
-		auto m = m_settings.cookieBrowserTextFilePath( name ) ;
-
-		m_ui.lineEditConfigureCookieBrowserName->setText( m ) ;
-
+		m_ui.lineEditConfigureCookieBrowserName->setText( m_settings.cookieBrowserTextFilePath( name ) ) ;
 		m_ui.labelPathToCookieFile->setText( tr( "Set Path To Cookie File" ) ) ;
 	}
 
-	m_ui.pbConfigureSetPathToCookieFile->setEnabled( !e ) ;
+	m_ui.lineEditConfigureCookieBrowserName->setEnabled( enable ) ;
+	m_ui.cbCookieSource->setEnabled( enable ) ;
+	m_ui.pbConfigureSetPathToCookieFile->setEnabled( enable && !e ) ;
 }
 
 void configure::downloadExtension( const QString& name )
@@ -1512,14 +1513,9 @@ void configure::setEngineOptions( const QString& e,engineOptions tab )
 
 		auto _setUpDownloadOptions = [ & ](){
 
-			auto enable = !s->cookieArgument().isEmpty() ;
-
-			auto mm = m_settings.cookieBrowserName( s->name() ) ;
-
-			m_ui.lineEditConfigureCookieBrowserName->setText( mm ) ;
-			m_ui.lineEditConfigureCookieBrowserName->setEnabled( enable ) ;
-			m_ui.cbCookieSource->setEnabled( enable ) ;
-			m_ui.pbConfigureSetPathToCookieFile->setEnabled( enable ) ;
+			// Cookie-source refresh owns both the per-engine value and the
+			// source-specific enablement state.
+			this->setCookieSourceLabel( m_ui.cbCookieSource->isChecked() ) ;
 		} ;
 
 		if( tab == engineOptions::url ){
