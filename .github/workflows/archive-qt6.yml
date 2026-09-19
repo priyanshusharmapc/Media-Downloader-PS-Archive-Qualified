@@ -28,6 +28,8 @@ jobs:
           cp /var/cache/apt/archives/*.deb /tmp/qt-toolchain/
           apt-get install -y qt6-base-dev qt6-base-dev-tools
       - uses: actions/checkout@v4
+      - name: Validate qualification publication references
+        run: python3 scripts/validate-qualification-publication.py --source-root .
       - name: Capture source identity and local development inputs
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -322,3 +324,130 @@ jobs:
             build/Testing/Temporary
             gui-settings-test
           if-no-files-found: ignore
+
+  publish-qualification-evidence:
+    name: publish durable qualification evidence
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download same-run qualification artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*${{ github.sha }}*'
+          path: qualification-evidence-input
+
+      - name: Assemble digest-bound evidence bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle="qualification-evidence-${GITHUB_SHA}.zip"
+          manifest="qualification-evidence-manifest-${GITHUB_SHA}.json"
+
+          python3 - "$bundle" <<'PY'
+          from pathlib import Path
+          import sys
+          import zipfile
+
+          root = Path("qualification-evidence-input")
+          out = Path(sys.argv[1])
+          files = sorted(p for p in root.rglob("*") if p.is_file())
+          if not files:
+              raise SystemExit("no same-run qualification artifacts were downloaded")
+          with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+              for path in files:
+                  archive.write(path, path.relative_to(root).as_posix())
+          PY
+
+          bundle_sha="$(sha256sum "$bundle" | awk '{print $1}')"
+          BUNDLE="$bundle" BUNDLE_SHA="$bundle_sha" MANIFEST="$manifest" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          commit = os.environ["GITHUB_SHA"]
+          repository = os.environ["GITHUB_REPOSITORY"]
+          tag = f"qualification-{commit}"
+          manifest = {
+              "schema_version": 1,
+              "repository": repository,
+              "commit": commit,
+              "run_id": os.environ["GITHUB_RUN_ID"],
+              "run_attempt": os.environ["GITHUB_RUN_ATTEMPT"],
+              "release_tag": tag,
+              "release_url": f"https://github.com/{repository}/releases/tag/{tag}",
+              "evidence_bundle": os.environ["BUNDLE"],
+              "evidence_bundle_sha256": os.environ["BUNDLE_SHA"],
+              "retention": "GitHub Release asset; retained until explicit release deletion",
+              "historical_evidence": "Historical local Qualification-Evidence paths are not part of current qualification."
+          }
+          Path(os.environ["MANIFEST"]).write_text(
+              json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+          )
+          PY
+
+          python3 - "$manifest" "$bundle" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          digest = hashlib.sha256(Path(sys.argv[2]).read_bytes()).hexdigest()
+          if digest != manifest["evidence_bundle_sha256"]:
+              raise SystemExit("qualification evidence bundle SHA-256 mismatch")
+          PY
+
+      - name: Publish immutable commit-specific release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="qualification-${GITHUB_SHA}"
+          bundle="qualification-evidence-${GITHUB_SHA}.zip"
+          manifest="qualification-evidence-manifest-${GITHUB_SHA}.json"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+            if ! grep -Fxq "$bundle" <<<"$assets" || ! grep -Fxq "$manifest" <<<"$assets"; then
+              echo "Existing qualification release is incomplete; refusing to mutate an already-published identity." >&2
+              exit 1
+            fi
+
+            mkdir -p existing-qualification
+            gh release download "$tag" --pattern "$bundle" --pattern "$manifest" --dir existing-qualification
+            EXISTING_MANIFEST="existing-qualification/$manifest" EXISTING_BUNDLE="existing-qualification/$bundle" python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          manifest = json.loads(Path(os.environ["EXISTING_MANIFEST"]).read_text(encoding="utf-8"))
+          bundle = Path(os.environ["EXISTING_BUNDLE"])
+          expected_repo = os.environ["GITHUB_REPOSITORY"]
+          expected_commit = os.environ["GITHUB_SHA"]
+          expected_tag = f"qualification-{expected_commit}"
+          if manifest.get("repository") != expected_repo or manifest.get("commit") != expected_commit:
+              raise SystemExit("existing qualification manifest identity mismatch")
+          if manifest.get("release_tag") != expected_tag:
+              raise SystemExit("existing qualification release tag mismatch")
+          actual = hashlib.sha256(bundle.read_bytes()).hexdigest()
+          if actual != manifest.get("evidence_bundle_sha256"):
+              raise SystemExit("qualification evidence bundle SHA-256 mismatch")
+          print("Existing immutable qualification publication verified.")
+          PY
+            exit 0
+          fi
+
+          gh release create "$tag"             --target "$GITHUB_SHA"             --title "Qualification evidence $GITHUB_SHA"             --notes-file docs/qualification/EVIDENCE_POLICY.md
+
+          # No --clobber: an existing asset is an integrity conflict, not a file
+          # to replace. Commit-specific release assets are append-once.
+          gh release upload "$tag" "$bundle" "$manifest"
+
