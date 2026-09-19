@@ -25,6 +25,7 @@
 #include <QUrlQuery>
 
 #include <algorithm>
+#include <limits>
 
 namespace archive
 {
