@@ -1558,6 +1558,9 @@ void batchdownloader::showSubtitles( const QByteArray& e )
 
 			obj.insert( "id",l.name() ) ;
 			obj.insert( "extension",m ) ;
+			// Selection reads "type" to distinguish manual subtitles from
+			// automatic captions. Keep the row discriminator aligned end-to-end.
+			obj.insert( "type",m ) ;
 			obj.insert( "resolution",l.subtitles() ) ;
 			obj.insert( "filesize",title ) ;
 			obj.insert( "info",l.notes() ) ;
