@@ -1576,14 +1576,39 @@ RecoveryImporter::RecoveryImporter(RuntimeConfig c,Store& s,ActivityLogger& l):m
 
 ValidationResult RecoveryImporter::validate(const QString& packageDir) const
 {
+    QByteArray manifestBytes;
+    QString error;
+    if(!detail::readBytes(QDir(packageDir).filePath("manifest.json"),&manifestBytes,&error)){
+        ValidationResult r;r.errors<<error;return r;
+    }
+    return validateSnapshot(packageDir,manifestBytes);
+}
+
+ValidationResult RecoveryImporter::validateSnapshot(const QString& packageDir,const QByteArray& manifestBytes) const
+{
     ValidationResult r;SyncLock lock(m_store.paths());
     if(!lock.tryLock()){r.errors<<lock.errorString();return r;}
     const QFileInfo dirInfo(packageDir);
     if(!dirInfo.isDir()||!detail::noLinks(packageDir)){r.errors<<"Package is not an unlinked directory";return r;}
-    QByteArray bytes;QString pe;
-    if(!detail::readBytes(QDir(packageDir).filePath("manifest.json"),&bytes,&pe)){r.errors<<pe;return r;}
-    if(bytes.size()>1024*1024){r.errors<<"Manifest exceeds the 1 MiB safety limit";return r;}
-    const auto doc=parseJson(bytes,&pe);
+
+    // Validate every descendant without following links. The Recovery Package
+    // boundary applies to unreferenced content too, not only manifest payloads.
+    QDirIterator tree(packageDir,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,QDirIterator::Subdirectories);
+    while(tree.hasNext()){
+        const auto path=tree.next();
+        const QFileInfo info=tree.fileInfo();
+        const auto rel=QDir(packageDir).relativeFilePath(path);
+        if(!detail::relativeSafe(rel)||!detail::noLinks(path)||info.isSymLink()){
+            r.errors<<"Recovery package contains a linked or unsafe entry: "+rel;
+            continue;
+        }
+        if(!info.isFile()&&!info.isDir())
+            r.errors<<"Recovery package contains a special filesystem entry: "+rel;
+    }
+
+    QString pe;
+    if(manifestBytes.size()>1024*1024){r.errors<<"Manifest exceeds the 1 MiB safety limit";return r;}
+    const auto doc=parseJson(manifestBytes,&pe);
     if(!doc.isObject()){r.errors<<("Invalid manifest.json: "+pe);return r;}
     const auto o=doc.object();
     if(o.value("schema_version")!=QJsonValue(1))r.errors<<"schema_version must be the number 1";
@@ -1672,8 +1697,10 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* 
     const auto absolute=QFileInfo(packageDir).absoluteFilePath();
     const auto pending=m_store.paths().importsPending();
     if(QFileInfo(absolute).absolutePath()!=pending||!detail::noLinks(absolute))return detail::reject(error,"Only direct, unlinked Pending packages can be ingested");
-    const auto vr=validate(absolute);if(!vr.ok)return detail::reject(error,vr.errors.join("; "));
-    QByteArray manifestBytes;if(!detail::readBytes(QDir(absolute).filePath("manifest.json"),&manifestBytes,error))return false;
+    QByteArray manifestBytes;
+    if(!detail::readBytes(QDir(absolute).filePath("manifest.json"),&manifestBytes,error))return false;
+    const auto vr=validateSnapshot(absolute,manifestBytes);
+    if(!vr.ok)return detail::reject(error,vr.errors.join("; "));
     const auto manifest=QJsonDocument::fromJson(manifestBytes).object();const auto reps=manifest.value("representations").toObject();
     QString stateError;auto items=m_store.loadCanonicalItems(&stateError);if(!stateError.isEmpty())return detail::reject(error,stateError);
     int index=-1;for(int i=0;i<items.size();++i)if(items[i].key==vr.itemKey){index=i;break;}
