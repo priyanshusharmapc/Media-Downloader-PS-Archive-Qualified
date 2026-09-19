@@ -1319,6 +1319,13 @@ bool playlistdownloader::parseJson( const engines::engine&,
 
 void playlistdownloader::networkResult( utility::MediaEntry media,const utils::network::reply& reply )
 {
+	// This callback exists only for real thumbnail requests, so it owns the
+	// matching decrement. A late completion after Cancel sees the reset zero
+	// and must not drive the counter negative.
+	if( m_networkRunning > 0 ){
+		m_networkRunning-- ;
+	}
+
 	emit this->networkDataSignal( { m_ctx,reply,-1,media.move() } ) ;
 }
 
@@ -1342,7 +1349,6 @@ void playlistdownloader::networkData( utility::networkReply m )
 		this->showEntry( { img,s,m.media() },true ) ;
 	}
 
-	m_networkRunning-- ;
 }
 
 void playlistdownloader::addTextToUi( const QByteArray& data,int index )
