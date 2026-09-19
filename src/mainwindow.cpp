@@ -27,6 +27,7 @@
 #include "translator.h"
 
 #include <csignal>
+#include <iostream>
 #include <QTimer>
 
 MainWindow::MainWindow( QApplication& app,
