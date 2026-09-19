@@ -9,6 +9,8 @@
 #include <QLockFile>
 #include <QPushButton>
 #include <QTabWidget>
+#include <QTableWidget>
+#include <QTextEdit>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -283,6 +285,55 @@ void corruptSettingsArePreserved()
 }
 
 
+void archiveHealthRequiresFreshIntegrityEvidence()
+{
+    Fixture f;archive::Paths paths(f.root);archive::Store store(paths);QString error;
+    require(store.initialize(&error),error);
+    archive::Source source;source.key="PLHEALTH";source.title="Health fixture";
+    source.url="https://www.youtube.com/playlist?list=PLHEALTH";
+    archive::PlaylistItem item;item.itemKey="youtube:abc123DEF45";item.providerId="abc123DEF45";
+    item.title="Health item";item.position=1;item.availability="public";
+    archive::Snapshot snapshot;snapshot.sourceKey=source.key;snapshot.complete=true;snapshot.items={item};
+    require(store.reconcile(source,snapshot).committed,"seed archive health fixture");
+
+    const QString videoRel="Video/health [abc123DEF45].mp4";
+    const QString audioRel="Audio/health [abc123DEF45].m4a";
+    const auto videoAbs=paths.absoluteFromRelative(videoRel),audioAbs=paths.absoluteFromRelative(audioRel);
+    put(videoAbs,"video-bytes");put(audioAbs,"audio-bytes");
+    auto verifiedAfterFiles=QDateTime::currentDateTimeUtc().addSecs(2).toString(Qt::ISODateWithMs);
+    archive::Representation video;video.state="complete";video.path=videoRel;video.origin="automatic_download";video.verifiedAt=verifiedAfterFiles;
+    archive::Representation audio;audio.state="complete";audio.path=audioRel;audio.origin="automatic_download";audio.verifiedAt=verifiedAfterFiles;
+    require(store.updateRepresentation(item.itemKey,"video",video,&error),error);
+    require(store.updateRepresentation(item.itemKey,"audio",audio,&error),error);
+    require(archive::ui::persistRoot(f.root),"select GUI health fixture root");
+
+    QTabWidget host;ArchiveTab tab(host);tab.init_done();
+    auto* table=host.findChild<QTableWidget*>();require(table&&table->rowCount()==1,"Archive health table missing fixture row");
+    require(table->item(0,5)&&table->item(0,5)->text()=="Protected","Fresh verified media did not show Protected");
+
+    require(QFile::remove(videoAbs),"Cannot delete verified video fixture");
+    tab.tabEntered();
+    require(table->item(0,5)->text()=="Missing","MDPS-AUDIT2-019: deleted completed media still shows Protected");
+    table->setCurrentCell(0,0);QCoreApplication::processEvents();
+    for(auto* text:host.findChildren<QTextEdit*>())
+        require(!text->toPlainText().contains("Video present: Yes"),"MDPS-AUDIT2-019: details still claim deleted video is present");
+
+    put(videoAbs,"video-bytes");
+    verifiedAfterFiles=QDateTime::currentDateTimeUtc().addSecs(2).toString(Qt::ISODateWithMs);
+    video.verifiedAt=verifiedAfterFiles;require(store.updateRepresentation(item.itemKey,"video",video,&error),error);
+    tab.tabEntered();require(table->item(0,5)->text()=="Protected","Restored freshly verified media did not recover Protected state");
+
+    QFile changed(videoAbs);require(changed.open(QIODevice::Append),"Cannot reopen video for corruption fixture");
+    require(changed.write("corruption")>0&&changed.flush(),"Cannot mutate video fixture");
+    require(changed.setFileTime(QDateTime::currentDateTimeUtc().addSecs(10),QFileDevice::FileModificationTime),"Cannot advance corruption timestamp");
+    changed.close();
+    tab.tabEntered();
+    require(table->item(0,5)->text()=="Verification Stale","MDPS-AUDIT2-019: modified completed media still shows Protected");
+    table->setCurrentCell(0,0);QCoreApplication::processEvents();bool sawStale=false;
+    for(auto* text:host.findChildren<QTextEdit*>())if(text->toPlainText().contains("Video integrity: Verification stale"))sawStale=true;
+    require(sawStale,"Details do not distinguish persisted completion from stale integrity evidence");
+}
+
 void acceptedRecoveryWithReportWarning()
 {
     Fixture f;
@@ -362,6 +413,7 @@ int main(int argc,char** argv)
     run("unusable-settings-no-switch",unusableSettingsDestinationDoesNotSwitch);
     run("legacy-and-unrelated-settings",validLegacyAndUnrelatedSettingsSurvive);
     run("corrupt-settings-preserved",corruptSettingsArePreserved);
+    run("archive-health-fresh-integrity",archiveHealthRequiresFreshIntegrityEvidence);
     run("accepted-recovery-report-warning",acceptedRecoveryWithReportWarning);
     qputenv("ARCHIVE_TEST_CONFIG_ROOT",originalConfig);
     return failures?1:0;
