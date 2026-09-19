@@ -184,6 +184,11 @@ configure::configure( const Context& ctx ) :
 			auto s = m_parent.m_settings.highDpiScalingFactorValue() ;
 
 			auto interval = m_parent.m_settings.highDpiScalingFactorInterval() ;
+			constexpr double minimumScaleFactor = 0.05 ;
+
+			if( interval <= 0.0 ){
+				interval = minimumScaleFactor ;
+			}
 
 			if( m_action == scaleUi::action::up ){
 
@@ -194,6 +199,10 @@ configure::configure( const Context& ctx ) :
 				s -= interval ;
 			}else{
 				s = 1.0 ;
+			}
+
+			if( s < minimumScaleFactor ){
+				s = minimumScaleFactor ;
 			}
 
 			auto m = QString::number( s ) ;
