@@ -1,0 +1,17 @@
+"""Regression policy for MDPS-AUDIT2-060 single-instance listener binding."""
+from __future__ import annotations
+import argparse
+from pathlib import Path
+
+p=argparse.ArgumentParser()
+p.add_argument("--source-root",required=True,type=Path)
+source=(p.parse_args().source_root/"src/utils/single_instance.hpp").read_text(encoding="utf-8")
+start=source.index("void start()")
+end=source.index("QLocalServer m_localServer",start)
+body=source[start:end]
+
+assert "if( !m_localServer.listen( m_info.socketPath ) )" in body
+assert "m_info.app.exit( 1 )" in body
+assert body.index("m_localServer.listen") < body.index("m_mainApp = std::make_unique")
+assert body.index("m_mainApp->start") < body.index("m_lockFile.unlock")
+print("Single-instance listener binding policy: PASS")
