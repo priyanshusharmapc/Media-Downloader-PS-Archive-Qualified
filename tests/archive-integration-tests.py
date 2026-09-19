@@ -243,6 +243,31 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertTrue(self.first()['video']['path'].endswith('.mp4'))
         self.command('verify-item', VIDEO_URL)
 
+    def test_unavailable_media_is_durably_blocked_then_recovers(self):
+        self.plan['discovery']['entries'][0]['availability'] = 'deleted'
+        self.write_plan()
+        self.scan()
+        before_calls = (self.base / 'calls.jsonl').read_bytes() if (self.base / 'calls.jsonl').exists() else b''
+        failed = self.command('sync-item', VIDEO_URL, expect=1)
+        item = self.first()
+        self.assertEqual(item['video']['state'], 'blocked_unavailable')
+        self.assertEqual(item['audio']['state'], 'blocked_unavailable')
+        self.assertIn('external recovery required', item['video']['error'])
+        self.assertIn('external recovery required', item['audio']['error'])
+        after_calls = (self.base / 'calls.jsonl').read_bytes() if (self.base / 'calls.jsonl').exists() else b''
+        self.assertEqual(before_calls, after_calls, 'unavailable source invoked downloader')
+        self.assertIn('source is unavailable', failed.stderr)
+
+        # When discovery later proves availability again, the normal sync path
+        # is reachable from blocked_unavailable and clears the blocking state.
+        self.plan['discovery']['entries'][0]['availability'] = 'public'
+        self.write_plan()
+        self.scan()
+        self.command('sync-item', VIDEO_URL)
+        item = self.first()
+        self.assertEqual(item['video']['state'], 'complete')
+        self.assertEqual(item['audio']['state'], 'complete')
+
     def test_missing_complete_media_cannot_report_pass(self):
         self.scan()
         self.command('sync-item', VIDEO_URL)

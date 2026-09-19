@@ -520,10 +520,10 @@ QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool do
         if(!doDownloads){postOperationProgress(tr("Source complete"),tr("%1 scanned successfully").arg(sourceName),sourceIndex,sources.size(),totalFailures);continue;}
 
         auto playlist=store.loadPlaylistItems(source.key);auto canonical=store.loadCanonicalItems();QHash<QString,archive::CanonicalItem> map;for(const auto& c:canonical)map[c.key]=c;
-        int eligible=0;for(const auto& p:playlist){if(p.membership!="active"||!map.contains(p.itemKey))continue;const auto c=map[p.itemKey];if(p.availability!="public"&&c.video.state!="complete"&&c.audio.state!="complete")continue;++eligible;}
+        int eligible=0;for(const auto& p:playlist){if(p.membership!="active"||!map.contains(p.itemKey))continue;++eligible;}
         int itemIndex=0;
         for(const auto& p:playlist){
-            if(m_stopRequested.load())break;if(p.membership!="active"||!map.contains(p.itemKey))continue;auto c=map[p.itemKey];if(p.availability!="public"&&c.video.state!="complete"&&c.audio.state!="complete")continue;++itemIndex;
+            if(m_stopRequested.load())break;if(p.membership!="active"||!map.contains(p.itemKey))continue;auto c=map[p.itemKey];++itemIndex;
             const auto itemName=p.title.isEmpty()?p.itemKey:p.title;postOperationProgress(tr("Media sync + verify + commit"),tr("%1 | source %2/%3 | item %4/%5").arg(itemName).arg(sourceIndex).arg(sources.size()).arg(itemIndex).arg(eligible),itemIndex-1,eligible,totalFailures);
             archive::MediaExecutor executor(runtimeConfig(),store,logger);QString e;if(executor.syncItem(c,true,true,&e))++totalDownloaded;else{++totalFailures;failures<<p.itemKey+": "+e;}
             postOperationProgress(tr("Media sync + verify + commit"),tr("Processed %1/%2 for %3").arg(itemIndex).arg(eligible).arg(sourceName),itemIndex,eligible,totalFailures);

@@ -173,7 +173,10 @@ class Store
 public:
     explicit Store(Paths paths);
     const Paths& paths() const;
-    bool initialize(QString* error = nullptr);
+    // recoverStaleRunning is true only at an operation boundary that has
+    // exclusive ownership of a newly acquired Archive lock. Nested operations
+    // must pass false so a live worker can never be relabelled as interrupted.
+    bool initialize(QString* error = nullptr,bool recoverStaleRunning = true);
     QVector<Source> loadSources(QString* error = nullptr) const;
     bool saveSources(const QVector<Source>& sources,QString* error = nullptr) const;
     QVector<CanonicalItem> loadCanonicalItems(QString* error = nullptr) const;
@@ -282,10 +285,14 @@ public:
     bool tryLock(int timeoutMs = 0);
     void unlock();
     QString errorString() const;
+    // True only when this SyncLock created the process/file lock rather than
+    // joining a same-thread lock already owned by a surrounding operation.
+    bool acquiredFreshly() const;
 private:
     Paths m_paths;
     std::shared_ptr<ArchiveLockState> m_lock;
     QString m_error;
+    bool m_acquiredFreshly = false;
 };
 
 QString videoIdFromUrl(const QString& url);

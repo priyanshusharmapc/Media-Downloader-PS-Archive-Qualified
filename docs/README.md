@@ -92,3 +92,10 @@ membership handling for suspect responses.
 [Transaction outcomes and projection repair](remediation/025.md) documents
 accurate accepted counts, separate post-commit warnings, CLI exit codes, and
 non-destructive report-only recovery.
+
+
+## Restart and unavailable representation states
+
+[Representation restart recovery](remediation/007.md) documents how stale
+`running` leases become `interrupted` only at a fresh Archive operation
+boundary, and how unavailable media becomes durably `blocked_unavailable`.
