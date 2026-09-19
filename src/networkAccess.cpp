@@ -1009,7 +1009,7 @@ QString networkAccess::downloadSpeed::calculate( const utils::network::progress&
 		}
 	}
 
-	if( totalSize == 0 ){
+	if( totalSize <= 0 ){
 
 		auto current = m_locale.formattedDataSize( received ) ;
 
