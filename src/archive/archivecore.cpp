@@ -1004,11 +1004,22 @@ ToolResolver::ToolResolver(RuntimeConfig config):m_config(std::move(config)){}
 
 QString ToolResolver::find(const QStringList& names,const QStringList& relativeCandidates) const
 {
+    // Package candidates are the qualification trust boundary. A same-named
+    // executable on PATH must never silently replace missing/quarantined sealed
+    // bytes during normal Archive execution.
     for(const auto& rel:relativeCandidates){
         const auto p=QDir(m_config.appDir).filePath(rel);
-        if(QFileInfo(p).exists() && QFileInfo(p).isFile() && QFileInfo(p).isExecutable()) return QDir::cleanPath(p);
+        const QFileInfo info(p);
+        if(info.exists()&&info.isFile()&&info.isExecutable()&&detail::noLinks(p))
+            return QDir::cleanPath(p);
     }
-    for(const auto& name:names){ const auto p=QStandardPaths::findExecutable(name); if(!p.isEmpty()) return p; }
+    if(!m_config.allowSystemTools)return {};
+    // Explicit development/system-tool mode is intentionally outside the
+    // qualified portable boundary and must be requested by the caller.
+    for(const auto& name:names){
+        const auto p=QStandardPaths::findExecutable(name);
+        if(!p.isEmpty())return p;
+    }
     return {};
 }
 
