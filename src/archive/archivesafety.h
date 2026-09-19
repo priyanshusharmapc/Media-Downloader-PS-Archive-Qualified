@@ -101,9 +101,18 @@ inline bool arrayShape(const QJsonArray& array,const QString& kind,QString* erro
         const auto o=entry.toObject();const QString key=o.value(kind=="playlist"?"item_key":"key").toString();
         if(key.isEmpty())return reject(error,kind+" contains an empty identity");
         const QString unique=kind=="source"?key.toCaseFolded():key;
-        // A playlist can contain repeated occurrences of the same video.
-        if(kind!="playlist" && keys.contains(unique))return reject(error,kind+" contains a duplicate identity: "+key);
-        keys.insert(unique);
+        // A playlist can contain repeated videos, but each occurrence must still
+        // have its own stable identity. Reconciliation indexes by entry_key, so
+        // accepting an empty or duplicate value would collapse historical rows.
+        if(kind=="playlist"){
+            const QString entryKey=o.value("entry_key").toString();
+            if(entryKey.isEmpty())return reject(error,"playlist contains an empty occurrence identity");
+            if(keys.contains(entryKey))return reject(error,"playlist contains a duplicate occurrence identity: "+entryKey);
+            keys.insert(entryKey);
+        }else{
+            if(keys.contains(unique))return reject(error,kind+" contains a duplicate identity: "+key);
+            keys.insert(unique);
+        }
         if(kind=="source"){
             if(!sourceKeySafe(key)||o.value("url").toString().isEmpty())return reject(error,"Invalid source identity or URL");
         }else{

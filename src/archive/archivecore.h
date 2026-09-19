@@ -19,6 +19,9 @@ struct RuntimeConfig
 {
     QString archiveRoot;
     QString appDir;
+    // Qualified/default execution is sealed to package-owned tools. System PATH
+    // is available only to callers that explicitly opt into development mode.
+    bool allowSystemTools = false;
 };
 
 struct Representation
