@@ -21,3 +21,9 @@ assert "QTimer" in cpp
 assert "this->quitApp()" in cpp[cpp.index("signalTimer"):cpp.index("signalTimer->start()")+40]
 assert "static volatile std::sig_atomic_t m_signalPending" in hdr
 print("Signal-safe shutdown handoff policy: PASS")
+
+# Handler installation itself is checked, so graceful-shutdown support cannot
+# silently disappear when std::signal rejects a registration.
+assert "std::signal( sig,MainWindow::signalHandler ) != SIG_ERR" in cpp
+assert "if( !MainWindow::setUpSignal( SIGTERM,SIGINT ) )" in cpp
+assert "static bool setUpSignal( int )" in hdr
