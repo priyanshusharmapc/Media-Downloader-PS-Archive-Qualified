@@ -66,7 +66,7 @@ private:
 	void processEventSlot( const QByteArray& ) ;
 
 	static void signalHandler( int ) ;
-	static void setUpSignal( int ) ;
+	static bool setUpSignal( int ) ;
 	template< typename Int,typename ... INTS >
 	static void setUpSignal( Int sig,INTS ... sigs )
 	{
