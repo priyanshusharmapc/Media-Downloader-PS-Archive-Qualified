@@ -404,7 +404,7 @@ void basicdownloader::setContextMenuForDirectUrl()
 
 void basicdownloader::download( const QString& url )
 {
-	if( url.isEmpty() ){
+	if( url.trimmed().isEmpty() ){
 
 		return ;
 	}
@@ -421,6 +421,14 @@ void basicdownloader::download( const QString& url )
 
 			m.removeAt( 0 ) ;
 		}
+	}
+
+	// Tokenization can legitimately yield no URL for whitespace-only input or
+	// after removing a standalone yt-dlp prefix. Never dereference last() until
+	// at least one actual argument remains.
+	if( m.isEmpty() ){
+
+		return ;
 	}
 
 	const auto& engine = this->defaultEngine( url ) ;
