@@ -945,14 +945,38 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
     const auto root=doc.object();
     if(!root.value("entries").isArray()){s.error="Playlist entries must be an array; removal inference disabled";return s;}
     const auto entries=root.value("entries").toArray();
-    bool malformed=root.contains("id")&&!source.key.isEmpty()&&root.value("id").toString()!=source.key;
+    // Requested identity is not provider evidence. Removal inference requires
+    // an explicit matching playlist ID, even for a complete-looking empty list.
+    if(!detail::sourceKeySafe(source.key)||!root.value("id").isString()||root.value("id").toString()!=source.key){
+        // Unbound observations cannot safely be attributed to this source,
+        // even as additions. Keep its historical membership entirely intact.
+        s.error="Missing or mismatched provider playlist identity; observations and removal inference refused";
+        return s;
+    }
+    bool malformed=false;
+    QSet<int> positions;
     int pos=0;
     for(const auto& value:entries){
         ++pos;
         if(!value.isObject()){malformed=true;continue;}
         const auto e=value.toObject();
         PlaylistItem p;
-        p.position=e.value("playlist_index").toInt(pos);
+        // Array order is the supported fallback only when the field is absent.
+        // Qt's toInt(default) otherwise silently repairs strings, null and
+        // fractions, which must not authorize destructive membership changes.
+        if(e.contains("playlist_index")){
+            const auto index=e.value("playlist_index");
+            const auto number=index.toDouble();
+            if(!index.isDouble()||!std::isfinite(number)||std::floor(number)!=number||number<1||number>INT_MAX){
+                malformed=true;continue;
+            }
+            p.position=static_cast<int>(number);
+        }else p.position=pos;
+        // Repeated videos are valid occurrences, but contradictory positions
+        // are not evidence of complete enumeration. Retain usable observations
+        // without granting removal authority to this snapshot.
+        if(positions.contains(p.position))malformed=true;
+        positions.insert(p.position);
         p.providerId=e.value("id").toString();
         if(!p.providerId.isEmpty()&&!detail::videoIdSafe(p.providerId)){malformed=true;continue;}
         if(p.position<1){malformed=true;continue;}

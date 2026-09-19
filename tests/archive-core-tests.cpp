@@ -52,8 +52,9 @@ int main(int argc,char** argv)
     check(store.saveSources({source},&error),"save sources: "+error);
     auto round=store.loadSources(&error); check(round.size()==1&&round[0].key==source.key,"source registry round-trip");
 
-    // Parsed observations from a nonzero yt-dlp run are useful evidence, but never a complete snapshot.
-    const QByteArray partialJson=R"({"entries":[{"id":"abc123DEF45","title":"Observed before failure","playlist_index":1,"url":"https://www.youtube.com/watch?v=abc123DEF45","availability":"public"}]})";
+    // Bound observations from a nonzero yt-dlp run remain useful evidence.
+    // Unknown provider identity is tested separately as a refused observation.
+    const QByteArray partialJson=R"({"id":"PLTEST123","entries":[{"id":"abc123DEF45","title":"Observed before failure","playlist_index":1,"url":"https://www.youtube.com/watch?v=abc123DEF45","availability":"public"}]})";
     const auto parsedNonzero=PlaylistDiscovery::parse(source,partialJson,"extractor failed after partial output",1);
     check(parsedNonzero.items.size()==1,"nonzero discovery retains observed entries");
     check(!parsedNonzero.complete,"nonzero discovery cannot be complete");

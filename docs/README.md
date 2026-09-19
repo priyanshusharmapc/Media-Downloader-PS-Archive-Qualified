@@ -72,3 +72,9 @@ Documentation should be updated whenever any of the following changes:
 A code change that alters one of these contracts is incomplete until the corresponding documentation is updated. Use [DOCUMENTATION_CHECKLIST.md](DOCUMENTATION_CHECKLIST.md) as the release review checklist.
 
 Do not add hardcoded "latest" build identities to maintained docs. Point readers to package identity and CI evidence instead.
+
+## Discovery trust and playlist history
+
+[Discovery admission](remediation/009-031.md) explains provider identity binding,
+explicit occurrence indexes, retained missing-index fallback, and fail-closed
+membership handling for suspect responses.
