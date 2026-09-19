@@ -99,3 +99,9 @@ non-destructive report-only recovery.
 [Representation restart recovery](remediation/007.md) documents how stale
 `running` leases become `interrupted` only at a fresh Archive operation
 boundary, and how unavailable media becomes durably `blocked_unavailable`.
+
+## Existing-media provider binding
+
+[Existing-media provenance](remediation/006.md) documents the provider-ID,
+path and SHA-256 binding required before an existing file can be adopted into
+canonical history.
