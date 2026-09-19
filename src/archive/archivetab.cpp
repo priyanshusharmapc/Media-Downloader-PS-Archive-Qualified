@@ -346,8 +346,11 @@ QVector<archive::CanonicalItem> ArchiveTab::itemsForSource(const archive::Source
 
 void ArchiveTab::refreshTable()
 {
-    if(!m_ready||!m_table||!archive::ui::rootAvailable(m_root))return;const auto source=selectedSource();archive::Store store{archive::Paths(m_root)};const auto playlist=store.loadPlaylistItems(source.key);const auto all=store.loadCanonicalItems();QHash<QString,archive::CanonicalItem> map;for(const auto& c:all)map[c.key]=c;
+    if(!m_ready||!m_table||!archive::ui::rootAvailable(m_root))return;
+    const auto selectedKey=selectedItemKey();
+    const auto source=selectedSource();archive::Store store{archive::Paths(m_root)};const auto playlist=store.loadPlaylistItems(source.key);const auto all=store.loadCanonicalItems();QHash<QString,archive::CanonicalItem> map;for(const auto& c:all)map[c.key]=c;
     const auto search=m_search->text().trimmed();const auto filter=m_filter->currentText();int protectedCount=0,needs=0,unavailable=0,removed=0;
+    int selectedRow=-1;
     m_table->setRowCount(0);
     for(const auto& p:playlist){const bool has=map.contains(p.itemKey);const auto c=has?map[p.itemKey]:archive::CanonicalItem{};const auto status=archive::derivedStatus(p,has?&c:nullptr);if(status=="Protected")++protectedCount;if(status.contains("Needs")||status=="Missing"||status=="Failed"||status=="Interrupted")++needs;if(p.availability!="public")++unavailable;if(p.membership=="removed")++removed;
         if(!search.isEmpty()&&!p.title.contains(search,Qt::CaseInsensitive)&&!p.providerId.contains(search,Qt::CaseInsensitive))continue;
@@ -355,7 +358,9 @@ void ArchiveTab::refreshTable()
             bool match=false;if(filter=="Protected")match=status=="Protected";else if(filter=="Needs Sync")match=status=="Needs Sync";else if(filter=="Missing")match=status=="Missing";else if(filter=="Unavailable")match=p.availability!="public";else if(filter=="Removed")match=p.membership=="removed";else match=status==filter;if(!match)continue;
         }
         const int r=m_table->rowCount();m_table->insertRow(r);auto* pos=new QTableWidgetItem(p.position<0?QStringLiteral("-"):QString::number(p.position));pos->setData(Qt::UserRole,p.itemKey);m_table->setItem(r,0,pos);m_table->setItem(r,1,new QTableWidgetItem(p.title));m_table->setItem(r,2,new QTableWidgetItem(p.availability));m_table->setItem(r,3,new QTableWidgetItem(has?c.video.state:"missing"));m_table->setItem(r,4,new QTableWidgetItem(has?c.audio.state:"missing"));m_table->setItem(r,5,new QTableWidgetItem(status));
+        if(!selectedKey.isEmpty()&&p.itemKey==selectedKey)selectedRow=r;
     }
+    if(selectedRow>=0)m_table->selectRow(selectedRow);
     m_healthLabel->setText(source.key.isEmpty()?tr("No playlist selected"):tr("%1  |  All %2  |  Protected %3  |  Needs Work %4  |  Unavailable %5  |  Removed %6  |  Last scan %7").arg(source.title.isEmpty()?source.key:source.title).arg(playlist.size()).arg(protectedCount).arg(needs).arg(unavailable).arg(removed).arg(pretty(source.lastScanAt)));
 }
 
