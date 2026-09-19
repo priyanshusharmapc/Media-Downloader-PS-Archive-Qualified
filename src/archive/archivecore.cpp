@@ -1246,13 +1246,13 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
         const auto rawTitle=e.value("title").toString();
         auto rawUrl=e.value("webpage_url").toString();
         if(rawUrl.isEmpty()) rawUrl=e.value("url").toString();
-        const auto availabilityValue=e.value("availability");
-        const auto hasExplicitAvailability=availabilityValue.isString()&&!availabilityValue.toString().trimmed().isEmpty();
+        const auto observedAvailability=availabilityFromEntry(e);
 
-        // A provider-less observation must still contain evidence that an
-        // actual unresolved occurrence was observed. A contentless object
-        // cannot authorize removals merely because it occupies an array slot.
-        if(p.providerId.isEmpty()&&rawTitle.isEmpty()&&rawUrl.isEmpty()&&!hasExplicitAvailability){
+        // A provider-less observation needs stable provider evidence. A URL is
+        // usable occurrence evidence, as is an explicit unavailable/private/
+        // deleted state. A free-form title by itself is not strong enough to
+        // authorize destructive removal inference for historical entries.
+        if(p.providerId.isEmpty()&&rawUrl.isEmpty()&&!isUnavailable(observedAvailability)){
             malformed=true;
             continue;
         }
@@ -1261,7 +1261,7 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
         if(p.title.isEmpty()) p.title="[Unavailable item]";
         p.url=rawUrl;
         if(!p.providerId.isEmpty()) p.url="https://www.youtube.com/watch?v="+p.providerId;
-        p.availability=availabilityFromEntry(e);
+        p.availability=observedAvailability;
         p.itemKey=p.providerId.isEmpty()?placeholderBaseKey(source.key,p.title,p.url):canonicalKey(p.providerId,source.key,p.position,p.title);
         s.items.append(p);
     }
