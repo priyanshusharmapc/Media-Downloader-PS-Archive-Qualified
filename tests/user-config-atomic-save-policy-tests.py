@@ -11,10 +11,10 @@ configure=(root/"src/configure.cpp").read_text(encoding="utf-8")
 playlist_h=(root/"src/playlistdownloader.h").read_text(encoding="utf-8")
 configure_h=(root/"src/configure.h").read_text(encoding="utf-8")
 
-assert "bool save() ;" in playlist_h
+assert "bool save( const QJsonArray& ) ;" in playlist_h
 assert configure_h.count("bool save() ;") >= 2
 
-ps=playlist[playlist.index("bool playlistdownloader::subscription::save()"):]
+ps=playlist[playlist.index("bool playlistdownloader::subscription::save( const QJsonArray& array )"):]
 assert "QSaveFile f( m_path )" in ps
 assert "f.write( data ) != data.size()" in ps
 assert "f.cancelWriting()" in ps
@@ -40,3 +40,11 @@ assert "const auto engineDefaultsSaved = m_downloadEngineDefaultOptions.save()" 
 assert "if( !m_presetOptions.save() )" in configure
 assert configure.count("QMessageBox::warning") >= 2
 print("atomic user configuration persistence policy: PASS")
+
+# Subscription UI/model mutation occurs only after the candidate JSON commits.
+add=playlist[playlist.index("void playlistdownloader::subscription::add"):playlist.index("void playlistdownloader::subscription::remove")]
+remove=playlist[playlist.index("void playlistdownloader::subscription::remove"):playlist.index("void playlistdownloader::subscription::setVisible")]
+assert "auto next = m_array" in add and "this->save( next )" in add
+assert add.index("this->save( next )") < add.index("m_array = next") < add.index("m_table.add")
+assert "auto next = m_array" in remove and "this->save( next )" in remove
+assert remove.index("this->save( next )") < remove.index("m_array = next") < remove.index("m_table.removeRow")
