@@ -353,23 +353,10 @@ QString settings::playlistRangeHistoryLastUsed( const QString& engineName )
 
 QString settings::gitHubDownloadUrl()
 {
-	QString channel = utility::runningGitVersion() ? "git" : "release" ;
-
-	auto m = this->getOption( "WindowsUpdateChannel",channel ) ;
-
-	const auto& e = utility::fakeRunningVersionOfMediaDownloader() ;
-
-	if( !e.isEmpty() ){
-
-		m = utility::runningGitVersion( e ) ? "git" : "release" ;
-	}
-
-	if( m.compare( "release",Qt::CaseInsensitive ) == 0 ){
-
-		return "https://api.github.com/repos/mhogomchungu/media-downloader/releases/latest" ;
-	}else{
-		return "https://api.github.com/repos/mhogomchungu/media-downloader-git/releases/latest" ;
-	}
+	// This publication is a distinct qualified fork. Application update
+	// discovery must remain inside the fork's release namespace; inheriting the
+	// upstream channel would silently replace the qualified product.
+	return "https://api.github.com/repos/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified/releases/latest" ;
 }
 
 std::unique_ptr< QSettings > settings::setConfig( const QString& path )
@@ -789,7 +776,9 @@ void settings::setAutoDownloadWhenAddedInBatchDownloader( bool e )
 
 bool settings::showVersionInfoAndAutoDownloadUpdates()
 {
-	return this->getOption( "ShowVersionInfoAndAutoDownloadUpdates",true ) ;
+	// Application self-update is opt-in for the qualified fork. Backend/tool
+	// update preferences are separate settings and are not changed here.
+	return this->getOption( "ShowVersionInfoAndAutoDownloadUpdates",false ) ;
 }
 
 bool settings::showLocalAndLatestVersionInformation()
