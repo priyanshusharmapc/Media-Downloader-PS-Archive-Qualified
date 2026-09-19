@@ -111,3 +111,9 @@ system `PATH` tools.
 [Fork-bound application updates](remediation/003.md) documents the qualified
 fork release endpoint, opt-in automatic update policy, and release-asset
 repository validation.
+
+## Existing-media provider binding
+
+[Existing-media provenance](remediation/006.md) documents the provider-ID,
+path and SHA-256 binding required before an existing file can be adopted into
+canonical history.

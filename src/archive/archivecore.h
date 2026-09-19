@@ -245,6 +245,9 @@ public:
 private:
     ProcessResult run(const QString& program,const QStringList& args,const QString& purpose) const;
     QString findExistingById(const QString& relativeDir,const QString& id,const QStringList& extensions) const;
+    QString findAttemptById(const QString& relativeDir,const QString& id,const QString& attempt,const QStringList& extensions) const;
+    bool mediaBindingValid(const QString& relativePath,const QString& providerId,const QString& kind) const;
+    bool writeMediaBinding(const QString& relativePath,const CanonicalItem& item,const QString& kind,QString* error) const;
     bool downloadVideo(const CanonicalItem& item,QString* error);
     bool downloadAudio(const CanonicalItem& item,QString* error);
     RuntimeConfig m_config;
