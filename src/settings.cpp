@@ -609,9 +609,12 @@ int settings::maxLoggerProcesses()
 
 size_t settings::maxConcurrentDownloads()
 {
-	auto m = this->getOption( "MaxConcurrentDownloads",4 ) ;
+	const auto m = this->getOption( "MaxConcurrentDownloads",4 ) ;
 
-	return static_cast< size_t >( m ) ;
+	// Settings may outlive older buggy builds, so validate persisted state at
+	// the read boundary as well. Never cast a non-positive signed value to the
+	// unsigned concurrency type.
+	return static_cast< size_t >( m > 0 ? m : 4 ) ;
 }
 
 bool settings::darkTheme()
@@ -659,7 +662,9 @@ const QString& settings::windowsOnlyDefaultPortableVersionDownloadFolder()
 
 void settings::setMaxConcurrentDownloads( int s )
 {
-	m_settings.setValue( "MaxConcurrentDownloads",s ) ;
+	// Keep invalid values out of persistent state even when this setter is
+	// called outside Configure.
+	m_settings.setValue( "MaxConcurrentDownloads",s > 0 ? s : 4 ) ;
 }
 
 void settings::setDownloadFolder( const QString& m )
