@@ -15,3 +15,12 @@ assert "m_info.app.exit( 1 )" in body
 assert body.index("m_localServer.listen") < body.index("m_mainApp = std::make_unique")
 assert body.index("m_mainApp->start") < body.index("m_lockFile.unlock")
 print("Single-instance listener binding policy: PASS")
+
+# The same finding also covers startup-lock acquisition. A non-contention lock
+# failure must stop before any listener/GUI startup is attempted.
+ctor=source[source.index("oneinstance( AppInfo info"):source.index("~oneinstance()",source.index("oneinstance( AppInfo info"))]
+assert "m_lockOwned = m_lockFile.lock()" in ctor
+assert "if( !m_lockOwned )" in ctor
+assert "m_info.app.exit( 1 )" in ctor
+assert "bool m_lockOwned = false" in source
+assert "if( !m_lockOwned )return" in body
