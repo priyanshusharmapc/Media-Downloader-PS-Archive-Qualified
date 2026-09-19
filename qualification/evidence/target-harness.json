@@ -1,0 +1,26 @@
+﻿{
+    "executable":  "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+    "arguments":  [
+                      "-NoProfile",
+                      "-ExecutionPolicy",
+                      "Bypass",
+                      "-File",
+                      "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\ci-35116148963\\windows-package\\Media-Downloader-PS\\archive-local-harness.ps1",
+                      "-ArchiveRoot",
+                      "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\phase1-audit-final-4c720\\ArchiveRoot",
+                      "-PlaylistUrl",
+                      "https://www.youtube.com/playlist?list=PLMeLfdmeKNdY",
+                      "-VideoUrl",
+                      "https://www.youtube.com/watch?v=0fvbzgnVO2Y",
+                      "-ExpectedCommit",
+                      "4c72054465697b899ede0555e48aff8a7c91c225"
+                  ],
+    "workingDirectory":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_runs\\ci-35116148963\\windows-package\\Media-Downloader-PS",
+    "started":  "2026-09-16T21:31:28.1044344+05:30",
+    "completed":  "2026-09-16T21:32:11.7225477+05:30",
+    "seconds":  43.6194224,
+    "exitCode":  0,
+    "timedOut":  false,
+    "stdoutSha256":  "EC2061C9459BC9F52C8C5911BBF3F719BBBAC408F9225B3D1D3AF51915B1C66A",
+    "stderrSha256":  "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855"
+}

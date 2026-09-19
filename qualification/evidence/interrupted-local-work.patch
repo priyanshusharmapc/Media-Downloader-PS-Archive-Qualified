@@ -1,0 +1,912 @@
+﻿diff --git a/.github/workflows/LinuxQt6Git.yml b/.github/workflows/LinuxQt6Git.yml
+deleted file mode 100644
+index b33cef92..00000000
+--- a/.github/workflows/LinuxQt6Git.yml
++++ /dev/null
+@@ -1,20 +0,0 @@
+-name: MediaDownloader4Linux
+-
+-on:
+-  push:
+-    branches:
+-    - main
+-    tags-ignore:
+-    - '*'
+-
+-jobs:
+-  build:
+-    runs-on: ubuntu-latest
+-    steps:
+-      - name: Repository Dispatch
+-        uses: peter-evans/repository-dispatch@v2
+-        with:
+-          token: ${{ secrets.MD_GIT_PUBLISH }}
+-          repository: mhogomchungu/media-downloader-git
+-          event-type: LinuxQt6Git
+-
+diff --git a/.github/workflows/PublishHereMacOsArmRelease.yml b/.github/workflows/PublishHereMacOsArmRelease.yml
+deleted file mode 100644
+index 131732b7..00000000
+--- a/.github/workflows/PublishHereMacOsArmRelease.yml
++++ /dev/null
+@@ -1,79 +0,0 @@
+-name: Publish Here MacOS Arm Release
+-env:
+-  QT6_VERSION: "6.6.2"
+-on:
+-  push:
+-    tags:
+-    - '*'
+-jobs:
+-  buildMacReleaseEvent:
+-    runs-on: macos-14
+-    steps:
+-    -
+-      uses: actions/checkout@v4
+-      with:
+-         repository: mhogomchungu/media-downloader
+-         path: MAC
+-    -
+-      name: Install Qt6
+-      uses: jurplel/install-qt-action@v3
+-      with:
+-        version: ${{ env.QT6_VERSION }}
+-        arch: 'clang_64'
+-        dir: "${{github.workspace}}/qt6"
+-        install-deps: "true"
+-        host: 'mac'
+-        target: 'desktop'
+-    -
+-      name: Configure CMake
+-      env:
+-        CMAKE_PREFIX_PATH: "${{github.workspace}}/qt6/Qt/${{ env.QT6_VERSION }}"
+-      run: cmake -DCMAKE_OSX_ARCHITECTURES="arm64" -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/MediaDownloader -DBUILD_WITH_QT6=true -DSOURCE_PATH=${{github.workspace}}/MAC/ -DCMAKE_VERBOSE_MAKEFILE=FALSE -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -S ${{github.workspace}}/MAC/ -B ${{github.workspace}}/MAC/build6
+-    -
+-      name: Build
+-      run: cmake --build ${{github.workspace}}/MAC/build6
+-    -
+-      name: Download 3rdParty Apps
+-      run: |
+-           #aria2c -d ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/MacOS/extra https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
+-
+-           mkdir -p ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/MacOS/extra
+-           mkdir -p ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/Resources
+-
+-           cp ${{github.workspace}}/MAC/src/media-downloader.icns ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/Resources/MediaDownloader.icns
+-
+-           aria2c -d ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/MacOS/extra https://github.com/mhogomchungu/media-downloader-git/releases/download/0.0.0/ffmpeg-macos-arm.zip
+-
+-           cd ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/MacOS/extra
+-           tar -xf ffmpeg-macos-arm.zip
+-           rm -rf ffmpeg-macos-arm.zip
+-    -
+-      name: Create img Bundle
+-      run: |
+-           cd ${{github.workspace}}/MAC/build6
+-           ${{github.workspace}}/qt6/Qt/${{ env.QT6_VERSION }}/macos/bin/macdeployqt6 MediaDownloader.app -dmg
+-    - name: Create Version Env
+-      run: |
+-           version=`cat ${{github.workspace}}/MAC/build6/VERSION_INFO`
+-           echo -n "VERSION_INFO=$version" >> "$GITHUB_ENV"
+-    -
+-      name: Rename Bundle
+-      run: |
+-           cp ${{github.workspace}}/MAC/build6/MediaDownloader.dmg ${{github.workspace}}/MAC/build6/MediaDownloaderQt6-arm64-${{ env.VERSION_INFO }}.dmg
+-    -
+-     name: Get Hash
+-     run: | 
+-          cd ${{github.workspace}}/MAC/build6
+-          shasum -a 256 MediaDownloaderQt6-arm64-${{ env.VERSION_INFO }}.dmg > ${{github.workspace}}/zMacOsArmReleaseHash.txt
+-    -
+-      name: Post Bundle
+-      uses: ncipollo/release-action@v1
+-      with:
+-        artifacts: ${{github.workspace}}/zMacOsArmReleaseHash.txt,${{github.workspace}}/MAC/build6/MediaDownloaderQt6-arm64-${{ env.VERSION_INFO }}.dmg
+-        tag: ${{ env.VERSION_INFO }}
+-        commit: "main"
+-        allowUpdates: true
+-        omitBody: true
+-        omitBodyDuringUpdate: true
+-        omitNameDuringUpdate: true
+-        omitPrereleaseDuringUpdate: true
+diff --git a/.github/workflows/PublishHereMacOsIntelRelease.yml b/.github/workflows/PublishHereMacOsIntelRelease.yml
+deleted file mode 100644
+index 131096c2..00000000
+--- a/.github/workflows/PublishHereMacOsIntelRelease.yml
++++ /dev/null
+@@ -1,79 +0,0 @@
+-name: Publish Here MacOS Intel Release
+-env:
+-  QT6_VERSION: "6.6.2"
+-on:
+-  push:
+-    tags:
+-    - '*'
+-jobs:
+-  buildMacReleaseEvent:
+-    runs-on: macos-14
+-    steps:
+-    -
+-      uses: actions/checkout@v4
+-      with:
+-         repository: mhogomchungu/media-downloader
+-         path: MAC
+-    -
+-      name: Install Qt6
+-      uses: jurplel/install-qt-action@v3
+-      with:
+-        version: ${{ env.QT6_VERSION }}
+-        arch: 'clang_64'
+-        dir: "${{github.workspace}}/qt6"
+-        install-deps: "true"
+-        host: 'mac'
+-        target: 'desktop'
+-    -
+-      name: Configure CMake
+-      env:
+-        CMAKE_PREFIX_PATH: "${{github.workspace}}/qt6/Qt/${{ env.QT6_VERSION }}"
+-      run: cmake -DCMAKE_OSX_ARCHITECTURES="x86_64" -DCMAKE_INSTALL_PREFIX=${{github.workspace}}/MediaDownloader -DBUILD_WITH_QT6=true -DSOURCE_PATH=${{github.workspace}}/MAC/ -DCMAKE_VERBOSE_MAKEFILE=FALSE -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -S ${{github.workspace}}/MAC/ -B ${{github.workspace}}/MAC/build6
+-    -
+-      name: Build
+-      run: cmake --build ${{github.workspace}}/MAC/build6
+-    -
+-      name: Download 3rdParty Apps
+-      run: |
+-           #aria2c -d ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/MacOS/extra https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
+-
+-           mkdir -p ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/MacOS/extra
+-           mkdir -p ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/Resources
+-
+-           cp ${{github.workspace}}/MAC/src/media-downloader.icns ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/Resources/MediaDownloader.icns
+-
+-           aria2c -d ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/MacOS/extra https://github.com/mhogomchungu/media-downloader-git/releases/download/0.0.0/ffmpeg-macos-intel.zip
+-
+-           cd ${{github.workspace}}/MAC/build6/MediaDownloader.app/Contents/MacOS/extra
+-           tar -xf ffmpeg-macos-intel.zip
+-           rm -rf ffmpeg-macos-intel.zip
+-    -
+-      name: Create img Bundle
+-      run: |
+-           cd ${{github.workspace}}/MAC/build6
+-           ${{github.workspace}}/qt6/Qt/${{ env.QT6_VERSION }}/macos/bin/macdeployqt6 MediaDownloader.app -dmg
+-    - name: Create Version Env
+-      run: |
+-           version=`cat ${{github.workspace}}/MAC/build6/VERSION_INFO`
+-           echo -n "VERSION_INFO=$version" >> "$GITHUB_ENV"
+-    -
+-      name: Rename Bundle
+-      run: |
+-           cp ${{github.workspace}}/MAC/build6/MediaDownloader.dmg ${{github.workspace}}/MAC/build6/MediaDownloaderQt6-x86_64-${{ env.VERSION_INFO }}.dmg
+-    -
+-     name: Get Hash
+-     run: | 
+-          cd ${{github.workspace}}/MAC/build6
+-          shasum -a 256 MediaDownloaderQt6-x86_64-${{ env.VERSION_INFO }}.dmg > ${{github.workspace}}/zMacOsIntelReleaseHash.txt
+-    -
+-      name: Post Bundle
+-      uses: ncipollo/release-action@v1
+-      with:
+-        artifacts: ${{github.workspace}}/zMacOsIntelReleaseHash.txt,${{github.workspace}}/MAC/build6/MediaDownloaderQt6-x86_64-${{ env.VERSION_INFO }}.dmg
+-        tag: ${{ env.VERSION_INFO }}
+-        commit: "main"
+-        allowUpdates: true
+-        omitBody: true
+-        omitBodyDuringUpdate: true
+-        omitNameDuringUpdate: true
+-        omitPrereleaseDuringUpdate: true
+diff --git a/.github/workflows/PublishHereWindowsRelease.yml b/.github/workflows/PublishHereWindowsRelease.yml
+deleted file mode 100644
+index 7fa85a9a..00000000
+--- a/.github/workflows/PublishHereWindowsRelease.yml
++++ /dev/null
+@@ -1,199 +0,0 @@
+-name: Publish Here Windows Release
+-env:
+-  QT5_VERSION:     "5.15.2"
+-  MINGW5_VERSION:  "win32_mingw81"
+-  MINGW5_PATH:     "mingw81_32"
+-  QT6_VERSION:     "6.8.1"
+-  MINGW6_VERSION:  "win64_mingw"
+-  MINGW6_PATH:     "mingw_64"
+-
+-  BUILD_TYPE:      Release
+-on:
+-  push:
+-    tags:
+-    - '*'
+-jobs:
+-  buildWindowsRelease:
+-    runs-on:  windows-2022
+-    steps:
+-    -
+-      uses: actions/checkout@v4
+-      with:
+-         repository: mhogomchungu/media-downloader
+-         path: MD
+-    -
+-      name: Install Qt5
+-      uses: jurplel/install-qt-action@v3
+-      with:
+-        version: ${{ env.QT5_VERSION }}
+-        arch: ${{ env.MINGW5_VERSION }}
+-        dir: "${{github.workspace}}/qt5"
+-        install-deps: "true"
+-        host: 'windows'
+-        target: 'desktop'
+-        tools: 'tools_mingw81,qt.tools.win32_mingw810'
+-    -
+-      name: update env for Qt5
+-      run: |
+-          Write-Output "${{github.workspace}}/qt5/Qt/Tools/mingw810_32/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+-    -
+-      name: Check GCC version and path for Qt5
+-      run: |
+-          Write-Output (Get-Command c++.exe).Path
+-          c++.exe --version
+-    -
+-      name: Download libs
+-      run: |
+-         New-Item -ItemType Directory -Path ${{github.workspace}}\tmp
+-         Invoke-WebRequest "https://github.com/mhogomchungu/media-downloader-git/releases/download/0.0.0/3rdParty.zip" -OutFile ${{github.workspace}}\tmp\3rdParty.zip
+-         Invoke-WebRequest "https://github.com/mhogomchungu/media-downloader-git/releases/download/0.0.0/libs.zip" -OutFile ${{github.workspace}}\tmp\libs.zip
+-         Invoke-WebRequest "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_x86.exe" -OutFile ${{github.workspace}}\tmp\yt-dlp_x86.exe
+-    -
+-      name: Configure CMake for Qt5
+-      env:
+-        CMAKE_PREFIX_PATH: "${{github.workspace}}/qt5/Qt/${{ env.QT5_VERSION }}"
+-      run: cmake -DOUTPUT_BASE_NAME=MediaDownloaderQt5 -DLIBRARIES_LOCATION=${{github.workspace}}\MediaDownloaderQt5\ -DOUTPUT_PATH=${{github.workspace}}\ -DSOURCE_PATH=${{github.workspace}}\MD\ -DCMAKE_VERBOSE_MAKEFILE=TRUE -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -G Ninja -S ${{github.workspace}}/MD/ -B ${{github.workspace}}/MD/build5
+-    -
+-      name: Set Build version
+-      run: |
+-
+-        $data = [System.IO.File]::ReadAllText("${{github.workspace}}\MD\build5\version.h")
+-
+-        $versionInfoLines = $data.Split([Environment]::NewLine, [System.StringSplitOptions]::RemoveEmptyEntries)
+-
+-        $versionInfoFirstLine = $versionInfoLines[0]
+-
+-        $versionInfo = $versionInfoFirstLine.Split(" ",[System.StringSplitOptions]::RemoveEmptyEntries)[2]
+-
+-        $VERSION = $versionInfo.Replace(".git_tag","")
+-
+-        $VERSION = $VERSION.Replace('"',"")
+-
+-        echo "RELEASEVERSION=$VERSION" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+-    -
+-      name: Reconfigure CMake for Qt5
+-      env:
+-        CMAKE_PREFIX_PATH: "${{github.workspace}}/qt5/Qt/${{ env.QT5_VERSION }}"
+-        msystem: MINGW32
+-      run: cmake -DOUTPUT_BASE_NAME=MediaDownloaderQt5 -DLIBRARIES_LOCATION=${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}\ -DOUTPUT_PATH=${{github.workspace}}\ -DSOURCE_PATH=${{github.workspace}}\MD\ -DCMAKE_VERBOSE_MAKEFILE=TRUE -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -G Ninja -S ${{github.workspace}}/MD/ -B ${{github.workspace}}/MD/build5
+-    -
+-      name: Print installer script for Qt5
+-      run : get-content ${{github.workspace}}\MD\build5\media-downloader_windows_installer_Qt5.iss
+-    -
+-      name: Build Project for Qt5
+-      run: cmake --build ${{github.workspace}}/MD/build5
+-    -
+-      name: Create MediaDownloaderQt5 archive
+-      run: |
+-        New-Item -ItemType Directory -Path ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}
+-        New-Item -ItemType Directory -Path ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}/local
+-
+-        Copy-Item -Path ${{github.workspace}}\MD\translations -Destination ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }} -Recurse
+-        Copy-Item -Path ${{github.workspace}}\MD\build5\media-downloader.exe -Destination ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}
+-
+-        Set-Location ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}
+-
+-        ${{github.workspace}}/qt5/Qt/${{ env.QT5_VERSION }}/${{ env.MINGW5_PATH }}/bin/windeployqt.exe ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}/media-downloader.exe
+-
+-        Expand-Archive -Path ${{github.workspace}}\tmp\3rdParty.zip -DestinationPath ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}
+-        Expand-Archive -Path ${{github.workspace}}\tmp\libs.zip -DestinationPath ${{github.workspace}}\tmp
+-
+-        Copy-Item ${{github.workspace}}\tmp\libs\* -Destination ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }} -Recurse
+-
+-        Remove-Item ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}\3rdParty\ytdlp\yt-dlp_x86.exe
+-        Copy-Item -Path ${{github.workspace}}\tmp\yt-dlp_x86.exe -Destination ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}\3rdParty\ytdlp\yt-dlp_x86.exe
+-
+-        Compress-Archive -Path ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }} -DestinationPath ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}.zip
+-
+-        Remove-Item -Path ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}\local
+-    -
+-      name: Make installer for Qt5
+-      uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+-      with:
+-          path: MD/build5/media-downloader_windows_installer_Qt5.iss
+-    -
+-      name: Install Qt6
+-      uses: jurplel/install-qt-action@v3
+-      with:
+-        version: ${{ env.QT6_VERSION }}
+-        arch: ${{ env.MINGW6_VERSION }}
+-        dir: "${{github.workspace}}/qt6"
+-        install-deps: "true"
+-        host: 'windows'
+-        target: 'desktop'
+-        tools: 'tools_mingw1310'
+-    -
+-      name: update env for Qt6
+-      run: echo "${{github.workspace}}/qt6/Qt/Tools/mingw1310_64/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+-    -
+-      name: Check GCC version and path for Qt6
+-      run: |
+-          Write-Output (Get-Command c++.exe).Path
+-          c++.exe --version
+-    -
+-      name: Configure CMake for Qt6
+-      env:
+-        CMAKE_PREFIX_PATH: "${{github.workspace}}/qt6/Qt/${{ env.QT6_VERSION }}"
+-      run: cmake -DOUTPUT_BASE_NAME=MediaDownloaderQt6 -DLIBRARIES_LOCATION=${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}\ -DOUTPUT_PATH=${{github.workspace}}\ -DSOURCE_PATH=${{github.workspace}}\MD\ -DBUILD_WITH_QT6=true -DCMAKE_VERBOSE_MAKEFILE=TRUE -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -G Ninja -S ${{github.workspace}}/MD/ -B ${{github.workspace}}/MD/build6
+-    -
+-      name: Print installer script for Qt6
+-      run : get-content ${{github.workspace}}\MD\build6\media-downloader_windows_installer_Qt6.iss
+-    -
+-      name: Build Project for Qt6
+-      run: cmake --build ${{github.workspace}}/MD/build6
+-    -
+-      name: Create MediaDownloaderQt6 archive
+-      run: |
+-        New-Item -ItemType Directory -Path ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}
+-        New-Item -ItemType Directory -Path ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}/local
+-
+-        Copy-Item -Path ${{github.workspace}}\MD\translations -Destination ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }} -Recurse
+-        Copy-Item -Path ${{github.workspace}}\MD\build6\media-downloader.exe -Destination ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}
+-
+-        Set-Location ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}
+-
+-        ${{github.workspace}}/qt6/Qt/${{ env.QT6_VERSION }}/${{ env.MINGW6_PATH }}/bin/windeployqt6.exe ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}\media-downloader.exe
+-
+-        Expand-Archive -Path ${{github.workspace}}\tmp\3rdParty.zip -DestinationPath ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}
+-
+-        Remove-Item "${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}\3rdParty\wget\wget.exe"
+-
+-        Invoke-WebRequest "https://github.com/rockdaboot/wget2/releases/download/v2.2.1/wget2.exe" -OutFile "${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}\3rdParty\wget\wget2.exe"
+-
+-        Remove-Item ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}\3rdParty\ytdlp\yt-dlp_x86.exe
+-        Copy-Item -Path ${{github.workspace}}\tmp\yt-dlp_x86.exe -Destination ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}\3rdParty\ytdlp\yt-dlp_x86.exe
+-
+-        Compress-Archive -Path ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }} -DestinationPath ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}.zip
+-
+-        Remove-Item -Path ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}\local
+-    -
+-      name: Make installer for Qt6
+-      uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+-      with:
+-          path: MD/build6/media-downloader_windows_installer_Qt6.iss
+-    -
+-      name: Rename installers
+-      run: |
+-          Rename-Item -Path ${{github.workspace}}\MediaDownloaderQt5.exe -NewName ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}.setup.exe
+-          Rename-Item -Path ${{github.workspace}}\MediaDownloaderQt6.exe -NewName ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}.setup.exe
+-    -
+-     name: Get Hashes
+-     run: | 
+-          $MediaDownloaderQt5a = (Get-FileHash ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}.zip).Hash.ToLower()
+-          $MediaDownloaderQt5b = (Get-FileHash ${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}.setup.exe).Hash.ToLower()
+-          $MediaDownloaderQt6a = (Get-FileHash ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}.zip).Hash.ToLower()
+-          $MediaDownloaderQt6b = (Get-FileHash ${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}.setup.exe).Hash.ToLower()
+-
+-          echo "$MediaDownloaderQt5a MediaDownloaderQt5-${{ env.RELEASEVERSION }}.zip`n$MediaDownloaderQt6a MediaDownloaderQt6-${{ env.RELEASEVERSION }}.zip`n$MediaDownloaderQt5b MediaDownloaderQt5-${{ env.RELEASEVERSION }}.setup.exe`n$MediaDownloaderQt6b MediaDownloaderQt6-${{ env.RELEASEVERSION }}.setup.exe" | Out-File -FilePath ${{github.workspace}}\ZWindowsHashes.txt -Encoding utf8 -Append 
+-    -
+-      name: Post Releases
+-      uses: ncipollo/release-action@v1
+-      with:
+-        artifacts: ${{github.workspace}}\ZWindowsHashes.txt,${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}.zip,${{github.workspace}}\MediaDownloaderQt5-${{ env.RELEASEVERSION }}.setup.exe,${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}.zip,${{github.workspace}}\MediaDownloaderQt6-${{ env.RELEASEVERSION }}.setup.exe
+-        tag: ${{ env.RELEASEVERSION }}
+-        commit: "main"
+-        allowUpdates: true
+-        omitBody: true
+-        omitBodyDuringUpdate: true
+-        omitNameDuringUpdate: true
+-        omitPrereleaseDuringUpdate: true
+diff --git a/.github/workflows/PublishThereMacOsArmGit.yml b/.github/workflows/PublishThereMacOsArmGit.yml
+deleted file mode 100644
+index 6160ca27..00000000
+--- a/.github/workflows/PublishThereMacOsArmGit.yml
++++ /dev/null
+@@ -1,20 +0,0 @@
+-name: Publish There MacOs Arm Git
+-
+-on:
+-  push:
+-    branches:
+-    - main
+-    tags-ignore:
+-    - '*'
+-
+-jobs:
+-  build:
+-    runs-on: macos-latest
+-    steps:
+-      - name: Repository Dispatch
+-        uses: peter-evans/repository-dispatch@v2
+-        with:
+-          token: ${{ secrets.MD_GIT_PUBLISH }}
+-          repository: mhogomchungu/media-downloader-git
+-          event-type: PublishMacArmGit
+-
+diff --git a/.github/workflows/PublishThereMacOsArmRelease.yml b/.github/workflows/PublishThereMacOsArmRelease.yml
+deleted file mode 100644
+index 7434b4f6..00000000
+--- a/.github/workflows/PublishThereMacOsArmRelease.yml
++++ /dev/null
+@@ -1,17 +0,0 @@
+-name: Publish There MacOs Arm Release
+-
+-on:
+-  push:
+-    tags:
+-    - '*'
+-jobs:
+-  build:
+-    runs-on: macos-latest
+-    steps:
+-      - name: Repository Dispatch
+-        uses: peter-evans/repository-dispatch@v2
+-        with:
+-          token: ${{ secrets.MD_GIT_PUBLISH }}
+-          repository: mhogomchungu/media-downloader-git
+-          event-type: PublishArmMacRelease
+-
+diff --git a/.github/workflows/PublishThereMacOsIntelGit.yml b/.github/workflows/PublishThereMacOsIntelGit.yml
+deleted file mode 100644
+index 998ddfb7..00000000
+--- a/.github/workflows/PublishThereMacOsIntelGit.yml
++++ /dev/null
+@@ -1,20 +0,0 @@
+-name: Publish There MacOs Intel Git
+-
+-on:
+-  push:
+-    branches:
+-    - main
+-    tags-ignore:
+-    - '*'
+-
+-jobs:
+-  build:
+-    runs-on: macos-latest
+-    steps:
+-      - name: Repository Dispatch
+-        uses: peter-evans/repository-dispatch@v2
+-        with:
+-          token: ${{ secrets.MD_GIT_PUBLISH }}
+-          repository: mhogomchungu/media-downloader-git
+-          event-type: PublishMacIntelGit
+-
+diff --git a/.github/workflows/PublishThereMacOsIntelRelease.yml b/.github/workflows/PublishThereMacOsIntelRelease.yml
+deleted file mode 100644
+index 38998bb2..00000000
+--- a/.github/workflows/PublishThereMacOsIntelRelease.yml
++++ /dev/null
+@@ -1,17 +0,0 @@
+-name: Publish There MacOs Intel Release
+-
+-on:
+-  push:
+-    tags:
+-    - '*'
+-jobs:
+-  build:
+-    runs-on: macos-latest
+-    steps:
+-      - name: Repository Dispatch
+-        uses: peter-evans/repository-dispatch@v2
+-        with:
+-          token: ${{ secrets.MD_GIT_PUBLISH }}
+-          repository: mhogomchungu/media-downloader-git
+-          event-type: PublishIntelMacRelease
+-
+diff --git a/.github/workflows/PublishThereWindowsGit.yml b/.github/workflows/PublishThereWindowsGit.yml
+deleted file mode 100644
+index c75e9c26..00000000
+--- a/.github/workflows/PublishThereWindowsGit.yml
++++ /dev/null
+@@ -1,20 +0,0 @@
+-name: Publish There Windows Git
+-
+-on:
+-  push:
+-    branches:
+-    - main
+-    tags-ignore:
+-    - '*'
+-
+-jobs:
+-  build:
+-    runs-on: ubuntu-latest
+-    steps:
+-      - name: Repository Dispatch
+-        uses: peter-evans/repository-dispatch@v2
+-        with:
+-          token: ${{ secrets.MD_GIT_PUBLISH }}
+-          repository: mhogomchungu/media-downloader-git
+-          event-type: PublishWindowsGit
+-
+diff --git a/.github/workflows/PublishThereWindowsRelease.yml b/.github/workflows/PublishThereWindowsRelease.yml
+deleted file mode 100644
+index 75252981..00000000
+--- a/.github/workflows/PublishThereWindowsRelease.yml
++++ /dev/null
+@@ -1,18 +0,0 @@
+-name: Publish There Windows Release
+-
+-on:
+-  push:
+-    tags:
+-    - '*'
+-
+-jobs:
+-  build:
+-    runs-on: ubuntu-latest
+-    steps:
+-      - name: Repository Dispatch
+-        uses: peter-evans/repository-dispatch@v2
+-        with:
+-          token: ${{ secrets.MD_GIT_PUBLISH }}
+-          repository: mhogomchungu/media-downloader-git
+-          event-type: PublishWindowsRelease
+-
+diff --git a/.github/workflows/archive-qt6.yml b/.github/workflows/archive-qt6.yml
+index 0463ecec..fa220f4c 100644
+--- a/.github/workflows/archive-qt6.yml
++++ b/.github/workflows/archive-qt6.yml
+@@ -181,8 +181,9 @@ jobs:
+           QT_QPA_PLATFORM: offscreen
+         run: |
+           $ErrorActionPreference = 'Stop'
+-          $out = Join-Path $env:GITHUB_WORKSPACE 'portable/Media-Downloader-PS'
+-          $env:ARCHIVE_TEST_FFMPEG = "$out/3rdParty/ffmpeg/bin/ffmpeg.exe"
++           $out = Join-Path $env:GITHUB_WORKSPACE 'portable/Media-Downloader-PS'
++           $env:PATH = "$out/3rdParty/ffmpeg/bin;$env:PATH"
++           $env:ARCHIVE_TEST_FFMPEG = "$out/3rdParty/ffmpeg/bin/ffmpeg.exe"
+           $env:ARCHIVE_TEST_FFPROBE = "$out/3rdParty/ffmpeg/bin/ffprobe.exe"
+           ctest --test-dir build --output-on-failure --output-junit Testing/Temporary/ctest-junit.xml
+           if ($LASTEXITCODE -ne 0) { throw 'Archive tests failed' }
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 1b4811c7..4ba6c8c3 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -103,8 +103,9 @@ set(SRC
+     src/engines.cpp
+     src/tableWidget.cpp
+     src/library.cpp
+-    src/archive/archivecore.cpp
+-    src/archive/archivetab.cpp
++     src/archive/archivecore.cpp
++     src/archive/archivesettings.cpp
++     src/archive/archivetab.cpp
+     src/engines/tests.cpp
+     src/engines/yt-dlp.cpp
+     src/engines/safaribooks.cpp
+@@ -481,10 +482,27 @@ if(BUILD_TESTING)
+     else()
+         target_link_libraries(archive-hardening-tests Qt5::Core)
+     endif()
+-    foreach(case discovery-shape discovery-null discovery-count discovery-error portable-paths source-traversal state-shape source-state-corruption snapshot-identity import-identity import-id-only import-schema partial-recovery-status nested-redaction deleted-title linked-package-file)
++    foreach(case discovery-shape discovery-null discovery-count discovery-error portable-paths reserved-device-variants reparse-policy root-symlink parent-symlink linked-state linked-media placeholder-position source-traversal state-shape source-state-corruption snapshot-identity import-identity import-id-only import-schema partial-recovery-status nested-redaction deleted-title linked-package-file)
+         add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
+         set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
+     endforeach()
++
++    add_executable(archive-media-integrity-tests tests/archive-media-integrity-tests.cpp src/archive/archivecore.cpp src/archive/archive.qrc)
++    if(BUILD_WITH_QT6)
++        target_link_libraries(archive-media-integrity-tests Qt6::Core)
++    else()
++        target_link_libraries(archive-media-integrity-tests Qt5::Core)
++    endif()
++    add_test(NAME archive-media-integrity COMMAND archive-media-integrity-tests)
++    set_tests_properties(archive-media-integrity PROPERTIES TIMEOUT 900)
++
++    add_executable(archive-gui-settings-tests tests/archive-gui-settings-tests.cpp src/archive/archivesettings.cpp)
++    if(BUILD_WITH_QT6)
++        target_link_libraries(archive-gui-settings-tests Qt6::Core)
++    else()
++        target_link_libraries(archive-gui-settings-tests Qt5::Core)
++    endif()
++    add_test(NAME archive-gui-settings COMMAND archive-gui-settings-tests)
+ endif()
+ 
+ if(BUILD_TESTING)
+diff --git a/src/archive/archivecore.cpp b/src/archive/archivecore.cpp
+index e60fd89c..a82631c3 100644
+--- a/src/archive/archivecore.cpp
++++ b/src/archive/archivecore.cpp
+@@ -304,10 +304,13 @@ QStringList withoutDownloadArchive(QStringList args)
+ Paths::Paths(QString root)
+ {
+     if(root.trimmed().isEmpty()) return;
+-    const auto absolute=QDir::cleanPath(QFileInfo(root).absoluteFilePath());
+-    const auto canonical=QFileInfo(absolute).canonicalFilePath();
+-    m_root=canonical.isEmpty()?absolute:canonical;
++    // Preserve the operator-selected path. Canonicalizing here would erase a
++    // root or parent symlink before the safety layer can reject it.
++    m_root=QDir::cleanPath(QFileInfo(root).absoluteFilePath());
+ }
++
++QString placeholderFingerprint(const QString& sourceKey,const QString& title,const QString& url);
++QString placeholderBaseKey(const QString& sourceKey,const QString& title,const QString& url=QString());
+ QString Paths::root() const{return m_root;}
+ QString Paths::video() const{return QDir(m_root).filePath("Video");}
+ QString Paths::audio() const{return QDir(m_root).filePath("Audio");}
+@@ -582,11 +585,14 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
+     if(!error.isEmpty()){ summary.error=error; return summary; }
+ 
+     QHash<QString,int> priorIndex;
++    QHash<QString,QVector<int>> priorPlaceholders;
+     QHash<QString,int> priorOccurrences;
+     for(int i=0;i<prior.size();++i){
+         const int ordinal=++priorOccurrences[prior[i].itemKey];
+         if(prior[i].entryKey.isEmpty())prior[i].entryKey=prior[i].itemKey+"#"+QString::number(ordinal);
+         priorIndex[prior[i].entryKey]=i;
++        if(prior[i].providerId.isEmpty()&&prior[i].itemKey.startsWith("placeholder:"))
++            priorPlaceholders[placeholderFingerprint(source.key,prior[i].title,prior[i].url)].append(i);
+     }
+     QHash<QString,int> canonicalIndex;
+     for(int i=0;i<canonical.size();++i) canonicalIndex[canonical[i].key]=i;
+@@ -599,13 +605,37 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
+     QSet<QString> observedKeys;
+     QHash<QString,int> observedOccurrences;
+     const auto scanTime=snapshot.scannedAt.isEmpty()?nowIso():snapshot.scannedAt;
++    QSet<int> matchedPrior;
+ 
+     for(auto p:snapshot.items){
+         if(!p.providerId.isEmpty()&&!detail::videoIdSafe(p.providerId)){summary.error="Invalid provider identity";return summary;}
+-        const auto expectedKey=canonicalKey(p.providerId,source.key,p.position,p.title);
++        const bool unresolved=p.providerId.isEmpty();
++        const auto expectedKey=unresolved?placeholderBaseKey(source.key,p.title,p.url):canonicalKey(p.providerId,source.key,p.position,p.title);
+         if(p.itemKey.isEmpty()) p.itemKey=expectedKey;
+-        if(p.itemKey!=expectedKey){summary.error="Canonical identity mismatch";return summary;}
+-        p.entryKey=p.itemKey+"#"+QString::number(++observedOccurrences[p.itemKey]);
++        if(unresolved){
++            if(!p.itemKey.startsWith("placeholder:"+source.key+":")){summary.error="Invalid unresolved placeholder identity";return summary;}
++            const auto fingerprint=placeholderFingerprint(source.key,p.title,p.url);
++            const auto candidates=priorPlaceholders.value(fingerprint);
++            int priorIndexForPlaceholder=-1;
++            for(const auto candidate:candidates)if(!matchedPrior.contains(candidate)){priorIndexForPlaceholder=candidate;break;}
++            if(priorIndexForPlaceholder>=0){
++                matchedPrior.insert(priorIndexForPlaceholder);
++                p.itemKey=prior[priorIndexForPlaceholder].itemKey;
++                p.entryKey=prior[priorIndexForPlaceholder].entryKey;
++            }else{
++                p.itemKey=expectedKey;
++                int ordinal=1;
++                while(canonicalIndex.contains(p.itemKey)){
++                    ++ordinal;
++                    const auto suffix=QString::fromLatin1(QCryptographicHash::hash((fingerprint+"|"+QString::number(ordinal)).toUtf8(),QCryptographicHash::Sha1).toHex().left(8));
++                    p.itemKey=expectedKey+":occurrence-"+suffix;
++                }
++                p.entryKey=p.itemKey+"#1";
++            }
++        }else{
++            if(p.itemKey!=expectedKey){summary.error="Canonical identity mismatch";return summary;}
++            p.entryKey=p.itemKey+"#"+QString::number(++observedOccurrences[p.itemKey]);
++        }
+         observedKeys.insert(p.entryKey);
+         const bool hadPrior=priorIndex.contains(p.entryKey);
+         PlaylistItem previous;
+@@ -838,13 +868,26 @@ QString availabilityFromEntry(const QJsonObject& e)
+     return a.isEmpty()?"public":a;
+ }
+ 
+-QString canonicalKey(const QString& providerId,const QString& sourceKey,int position,const QString& title)
++QString placeholderFingerprint(const QString& sourceKey,const QString& title,const QString& url)
+ {
+-    if(!providerId.trimmed().isEmpty()) return "youtube:"+providerId.trimmed();
+-    const QByteArray material=(sourceKey+"|"+QString::number(position)+"|"+title).toUtf8();
++    const auto normalize=[](QString value){return value.trimmed().normalized(QString::NormalizationForm_KC).toCaseFolded();};
++    return sourceKey+"|"+normalize(title)+"|"+normalize(url);
++}
++
++QString placeholderBaseKey(const QString& sourceKey,const QString& title,const QString& url)
++{
++    const auto material=placeholderFingerprint(sourceKey,title,url).toUtf8();
+     return "placeholder:"+sourceKey+":"+QString::fromLatin1(QCryptographicHash::hash(material,QCryptographicHash::Sha1).toHex().left(16));
+ }
+ 
++QString canonicalKey(const QString& providerId,const QString& sourceKey,int,const QString& title)
++{
++    if(!providerId.trimmed().isEmpty()) return "youtube:"+providerId.trimmed();
++    // Position is mutable playlist metadata, not identity. Unresolved
++    // duplicate occurrences are separated during reconciliation.
++    return placeholderBaseKey(sourceKey,title);
++}
++
+ QString derivedStatus(const PlaylistItem& p,const CanonicalItem* c)
+ {
+     if(!c) return "Unknown";
+@@ -908,7 +951,7 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
+         if(p.url.isEmpty()) p.url=e.value("url").toString();
+         if(!p.providerId.isEmpty()) p.url="https://www.youtube.com/watch?v="+p.providerId;
+         p.availability=availabilityFromEntry(e);
+-        p.itemKey=canonicalKey(p.providerId,source.key,p.position,p.title);
++        p.itemKey=p.providerId.isEmpty()?placeholderBaseKey(source.key,p.title,p.url):canonicalKey(p.providerId,source.key,p.position,p.title);
+         s.items.append(p);
+     }
+     const bool transient=isTransientText(stderrText);
+@@ -952,7 +995,23 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
+     }
+     if(video&&videos==0)result.errors<<"No video stream";
+     if(!video&&(audios==0||videos!=0))result.errors<<"Audio representation needs AAC audio without a moving-video stream";
+-    result.ok=result.errors.isEmpty();return result;
++    if(!result.errors.isEmpty())return result;
++
++    // Metadata can survive a truncated fast-start MP4. Decode every canonical
++    // media stream before allowing the representation to become complete.
++    const auto ffmpeg=tools.ffmpeg();
++    if(ffmpeg.isEmpty()){result.errors<<"FFmpeg is required for full media integrity validation";return result;}
++    QStringList integrityArgs={"-hide_banner","-nostdin","-v","error","-xerror","-i",absolute};
++    if(video) integrityArgs<<"-map"<<"0:v:0?"<<"-map"<<"0:a:0?";
++    else integrityArgs<<"-map"<<"0:a:0?";
++    integrityArgs<<"-f"<<"null"<<"-";
++    const auto integrity=runProcess(ffmpeg,integrityArgs,m_config.archiveRoot,10*60*1000);
++    if(!integrity.ok){
++        const auto detail=integrity.standardError.trimmed().left(1600);
++        result.errors<<("Full media integrity decode failed: "+(detail.isEmpty()?integrity.error:detail));
++        return result;
++    }
++    result.ok=true;return result;
+ }
+ 
+ MediaExecutor::MediaExecutor(RuntimeConfig c,Store& s,ActivityLogger& l):m_config(std::move(c)),m_store(s),m_logger(l),m_tools(m_config),m_verifier(m_config,l){}
+diff --git a/src/archive/archivesafety.h b/src/archive/archivesafety.h
+index 033fdae2..2de26110 100644
+--- a/src/archive/archivesafety.h
++++ b/src/archive/archivesafety.h
+@@ -12,6 +12,13 @@
+ #include <QSaveFile>
+ #include <QSet>
+ #include <QMap>
++#ifdef Q_OS_WIN
++#include <windows.h>
++#include <winioctl.h>
++#ifndef FSCTL_GET_REPARSE_POINT
++#define FSCTL_GET_REPARSE_POINT 0x000900A8
++#endif
++#endif
+ 
+ namespace archive { namespace detail {
+ inline bool reject(QString* error,const QString& message){if(error)*error=message;return false;}
+@@ -21,11 +28,33 @@ inline bool relativeSafe(const QString& path){
+     if(path.isEmpty()||QDir::isAbsolutePath(path)||path.contains('\\'))return false;
+     const auto parts=path.split('/');
+     const QRegularExpression bad("[\\x00-\\x1F\\x7F:*?\"<>|]");
+-    const QRegularExpression reserved("^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$)",QRegularExpression::CaseInsensitiveOption);
++    const QRegularExpression reserved("^(CON|PRN|AUX|NUL|COM(?:[1-9]|[¹²³])|LPT(?:[1-9]|[¹²³]))(?:\\.|$)",QRegularExpression::CaseInsensitiveOption);
+     for(const auto& part:parts)
+         if(part.isEmpty()||part=="."||part==".."||part.size()>240||part.endsWith('.')||part.endsWith(' ')||bad.match(part).hasMatch()||reserved.match(part).hasMatch())return false;
+     return true;
+ }
++inline bool isPermittedCloudFilesTag(quint32 tag){
++    // IO_REPARSE_TAG_CLOUD_0..15 are 0x9000n01A. These are not name-surrogate
++    // links and may be traversed as ordinary synchronized Archive ancestors.
++    return (tag&0xFFFF0FFFu)==0x9000001Au;
++}
++#ifdef Q_OS_WIN
++inline bool windowsReparseSafe(const QString& path){
++    const auto native=QDir::toNativeSeparators(path);
++    const auto attributes=GetFileAttributesW(reinterpret_cast<LPCWSTR>(native.utf16()));
++    if(attributes==INVALID_FILE_ATTRIBUTES||!(attributes&FILE_ATTRIBUTE_REPARSE_POINT))return true;
++    const auto handle=CreateFileW(reinterpret_cast<LPCWSTR>(native.utf16()),FILE_READ_ATTRIBUTES,
++                                  FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,
++                                  FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_BACKUP_SEMANTICS,nullptr);
++    if(handle==INVALID_HANDLE_VALUE)return false;
++    BYTE buffer[MAXIMUM_REPARSE_DATA_BUFFER_SIZE]{};DWORD returned=0;
++    const bool queried=DeviceIoControl(handle,FSCTL_GET_REPARSE_POINT,nullptr,0,buffer,sizeof(buffer),&returned,nullptr)!=FALSE;
++    CloseHandle(handle);
++    if(!queried||returned<sizeof(quint32))return false;
++    const auto tag=*reinterpret_cast<const quint32*>(buffer);
++    return isPermittedCloudFilesTag(tag);
++}
++#endif
+ inline bool noLinks(const QString& path){
+     QString current=QDir::cleanPath(QFileInfo(path).absoluteFilePath());
+     for(;;){
+@@ -33,6 +62,9 @@ inline bool noLinks(const QString& path){
+         if(info.isSymLink())return false;
+ #if QT_VERSION >= QT_VERSION_CHECK(6,2,0)
+         if(info.isJunction())return false;
++#endif
++#ifdef Q_OS_WIN
++        if(!windowsReparseSafe(current))return false;
+ #endif
+         const auto parent=info.absolutePath();if(parent==current)break;current=parent;
+     }
+diff --git a/src/archive/archivetab.cpp b/src/archive/archivetab.cpp
+index 1047fa37..84be258e 100644
+--- a/src/archive/archivetab.cpp
++++ b/src/archive/archivetab.cpp
+@@ -1,4 +1,5 @@
+ #include "archivetab.h"
++#include "archivesettings.h"
+ 
+ #include "../settings.h"
+ 
+@@ -21,7 +22,6 @@
+ #include <QMessageBox>
+ #include <QPlainTextEdit>
+ #include <QPushButton>
+-#include <QSettings>
+ #include <QSplitter>
+ #include <QTableWidget>
+ #include <QTabWidget>
+@@ -34,12 +34,6 @@
+ 
+ namespace
+ {
+-QString appSettingsFile()
+-{
+-    const auto d=QDir(QCoreApplication::applicationDirPath()).filePath("local/settings");
+-    QDir().mkpath(d);
+-    return QDir(d).filePath("archive-mode.ini");
+-}
+ QString readText(const QString& path)
+ {
+     QFile f(path); if(!f.open(QIODevice::ReadOnly|QIODevice::Text)) return {}; return QString::fromUtf8(f.readAll());
+@@ -134,23 +128,12 @@ void ArchiveTab::wireUi()
+ 
+ QString ArchiveTab::configuredRoot() const
+ {
+-    QSettings s(appSettingsFile(),QSettings::IniFormat);
+-    const auto relative=s.value("ArchiveRootRelativeToApp").toString();
+-    if(!relative.isEmpty()){
+-        const auto candidate=QDir::cleanPath(QDir(QCoreApplication::applicationDirPath()).filePath(relative));
+-        if(QFileInfo(candidate).isDir()) return candidate;
+-    }
+-    const auto parent=QFileInfo(QCoreApplication::applicationDirPath()).absoluteDir().absolutePath();
+-    if(QFileInfo(QDir(parent).filePath("State")).exists()||QFileInfo(QDir(parent).filePath("Video")).exists()||QFileInfo(QDir(parent).filePath("Audio")).exists()) return parent;
+-    const auto download=m_ctx.Settings().downloadFolder();
+-    if(!download.isEmpty()&&QFileInfo(download).isDir()) return download;
+-    return parent;
++    return archive::ui::configuredRoot(QCoreApplication::applicationDirPath(),m_ctx.Settings().downloadFolder());
+ }
+ 
+ void ArchiveTab::persistRoot(const QString& root)
+ {
+-    const auto app=QCoreApplication::applicationDirPath(); const auto rel=QDir::fromNativeSeparators(QDir(app).relativeFilePath(root));
+-    QSettings s(appSettingsFile(),QSettings::IniFormat); s.setValue("ArchiveRootRelativeToApp",rel); s.sync();
++    archive::ui::persistRoot(root);
+ }
+ 
+ archive::RuntimeConfig ArchiveTab::runtimeConfig() const{return {m_root,QCoreApplication::applicationDirPath()};}
+diff --git a/tests/archive-hardening-tests.cpp b/tests/archive-hardening-tests.cpp
+index 36c6f8e1..aedab11e 100644
+--- a/tests/archive-hardening-tests.cpp
++++ b/tests/archive-hardening-tests.cpp
+@@ -1,4 +1,5 @@
+ #include "../src/archive/archivecore.h"
++#include "../src/archive/archivesafety.h"
+ #include <QCoreApplication>
+ #include <QDir>
+ #include <QFile>
+@@ -16,6 +17,14 @@ using namespace archive;
+ static void require(bool ok,const QString& message){if(!ok)throw std::runtime_error(message.toStdString());}
+ static void put(const QString& path,const QByteArray& bytes){QDir().mkpath(QFileInfo(path).absolutePath());QFile f(path);require(f.open(QIODevice::WriteOnly),"write "+path);require(f.write(bytes)==bytes.size(),"short write");}
+ static QByteArray get(const QString& path){QFile f(path);require(f.open(QIODevice::ReadOnly),"read "+path);return f.readAll();}
++static bool makeDirectoryLink(const QString& target,const QString& link)
++{
++#ifdef Q_OS_WIN
++ return CreateSymbolicLinkW(reinterpret_cast<LPCWSTR>(link.utf16()),reinterpret_cast<LPCWSTR>(target.utf16()),0x3)!=0;
++#else
++ return QFile::link(target,link);
++#endif
++}
+ struct Fixture {
+  QTemporaryDir tmp; Paths paths{tmp.path()}; Store store{paths}; ActivityLogger logger{paths};
+  RuntimeConfig config{tmp.path(),QCoreApplication::applicationDirPath()};
+@@ -28,7 +37,14 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
+  else if(name=="discovery-null"){Source s;auto r=PlaylistDiscovery::parse(s,R"({"entries":[null]})","",0);require(!r.complete,"null entries must prevent removal inference");}
+  else if(name=="discovery-count"){Source s;auto r=PlaylistDiscovery::parse(s,R"({"entries":[],"playlist_count":3})","",0);require(!r.complete,"truncated playlist must be partial");}
+  else if(name=="discovery-error"){Source s;auto r=PlaylistDiscovery::parse(s,R"({"entries":[]})","ERROR: failed to fetch page",0);require(!r.complete,"ignore-errors cannot authorize removals");}
+- else if(name=="portable-paths"){Fixture f;for(const auto& p:QStringList{"C:escape","Video/../State/items.json","Video\\..\\escape","Video/NUL.mp4","Video/x:stream","Video/trailing. ","Video//x","Video/./x"})require(!f.paths.isSafeRelative(p),"unsafe portable path accepted: "+p);require(f.paths.isSafeRelative("Video/a file [abc123DEF45].mp4"),"normal path rejected");}
++  else if(name=="portable-paths"){Fixture f;for(const auto& p:QStringList{"C:escape","Video/../State/items.json","Video\\..\\escape","Video/NUL.mp4","Video/x:stream","Video/trailing. ","Video//x","Video/./x"})require(!f.paths.isSafeRelative(p),"unsafe portable path accepted: "+p);require(f.paths.isSafeRelative("Video/a file [abc123DEF45].mp4"),"normal path rejected");}
++  else if(name=="reserved-device-variants"){Fixture f;for(const auto& p:QStringList{"Video/CON.txt","Video/com1.mp4","Video/COM¹.mp4","Video/COM².mp4","Video/COM³.mp4","Video/LPT¹.txt"})require(!f.paths.isSafeRelative(p),"reserved device name accepted: "+p);}
++  else if(name=="reparse-policy"){require(detail::isPermittedCloudFilesTag(0x9000601Au),"Cloud Files family rejected");require(!detail::isPermittedCloudFilesTag(0xA000000Cu),"symbolic-link tag permitted");require(!detail::isPermittedCloudFilesTag(0xA0000003u),"junction tag permitted");require(!detail::isPermittedCloudFilesTag(0x12345678u),"unknown tag permitted");}
++  else if(name=="root-symlink"){QTemporaryDir base,target;require(base.isValid()&&target.isValid(),"temporary roots");const auto link=QDir(base.path()).filePath("root-link");require(makeDirectoryLink(target.path(),link),"create root symbolic link");Paths p(link);QString e;require(!p.ensureLayout(&e),"symbolic-link Archive Root accepted");}
++  else if(name=="parent-symlink"){QTemporaryDir base,target;require(base.isValid()&&target.isValid(),"temporary roots");const auto link=QDir(base.path()).filePath("parent-link");require(makeDirectoryLink(target.path(),link),"create parent symbolic link");Paths p(QDir(link).filePath("archive"));QString e;require(!p.ensureLayout(&e),"symbolic-link Archive Root parent accepted");}
++  else if(name=="linked-state"){Fixture f;const auto outside=QDir(f.tmp.path()).filePath("outside-state");QDir().mkpath(outside);QDir(f.paths.state()).removeRecursively();require(makeDirectoryLink(outside,f.paths.state()),"create linked State directory");QString e;require(!f.paths.ensureLayout(&e),"linked State directory accepted");}
++  else if(name=="linked-media"){Fixture f;const auto outside=QDir(f.tmp.path()).filePath("outside-video");QDir().mkpath(outside);QDir(f.paths.video()).removeRecursively();require(makeDirectoryLink(outside,f.paths.video()),"create linked Video directory");QString e;require(!f.paths.ensureLayout(&e),"linked Video directory accepted");}
++  else if(name=="placeholder-position"){require(canonicalKey({},"PLAUDIT",1,"Unresolved")==canonicalKey({},"PLAUDIT",99,"Unresolved"),"placeholder identity depends on mutable position");}
+  else if(name=="source-traversal"){Fixture f;Source s=f.source;s.key="..";Snapshot snap;snap.sourceKey=s.key;snap.complete=true;require(!f.store.reconcile(s,snap).committed,"unsafe source key must fail");}
+  else if(name=="state-shape"){Fixture f;put(f.paths.itemsFile(),"{\"unexpected\":true}");QString e;f.store.loadCanonicalItems(&e);require(!e.isEmpty(),"wrong JSON root must be an error");const auto before=get(f.paths.itemsFile());Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(!f.store.reconcile(f.source,s).committed,"corrupt store must block writes");require(get(f.paths.itemsFile())==before,"corrupt state was overwritten");}
+  else if(name=="source-state-corruption"){Fixture f;put(f.paths.sourcesFile(),"not json");Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(!f.store.reconcile(f.source,s).committed,"corrupt sources must block reconciliation");require(get(f.paths.sourcesFile())=="not json","source registry destroyed");}

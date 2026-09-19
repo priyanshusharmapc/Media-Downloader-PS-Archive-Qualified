@@ -1,0 +1,14 @@
+﻿{
+    "observedAt":  "2026-09-15T23:18:59.9234442+05:30",
+    "portableRoot":  "Z:\\KILOCODE WORK\\Media Downloader Harness\\MDH\\_staging\\release-output-ready-261f\\Media-Downloader-PS-Portable",
+    "sourceCommit":  "261fcef529be7982b9048a39161941c1572b3044",
+    "itemExit":  1,
+    "playlistExit":  3,
+    "canonicalRecordCount":  1,
+    "availability":  "unknown",
+    "videoState":  "failed",
+    "audioState":  "failed",
+    "errorRecorded":  true,
+    "mediaPublished":  0,
+    "pass":  true
+}
