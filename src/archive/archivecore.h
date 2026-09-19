@@ -30,6 +30,9 @@ struct Representation
     QString path;
     QString origin;
     QString verifiedAt;
+    QString verifiedSha256;
+    qint64 verifiedSize = -1;
+    QString verificationProfile;
     QString error;
 };
 
