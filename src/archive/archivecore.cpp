@@ -1286,7 +1286,7 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
         const auto stream=value.toObject();const auto type=stream.value("codec_type").toString();
         if(type=="video"&&stream.value("disposition").toObject().value("attached_pic").toInt()==0){
             ++videos;
-            if(stream.value("codec_name")!="h264"||stream.value("pix_fmt")!="yuv420p"||stream.value("width").toInt()<=0||stream.value("height").toInt()<=0||stream.value("height").toInt()>1080)result.errors<<"Video must be H.264/yuv420p at no more than 1080 lines";
+            if(stream.value("codec_name")!="h264"||stream.value("pix_fmt")!="yuv420p"||stream.value("width").toInt()<=0||stream.value("height").toInt()<=0||stream.value("width").toInt()>1920||stream.value("height").toInt()>1080)result.errors<<"Video must be H.264/yuv420p within the 1920x1080 canonical envelope";
         }
         if(type=="audio"){++audios;if(stream.value("codec_name")!="aac")result.errors<<"Every audio stream must be AAC";}
     }
