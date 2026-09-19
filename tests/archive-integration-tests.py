@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--cli', required=True, type=Path)
@@ -621,11 +622,31 @@ class ArchiveIntegration(unittest.TestCase):
         ffbin = self.package / '3rdParty/ffmpeg/bin'
         shutil.copytree(Path(FFMPEG).parent, ffbin)
         commit = 'a' * 40
-        (self.package / 'build-identity.json').write_text(json.dumps({'commit': commit, 'qualification': 'windows-ci-qualified-for-local-harness', 'run_id': 'fixture'}))
+        run_id = '123456789'
+        repository = 'example/qualified-repo'
+        artifact_id = '987654321'
+        (self.package / 'build-identity.json').write_text(json.dumps({
+            'repository': repository, 'commit': commit, 'run_id': run_id,
+            'qualification': 'windows-ci-qualified-for-local-harness'
+        }))
         (self.package / 'PORTABLE_MANIFEST.txt').write_text('deterministic fixture package')
         manifest = '\n'.join(sha(p) + '  ' + p.relative_to(self.package).as_posix() for p in self.package.rglob('*') if p.is_file()) + '\n'
         (self.package / 'SHA256SUMS.txt').write_text(manifest, encoding='ascii')
-        args = [powershell, '-NoProfile', '-File', script, '-ArchiveRoot', self.root, '-PlaylistUrl', SOURCE_URL, '-VideoUrl', VIDEO_URL, '-ExpectedCommit', commit]
+
+        artifact = self.package.parent / 'qualified-artifact.zip'
+        with zipfile.ZipFile(artifact, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for path in self.package.rglob('*'):
+                if path.is_file():
+                    archive.write(path, (Path('Media-Downloader-PS') / path.relative_to(self.package)).as_posix())
+        artifact_sha = sha(artifact)
+
+        args = [
+            powershell, '-NoProfile', '-NonInteractive', '-File', script,
+            '-ArchiveRoot', self.root, '-PlaylistUrl', SOURCE_URL, '-VideoUrl', VIDEO_URL,
+            '-ExpectedCommit', commit, '-ExpectedArtifactSha256', artifact_sha,
+            '-ExpectedArtifactId', artifact_id, '-ExpectedRunId', run_id,
+            '-ExpectedRepository', repository, '-ArtifactZipPath', artifact
+        ]
         result = run(args, env=self.env, timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         receipt = list(self.root.glob('local-harness-evidence-*.json'))
@@ -635,18 +656,55 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertEqual(evidence['source_key'], 'PLAUDIT')
         self.assertEqual(evidence['active_occurrences'], 1)
         self.assertTrue(evidence['entry_key'])
+        self.assertEqual(evidence['artifact_id'], artifact_id)
+        self.assertEqual(evidence['artifact_sha256'], artifact_sha)
+        self.assertEqual(evidence['repository'], repository)
+        self.assertEqual(str(evidence['ci_run_id']), run_id)
         self.assertEqual(evidence['result'], 'PASS')
 
-        unrelated_args = [powershell, '-NoProfile', '-File', script, '-ArchiveRoot', self.root, '-PlaylistUrl', SOURCE_URL,
-                          '-VideoUrl', 'https://www.youtube.com/watch?v=ZZZ999yyy88', '-ExpectedCommit', commit, '-AllowExistingArchive']
-        unrelated = run(unrelated_args, env=self.env, timeout=120)
+        # The same anchored package must not qualify a requested video that is
+        # unrelated to the scanned playlist.
+        unrelated_args = list(args)
+        unrelated_args[unrelated_args.index('-VideoUrl') + 1] = 'https://www.youtube.com/watch?v=ZZZ999yyy88'
+        unrelated = run(unrelated_args + ['-AllowExistingArchive'], env=self.env, timeout=120)
         self.assertNotEqual(unrelated.returncode, 0)
         self.assertIn('not an active occurrence', unrelated.stdout + unrelated.stderr)
         self.assertEqual(len(list(self.root.glob('local-harness-evidence-*.json'))), 1)
 
-        (self.package / 'PORTABLE_MANIFEST.txt').write_text('tampered')
-        result = run(args + ['-AllowExistingArchive'], env=self.env, timeout=120)
-        self.assertNotEqual(result.returncode, 0)
+        # A wrong artifact is rejected even if the package claims the same
+        # repository/run/commit identity.
+        wrong_artifact = self.package.parent / 'wrong-artifact.zip'
+        shutil.copy2(artifact, wrong_artifact)
+        with wrong_artifact.open('ab') as stream:
+            stream.write(b'wrong-artifact')
+        wrong = list(args)
+        wrong[wrong.index('-ArtifactZipPath') + 1] = wrong_artifact
+        wrong_result = run(wrong + ['-AllowExistingArchive'], env=self.env, timeout=120)
+        self.assertNotEqual(wrong_result.returncode, 0)
+        self.assertIn('External artifact SHA-256', wrong_result.stdout + wrong_result.stderr)
+
+        # A coherently resealed extracted package must still fail because the
+        # externally anchored ZIP is unchanged.
+        (self.package / 'PORTABLE_MANIFEST.txt').write_text('coherently tampered')
+        manifest = '\n'.join(
+            sha(p) + '  ' + p.relative_to(self.package).as_posix()
+            for p in self.package.rglob('*')
+            if p.is_file() and p.name != 'SHA256SUMS.txt'
+        ) + '\n'
+        (self.package / 'SHA256SUMS.txt').write_text(manifest, encoding='ascii')
+        resealed = run(args + ['-AllowExistingArchive'], env=self.env, timeout=120)
+        self.assertNotEqual(resealed.returncode, 0)
+        self.assertIn('differs from externally anchored artifact', resealed.stdout + resealed.stderr)
+        self.assertEqual(len(list(self.root.glob('local-harness-evidence-*.json'))), 1)
+
+        # No external digest/artifact identity means no qualified acceptance.
+        missing_anchor = [
+            powershell, '-NoProfile', '-NonInteractive', '-File', script,
+            '-ArchiveRoot', self.root, '-PlaylistUrl', SOURCE_URL, '-VideoUrl', VIDEO_URL,
+            '-ExpectedCommit', commit
+        ]
+        absent = run(missing_anchor + ['-AllowExistingArchive'], env=self.env, timeout=30)
+        self.assertNotEqual(absent.returncode, 0)
         self.assertEqual(len(list(self.root.glob('local-harness-evidence-*.json'))), 1)
 
     def test_malformed_journal_payload_is_rejected_before_any_write(self):
