@@ -11,7 +11,7 @@ source=(root/"src/networkAccess.cpp").read_text(encoding="utf-8")
 
 assert "bool write( const QByteArray& e )" in header
 assert "written != e.size()" in header
-assert "m_writeFailed = true" in header
+assert "m_writeFailed = true" in header\nassert "m_file.get() == nullptr" in header
 assert "bool writeFailed() const" in header
 
 assert "if( md.file.write( data ) )" in source
