@@ -2048,15 +2048,49 @@ void engines::engine::baseEngine::openLocalFile( const engines::engine::baseEngi
 		}
 	}() ;
 
-	auto s = QDir::fromNativeSeparators( e ) ;
-	auto ss = QDir::fromNativeSeparators( l.downloadFolder ) ;
+	const auto normalizedRoot = QDir::cleanPath( QDir::fromNativeSeparators( l.downloadFolder ) ) ;
+	const auto reported = QDir::fromNativeSeparators( e ) ;
 
-	if( s.startsWith( ss ) ){
+	if( normalizedRoot.isEmpty() || reported.isEmpty() ){
 
-		m_settings.openUrl( s ) ;
-	}else{
-		m_settings.openUrl( l.downloadFolder + "/" + e ) ;
+		return ;
 	}
+
+	const auto candidatePath = QDir::isAbsolutePath( reported ) ?
+		QDir::cleanPath( reported ) :
+		QDir::cleanPath( QDir( normalizedRoot ).filePath( reported ) ) ;
+
+	auto canonicalOrClean = []( const QString& path ){
+
+		const QFileInfo info( path ) ;
+		const auto canonical = info.canonicalFilePath() ;
+
+		return canonical.isEmpty() ?
+			QDir::cleanPath( QDir::fromNativeSeparators( path ) ) :
+			QDir::fromNativeSeparators( canonical ) ;
+	} ;
+
+	const auto root = canonicalOrClean( normalizedRoot ) ;
+	const auto candidate = canonicalOrClean( candidatePath ) ;
+	const auto rootPrefix = root.endsWith( '/' ) ? root : root + "/" ;
+
+#ifdef Q_OS_WIN
+	const auto caseSensitivity = Qt::CaseInsensitive ;
+#else
+	const auto caseSensitivity = Qt::CaseSensitive ;
+#endif
+
+	const auto inRoot = candidate.compare( root,caseSensitivity ) == 0 ||
+		candidate.startsWith( rootPrefix,caseSensitivity ) ;
+
+	// Engine output is not an authorization to open arbitrary local files.
+	// Refuse sibling-prefix, absolute out-of-root and relative traversal paths.
+	if( !inRoot ){
+
+		return ;
+	}
+
+	m_settings.openUrl( candidate ) ;
 }
 
 engines::engine::baseEngine::onlineVersion engines::engine::baseEngine::versionInfoFromGithub( const QByteArray& e )
