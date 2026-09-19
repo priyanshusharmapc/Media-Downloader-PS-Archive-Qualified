@@ -92,3 +92,10 @@ membership handling for suspect responses.
 [Transaction outcomes and projection repair](remediation/025.md) documents
 accurate accepted counts, separate post-commit warnings, CLI exit codes, and
 non-destructive report-only recovery.
+
+
+## Existing-media provider binding
+
+[Existing-media provenance](remediation/006.md) documents the provider-ID,
+path and SHA-256 binding required before an existing file can be adopted into
+canonical history.

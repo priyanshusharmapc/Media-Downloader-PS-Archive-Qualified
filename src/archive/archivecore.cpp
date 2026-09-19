@@ -1132,22 +1132,71 @@ ProcessResult MediaExecutor::run(const QString& program,const QStringList& args,
     return r;
 }
 
-QString MediaExecutor::findExistingById(const QString& relativeDir,const QString& id,const QStringList& extensions) const
+bool MediaExecutor::mediaBindingValid(const QString& relativePath,const QString& providerId,const QString& kind) const
 {
-    if(!detail::videoIdSafe(id)) return {};
-    QString fallback;
+    if(!detail::videoIdSafe(providerId)||!m_store.paths().isSafeRelative(relativePath))return false;
+    const auto key=detail::digest(relativePath.toUtf8());
+    const auto bindingPath=QDir(m_store.paths().archiveState()).filePath("MediaBindings/"+key+".json");
+    if(!QFileInfo::exists(bindingPath)||!detail::noLinks(bindingPath))return false;
+    QByteArray bytes;QString error;
+    if(!detail::readBytes(bindingPath,&bytes,&error))return false;
+    const auto doc=QJsonDocument::fromJson(bytes);
+    if(!doc.isObject())return false;
+    const auto o=doc.object();
+    if(o.value("schema_version").toInt()!=1||
+       o.value("provider").toString()!="youtube"||
+       o.value("provider_id").toString()!=providerId||
+       o.value("kind").toString()!=kind||
+       o.value("path").toString()!=relativePath)return false;
+    const auto absolute=m_store.paths().absoluteFromRelative(relativePath);
+    const auto expected=o.value("sha256").toString();
+    return !absolute.isEmpty()&&!expected.isEmpty()&&detail::fileDigest(absolute,&error)==expected;
+}
+
+bool MediaExecutor::writeMediaBinding(const QString& relativePath,const CanonicalItem& item,const QString& kind,QString* error) const
+{
+    if(!detail::videoIdSafe(item.providerId)||!m_store.paths().isSafeRelative(relativePath))
+        return detail::reject(error,"Cannot bind unsafe media identity");
+    const auto absolute=m_store.paths().absoluteFromRelative(relativePath);
+    const auto hash=detail::fileDigest(absolute,error);if(hash.isEmpty())return false;
+    const QJsonObject binding{{"schema_version",1},{"provider","youtube"},{"provider_id",item.providerId},
+        {"item_key",item.key},{"kind",kind},{"path",relativePath},{"sha256",hash},{"bound_at",nowIso()}};
+    const auto key=detail::digest(relativePath.toUtf8());
+    const auto target=QDir(m_store.paths().archiveState()).filePath("MediaBindings/"+key+".json");
+    return atomicWrite(target,QJsonDocument(binding).toJson(QJsonDocument::Indented),error);
+}
+
+QString MediaExecutor::findAttemptById(const QString& relativeDir,const QString& id,const QString& attempt,const QStringList& extensions) const
+{
+    if(!detail::videoIdSafe(id)||attempt.isEmpty())return {};
     QDirIterator it(QDir(m_config.archiveRoot).filePath(relativeDir),QDir::Files,QDirIterator::Subdirectories);
     while(it.hasNext()){
-        const auto p=it.next(); const QFileInfo fi(p);
-        if(!fi.fileName().contains("["+id+"]")) continue;
-        if(!extensions.isEmpty() && !extensions.contains(fi.suffix().toLower())) continue;
-        const auto rel=Paths(m_config.archiveRoot).relativeToRoot(p);
-        if(!Paths(m_config.archiveRoot).isSafeRelative(rel))continue;
-        if(fallback.isEmpty())fallback=rel;
+        const auto p=it.next();const QFileInfo fi(p);
+        if(!fi.fileName().contains("["+id+"]")||!fi.fileName().contains("["+attempt+"]"))continue;
+        if(!extensions.isEmpty()&&!extensions.contains(fi.suffix().toLower()))continue;
+        const auto rel=m_store.paths().relativeToRoot(p);
+        if(!m_store.paths().isSafeRelative(rel))continue;
         const auto verified=relativeDir=="Video"?m_verifier.verifyVideo(rel):m_verifier.verifyAudio(rel);
         if(verified.ok)return rel;
     }
-    return fallback;
+    return {};
+}
+
+QString MediaExecutor::findExistingById(const QString& relativeDir,const QString& id,const QStringList& extensions) const
+{
+    if(!detail::videoIdSafe(id))return {};
+    const auto kind=relativeDir=="Video"?QString("video"):QString("audio");
+    QDirIterator it(QDir(m_config.archiveRoot).filePath(relativeDir),QDir::Files,QDirIterator::Subdirectories);
+    while(it.hasNext()){
+        const auto p=it.next();const QFileInfo fi(p);
+        if(!fi.fileName().contains("["+id+"]"))continue;
+        if(!extensions.isEmpty()&&!extensions.contains(fi.suffix().toLower()))continue;
+        const auto rel=m_store.paths().relativeToRoot(p);
+        if(!m_store.paths().isSafeRelative(rel)||!mediaBindingValid(rel,id,kind))continue;
+        const auto verified=kind=="video"?m_verifier.verifyVideo(rel):m_verifier.verifyAudio(rel);
+        if(verified.ok)return rel;
+    }
+    return {};
 }
 
 bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
@@ -1164,9 +1213,9 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
         return false;
     };
     const QString url=item.originalUrl.isEmpty()?"https://www.youtube.com/watch?v="+item.providerId:item.originalUrl;
-    QString output="Video/%(title).120s [%(artist|UNKNOWN)s] [%(height)sp %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s].%(ext)s";
+    const auto attempt="download-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+    QString output="Video/%(title).120s [%(artist|UNKNOWN)s] [%(height)sp %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s] ["+attempt+"].%(ext)s";
     const auto previous=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
-    if(!previous.isEmpty())output.replace(".%(ext)s"," [repair-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8)+"].%(ext)s");
     QStringList args={
         "--ignore-config","--no-playlist","--no-overwrites","--output-na-placeholder","NA",
         "-f","bv[height<=1080][vcodec^=avc]+ba[ext=m4a]/bv[height<=1080][vcodec^=avc]+ba/bv[height<=1080]+ba/b[height<=1080]",
@@ -1184,12 +1233,12 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     args << "--" << url;
     if(!previous.isEmpty())args=withoutDownloadArchive(args);
     auto r=run(m_tools.ytDlp(),args,"video-download");
-    QString rel=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
+    QString rel=findAttemptById("Video",item.providerId,attempt,{"mp4","mkv","webm"});
     if(r.ok && rel.isEmpty()){
         m_logger.event("WARNING","download","video_archive_retry",{{"item_key",item.key}});
         const auto retryArgs=withoutDownloadArchive(args);
         r=run(m_tools.ytDlp(),retryArgs,"video-download-retry-without-archive");
-        rel=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
+        rel=findAttemptById("Video",item.providerId,attempt,{"mp4","mkv","webm"});
     }
     if(!r.ok && rel.isEmpty()) return fail(r.error+" "+r.standardError.left(600));
     if(rel.isEmpty()) return fail("Downloaded video could not be located");
@@ -1210,6 +1259,7 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
         rel=normalized;verify=m_verifier.verifyVideo(rel);
     }
     if(!verify.ok) return fail("Video verification failed: "+verify.errors.join("; "),rel);
+    if(!writeMediaBinding(rel,item,"video",error))return false;
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
     if(!m_store.updateRepresentation(item.key,"video",done,error))return false;
     m_logger.event("INFO","verification","video_complete",{{"item_key",item.key},{"path",rel}});
@@ -1231,25 +1281,22 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
     };
     const QString url=item.originalUrl.isEmpty()?"https://www.youtube.com/watch?v="+item.providerId:item.originalUrl;
     const auto previous=findExistingById("Audio",item.providerId,{"m4a","mp4"});
+    const auto attempt="download-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
     QStringList args={"--ignore-config","--no-playlist","--no-overwrites","--output-na-placeholder","NA","-f","ba[ext=m4a]/ba","--paths","temp:Temp",
-        "-o","Audio/%(title).120s [%(artist|UNKNOWN)s] [m4a %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s].%(ext)s",
+        "-o","Audio/%(title).120s [%(artist|UNKNOWN)s] [m4a %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s] ["+attempt+"].%(ext)s",
         "--download-archive","State/audio-archive.txt","--windows-filenames","-x","--audio-format","m4a","--audio-quality","192K","--no-keep-video",
         "--embed-metadata","--embed-thumbnail","--embed-chapters","--parse-metadata","%(artist|UNKNOWN)s:%(meta_artist)s",
         "--print-to-file","after_move:%(.{id,title,artist,meta_artist,uploader,upload_date,duration,ext,webpage_url,filepath})j","State/audio-catalog.jsonl"};
     appendYtRuntimeArgs(args,m_tools);
     args << "--" << url;
-    if(!previous.isEmpty()){
-        const auto outputIndex=args.indexOf("-o")+1;
-        args[outputIndex].replace(".%(ext)s"," [repair-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8)+"].%(ext)s");
-        args=withoutDownloadArchive(args);
-    }
+    if(!previous.isEmpty())args=withoutDownloadArchive(args);
     auto r=run(m_tools.ytDlp(),args,"audio-download");
-    QString rel=findExistingById("Audio",item.providerId,{"m4a","mp4"});
+    QString rel=findAttemptById("Audio",item.providerId,attempt,{"m4a","mp4"});
     if(r.ok && rel.isEmpty()){
         m_logger.event("WARNING","download","audio_archive_retry",{{"item_key",item.key}});
         const auto retryArgs=withoutDownloadArchive(args);
         r=run(m_tools.ytDlp(),retryArgs,"audio-download-retry-without-archive");
-        rel=findExistingById("Audio",item.providerId,{"m4a","mp4"});
+        rel=findAttemptById("Audio",item.providerId,attempt,{"m4a","mp4"});
     }
     if(!r.ok && rel.isEmpty()) return fail(r.error+" "+r.standardError.left(600));
     if(rel.isEmpty()) return fail("Downloaded audio could not be located");
@@ -1267,6 +1314,7 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
         rel=normalized;verify=m_verifier.verifyAudio(rel);
     }
     if(!verify.ok)return fail("Audio verification failed: "+verify.errors.join("; "),rel);
+    if(!writeMediaBinding(rel,item,"audio",error))return false;
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
     if(!m_store.updateRepresentation(item.key,"audio",done,error))return false;
     m_logger.event("INFO","verification","audio_complete",{{"item_key",item.key},{"path",rel}});

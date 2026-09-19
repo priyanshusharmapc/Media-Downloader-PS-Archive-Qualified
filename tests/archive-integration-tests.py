@@ -441,13 +441,38 @@ class ArchiveIntegration(unittest.TestCase):
         playlist = (self.root / 'Playlists/PLAUDIT/video.m3u8').read_text()
         self.assertEqual(sum(line.startswith('#EXTINF:') for line in playlist.splitlines()), 1)
 
-    def test_valid_existing_media_is_adopted_when_source_unavailable(self):
+    def test_unbound_existing_media_is_not_adopted_when_source_unavailable(self):
         self.scan()
         shutil.copy2(self.video, self.root / 'Video' / ('backup [' + VIDEO_ID + '].mp4'))
         shutil.copy2(self.audio, self.root / 'Audio' / ('backup [' + VIDEO_ID + '].m4a'))
         self.plan['discovery']['entries'][0]['availability'] = 'private'
         self.write_plan(); self.scan()
+        self.command('sync-item', VIDEO_URL, expect=1)
+        item = self.first()
+        self.assertNotEqual(item['video']['state'], 'complete')
+        self.assertNotEqual(item['audio']['state'], 'complete')
+
+    def test_bound_existing_media_is_adopted_when_source_unavailable(self):
+        self.scan()
         self.command('sync-item', VIDEO_URL)
+        item = self.first()
+        self.assertEqual(item['video']['state'], 'complete')
+        self.assertEqual(item['audio']['state'], 'complete')
+        bindings = list((self.root / 'State/ArchiveMode/MediaBindings').glob('*.json'))
+        self.assertGreaterEqual(len(bindings), 2)
+
+        items_path = self.root / 'State/ArchiveMode/items.json'
+        items = json.loads(items_path.read_text(encoding='utf-8'))
+        target = next(x for x in items if x['key'] == 'youtube:' + VIDEO_ID)
+        target['video']['state'] = 'missing'
+        target['audio']['state'] = 'missing'
+        items_path.write_text(json.dumps(items), encoding='utf-8')
+        self.plan['discovery']['entries'][0]['availability'] = 'private'
+        self.write_plan(); self.scan()
+        self.command('sync-item', VIDEO_URL)
+        adopted = self.first()
+        self.assertEqual(adopted['video']['state'], 'complete')
+        self.assertEqual(adopted['audio']['state'], 'complete')
         self.command('verify-item', VIDEO_URL)
 
     @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell acceptance wrapper')
