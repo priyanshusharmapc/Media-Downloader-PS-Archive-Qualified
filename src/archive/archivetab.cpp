@@ -578,27 +578,33 @@ QString ArchiveTab::operationRetryFailed(const archive::Source& source)
         return state=="failed"||state=="interrupted";
     };
 
-    int eligible=0;
+    // Playlist state preserves occurrence identity, so the same canonical item
+    // may appear more than once. Retry work is canonical-item scoped and must
+    // execute at most once for each item key.
+    QSet<QString> eligibleKeys;
     for(const auto& p:playlist){
         if(p.membership!="active"||!map.contains(p.itemKey))continue;
         const auto& item=map[p.itemKey];
-        if(retryable(item.video.state)||retryable(item.audio.state))++eligible;
+        if(retryable(item.video.state)||retryable(item.audio.state))eligibleKeys.insert(p.itemKey);
     }
+    const auto eligible=eligibleKeys.size();
 
     int processed=0;
     int failuresCount=0;
     QStringList failures;
     logger.event("INFO","application","retry_failed_started",{{"source_key",source.key},{"eligible",eligible}});
 
+    QSet<QString> processedKeys;
     for(const auto& p:playlist){
         if(m_stopRequested.load())break;
-        if(p.membership!="active"||!map.contains(p.itemKey))continue;
+        if(p.membership!="active"||!map.contains(p.itemKey)||processedKeys.contains(p.itemKey))continue;
 
         const auto item=map[p.itemKey];
         const bool retryVideo=retryable(item.video.state);
         const bool retryAudio=retryable(item.audio.state);
         if(!retryVideo&&!retryAudio)continue;
 
+        processedKeys.insert(p.itemKey);
         ++processed;
         const auto itemName=p.title.isEmpty()?p.itemKey:p.title;
         postOperationProgress(tr("Retry failed media"),tr("%1 | item %2/%3").arg(itemName).arg(processed).arg(eligible),processed-1,eligible,failuresCount);
