@@ -1118,6 +1118,21 @@ void batchdownloader::addItemToUi( const engines::engine& engine,Items::entry s 
 	m_table.setEngineName( s.engineName,row ) ;
 	m_table.setExtraDownloadOptions( s.downloadExtraOptions,row ) ;
 
+	// Restore command-affecting per-row state that is deliberately stored
+	// outside the ordinary download-options string.
+	if( !s.subtitle.isEmpty() ){
+		m_table.setDownloadingOptions( tableWidget::type::subtitleOption,row,s.subtitle ) ;
+	}
+	if( !s.timeInterval.isEmpty() ){
+		m_table.setDownloadingOptions( tableWidget::type::DownloadTimeInterval,row,s.timeInterval ) ;
+	}
+	if( !s.chapters.isEmpty() ){
+		m_table.setDownloadingOptions( tableWidget::type::DownloadChapters,row,s.chapters ) ;
+	}
+	if( s.splitByChapters ){
+		m_table.setDownloadingOptions( tableWidget::type::SplitByChapters,row,"Yes" ) ;
+	}
+
 	if( s.downloadOptions.isEmpty() ){
 
 		m_ctx.TabManager().Configure().setDownloadOptions( row,m_table ) ;
