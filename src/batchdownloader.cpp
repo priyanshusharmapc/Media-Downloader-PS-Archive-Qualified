@@ -1153,98 +1153,101 @@ void batchdownloader::addItemUiSlot( ItemEntries m )
 
 static QJsonArray _saveComments( const QJsonArray& arr )
 {
-	class comments
+	struct node
 	{
-	public:
-		void add( const QJsonObject& obj )
-		{
-			QJsonObject oo ;
-
-			oo.insert( "id",obj.value( "id" ) ) ;
-			oo.insert( "parent",obj.value( "parent" ) ) ;
-			oo.insert( "author",obj.value( "author" ) ) ;
-			oo.insert( "text",obj.value( "text" ) ) ;
-			oo.insert( "date",obj.value( "date" ) ) ;
-			oo.insert( "text replies",obj.value( "text replies" ) ) ;
-
-			m_objs.append( oo ) ;
-		}
-		void add( const QJsonObject& obj,const QString& parent )
-		{
-			for( int i = 0 ; i < m_objs.size() ; i++ ){
-
-				auto m = m_objs.at( i ).toObject() ;
-
-				if( m.value( "id" ).toString() == parent ){
-
-					this->add( obj,m,i ) ;
-				}
-			}
-		}
-		const QJsonArray& data() const
-		{
-			return m_objs ;
-		}
-	private:
-		void add( const QJsonObject& obj,QJsonObject& ss,int i )
-		{
-			auto replies = this->replies( ss ) ;
-
-			QJsonObject oo ;
-
-			oo.insert( "author",obj.value( "author" ) ) ;
-			oo.insert( "text",obj.value( "text" ) ) ;
-			oo.insert( "date",obj.value( "date" ) ) ;
-
-			replies.append( oo ) ;
-
-			ss.insert( "text replies",replies ) ;
-
-			m_objs.replace( i,ss ) ;
-		}
-		QJsonArray replies( const QJsonObject& obj ) const
-		{
-			auto arr = obj.value( "text replies" ) ;
-
-			if( arr.isUndefined() ){
-
-				return QJsonArray() ;
-			}else{
-				return arr.toArray() ;
-			}
-		}
-		QJsonArray m_objs ;
+		QJsonObject object ;
+		QVector< int > children ;
 	} ;
 
-	comments mm ;
+	QVector< node > nodes ;
+	QHash< QString,int > byId ;
+	nodes.reserve( arr.size() ) ;
 
-	for( const auto& it : arr ){
+	// Index every comment before resolving parents so input order never decides
+	// whether a reply survives export.
+	for( const auto& value : arr ){
 
-		auto obj = it.toObject() ;
+		const auto object = value.toObject() ;
+		const auto index = nodes.size() ;
+		nodes.append( { object,{} } ) ;
 
-		auto parent = obj.value( "parent" ).toString() ;
+		const auto id = object.value( "id" ).toString() ;
+		if( !id.isEmpty() && !byId.contains( id ) ){
 
-		if( parent == "root" ){
-
-			mm.add( obj ) ;
-		}else{
-			mm.add( obj,parent ) ;
+			byId.insert( id,index ) ;
 		}
 	}
 
-	QJsonArray e ;
+	QVector< int > roots ;
+	for( int i = 0 ; i < nodes.size() ; ++i ){
 
-	for( const auto& it : mm.data() ){
+		const auto parent = nodes[ i ].object.value( "parent" ).toString() ;
+		const auto parentIndex = byId.value( parent,-1 ) ;
 
-		auto obj = it.toObject() ;
+		// Missing, malformed and self-parent references remain visible as roots
+		// instead of silently discarding archival evidence.
+		if( parent == "root" || parent.isEmpty() || parentIndex < 0 || parentIndex == i ){
 
-		obj.remove( "parent" ) ;
-		obj.remove( "id" ) ;
-
-		e.append( obj ) ;
+			roots.append( i ) ;
+		}else{
+			nodes[ parentIndex ].children.append( i ) ;
+		}
 	}
 
-	return e ;
+	QVector< bool > emitted( nodes.size(),false ) ;
+	QVector< bool > active( nodes.size(),false ) ;
+
+	std::function< QJsonObject( int ) > build = [ & ]( int index ){
+
+		emitted[ index ] = true ;
+		active[ index ] = true ;
+
+		const auto& source = nodes[ index ].object ;
+		QJsonObject out ;
+		out.insert( "author",source.value( "author" ) ) ;
+		out.insert( "text",source.value( "text" ) ) ;
+		out.insert( "date",source.value( "date" ) ) ;
+
+		QJsonArray replies ;
+		for( const auto child : nodes[ index ].children ){
+
+			if( child < 0 || child >= nodes.size() || active[ child ] || emitted[ child ] ){
+
+				continue ;
+			}
+
+			replies.append( build( child ) ) ;
+		}
+
+		if( !replies.isEmpty() ){
+
+			out.insert( "text replies",replies ) ;
+		}
+
+		active[ index ] = false ;
+		return out ;
+	} ;
+
+	QJsonArray result ;
+	for( const auto root : roots ){
+
+		if( !emitted[ root ] ){
+
+			result.append( build( root ) ) ;
+		}
+	}
+
+	// A malformed parent cycle has no natural root. Emit each still-unseen
+	// component once rather than losing it from the export.
+	for( int i = 0 ; i < nodes.size() ; ++i ){
+
+		if( !emitted[ i ] ){
+
+			result.append( build( i ) ) ;
+		}
+	}
+
+	return result ;
 }
 
 template< typename Array,typename Table >
