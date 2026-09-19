@@ -224,6 +224,22 @@ public:
 			ok = ok && !QFileInfo::exists( root ) ;
 		}
 
+#ifdef Q_OS_WIN
+		// Exercise the top-level reparse case directly on the Windows recursive
+		// primitive. The target sentinel must survive and only the link is removed.
+		const auto topLevelLink = base + "/top-level-link" ;
+		auto nativeTopLevelLink = QDir::toNativeSeparators( topLevelLink ).toStdWString() ;
+		const auto topLevelLinked = CreateSymbolicLinkW( nativeTopLevelLink.c_str(),nativeOutside.c_str(),
+			SYMBOLIC_LINK_FLAG_DIRECTORY | allowUnprivilegedCreate ) != 0 ;
+		ok = ok && topLevelLinked ;
+		if( topLevelLinked ){
+			std::atomic_bool keepGoing{ true } ;
+			directoryManager::removeDirectory( topLevelLink,keepGoing ) ;
+			ok = ok && QFileInfo::exists( outsideDirectoryFile ) ;
+			ok = ok && GetFileAttributesW( nativeTopLevelLink.c_str() ) == INVALID_FILE_ATTRIBUTES ;
+		}
+#endif
+
 		const auto renameRoot = base + "/rename" ;
 		QDir().mkpath( renameRoot ) ;
 		const auto source = renameRoot + "/source.txt" ;
