@@ -37,6 +37,6 @@ See `EVIDENCE_POLICY.md` for the publication/retention contract.
 
 ## Historical record
 
-The pre-publication qualification record is preserved at `history/RELEASE_QUALIFICATION_REPORT-4c720544.md`. Its original local `Qualification-Evidence/...` references describe evidence that was available to that historical qualification process but is not included in this publication repository. The historical record is not evidence for a current candidate.
+The pre-publication qualification record is preserved at `history/RELEASE_QUALIFICATION_REPORT-4c720544.md`. Its original local qualification-evidence paths describe evidence that was available to that historical qualification process but is not included in this publication repository. The historical record is not evidence for a current candidate.
 
 No current qualification claim may cite those unavailable historical paths as if they were directly inspectable publication evidence.
