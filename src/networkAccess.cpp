@@ -892,6 +892,21 @@ void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
         }
     }
 
+    // Validate the expected executable in staging before touching the live
+    // engine tree. A successfully extracted but structurally wrong archive is
+    // an update failure, not a payload that should be committed and diagnosed
+    // only after the previous working version has been discarded.
+    const auto expectedRelative = QDir( opts.tempPath ).relativeFilePath( opts.exeBinPath ) ;
+    const auto stagedExecutable = QDir( opts.updateStagePath ).filePath( expectedRelative ) ;
+    if( QDir::isAbsolutePath( expectedRelative ) || expectedRelative == ".." || expectedRelative.startsWith( "../" ) ||
+        !QFileInfo( stagedExecutable ).isFile() ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Extracted update is missing the expected executable: %1" ).arg( expectedRelative ),opts.id ) ;
+        engine.setBroken() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
+
     QString cleanupWarning ;
     const auto promotion = promoteUpdateDirectoryContents( opts.updateStagePath,opts.tempPath,&cleanupWarning ) ;
     if( !promotion.isEmpty() ){
