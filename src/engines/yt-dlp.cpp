@@ -1517,6 +1517,12 @@ void yt_dlp::updateDownLoadCmdOptions( const engines::engine::baseEngine::update
 		s.ourOptions.append( settings.downloadFolder() ) ;
 	}
 
+	// Assemble the same effective option list yt-dlp will receive before
+	// deriving playlist metadata reconstruction from its final output template.
+	// This keeps engine-default, per-row/user, UI and extra option sources
+	// behaviorally equivalent while preserving baseEngine precedence.
+	engines::engine::baseEngine::updateDownLoadCmdOptions( s,e,extraOpts ) ;
+
 	QStringList mm ;
 
 	for( int m = s.ourOptions.size() - 1 ; m > -1 ; m-- ){
@@ -1550,8 +1556,6 @@ void yt_dlp::updateDownLoadCmdOptions( const engines::engine::baseEngine::update
 
 		s.ourOptions.append( mm ) ;
 	}
-
-	engines::engine::baseEngine::updateDownLoadCmdOptions( s,e,extraOpts ) ;
 
 	if( !utils::misc::containsAny( s.ourOptions,"-f","--format","-S","--format-sort" ) ){
 
