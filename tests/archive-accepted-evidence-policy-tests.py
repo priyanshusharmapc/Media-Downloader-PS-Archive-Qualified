@@ -17,3 +17,12 @@ init=source[source.index("bool Store::initialize"):source.index("QVector<Source>
 assert "verifyAcceptedEvidence(m_paths,error)" in init
 assert init.index("verifyAcceptedEvidence(m_paths,error)") < init.index("recoverStaleRunning")
 print("Accepted recovery evidence integrity policy: PASS")
+
+# Post-acceptance integrity must inspect directory/link/special entries too, not
+# only files recorded in the receipt.
+verify=source[source.index("bool verifyAcceptedEvidence"):source.index("bool Store::initialize")]
+assert "QDir::AllEntries" in verify and "QDir::System" in verify
+assert "info.isSymLink()" in verify
+assert "if(info.isDir())continue" in verify
+assert "if(!info.isFile())" in verify
+assert "QDir::Files|QDir::Hidden" not in verify
