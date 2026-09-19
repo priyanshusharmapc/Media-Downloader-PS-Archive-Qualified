@@ -135,9 +135,7 @@ bool Logger::clearDownloadHistory()
 
 		if( QFile::exists( e ) ){
 
-			QFile::remove( e ) ;
-
-			return true ;
+			return QFile::remove( e ) ;
 		}else{
 			return false ;
 		}
