@@ -254,10 +254,13 @@ void MainWindow::setUpSignal( int sig )
 	std::signal( sig,MainWindow::signalHandler ) ;
 }
 
-void MainWindow::closeEvent( QCloseEvent * )
+void MainWindow::closeEvent( QCloseEvent * event )
 {
 	if( m_showTrayIcon ){
 
+		// Tray mode means "hide", not "close". Reject the Qt close request so
+		// last-window-close cannot terminate the process behind our shutdown path.
+		event->ignore() ;
 		this->hide() ;
 	}else{
 		this->quitApp() ;
