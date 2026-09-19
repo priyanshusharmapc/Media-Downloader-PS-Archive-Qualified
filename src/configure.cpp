@@ -1416,24 +1416,13 @@ void configure::saveOptions()
 	m_settings.setUseSystemEngine( m_ui.cbConfigureUseSystemEngine->isChecked() ) ;
 	auto s = m_ui.lineEditConfigureMaximuConcurrentDownloads->text() ;
 
-	if( s.isEmpty() ){
+	bool maxDownloadsOk = false ;
+	const auto maxDownloads = s.toInt( &maxDownloadsOk ) ;
 
-		m_settings.setMaxConcurrentDownloads( 4 ) ;
-	}else{
-		bool ok ;
-
-		auto m = s.toInt( &ok ) ;
-
-		if( ok ){
-
-			if( m == 0 ){
-
-				m_settings.setMaxConcurrentDownloads( 4 ) ;
-			}else{
-				m_settings.setMaxConcurrentDownloads( m ) ;
-			}
-		}
-	}
+	// Persist one well-defined positive value. Empty, malformed, overflowed,
+	// zero and negative text all fall back to the established default instead
+	// of leaving stale or wrapped concurrency state behind.
+	m_settings.setMaxConcurrentDownloads( maxDownloadsOk && maxDownloads > 0 ? maxDownloads : 4 ) ;
 
 	auto mm = m_ui.cbConfigureEngines->currentText() ;
 
