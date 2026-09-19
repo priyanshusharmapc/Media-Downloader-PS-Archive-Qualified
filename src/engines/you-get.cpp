@@ -203,7 +203,11 @@ const QByteArray& you_get::you_getFilter::operator()( Logger::Data& s )
 			} ) ;
 		}
 
-		s.addFileName( m_title ) ;
+		if( !m_outputFile.isEmpty() ){
+
+			s.addFileName( m_outputFile ) ;
+			return m_outputFile ;
+		}
 
 		return m_title ;
 
@@ -241,30 +245,46 @@ const QByteArray& you_get::you_getFilter::operator()( Logger::Data& s )
 
 		if( a != -1 && b != -1 ){
 
-			auto s = strLen( "Skipping ./" ) ;
+			auto len = strLen( "Skipping ./" ) ;
 
-			m_title = m.mid( a + s, b - ( a + s ) ) ;
+			m_outputFile = m.mid( a + len, b - ( a + len ) ).trimmed() ;
 
-			return m_title ;
+			return m_outputFile ;
 		}else{
-			auto a = m.indexOf( "Merged into " ) ;
+			// Filesystem output identity is separate from the human-readable
+			// metadata title. A final "Merged into" event may be the last line of
+			// the process, so its endpoint is the line boundary, not an unrelated
+			// later Saving/Skipping marker.
+			auto captureOutputLine = [ & ]( const char * marker,bool stripDots ){
 
-			if( a != -1 ){
+				auto markerPos = m.lastIndexOf( marker ) ;
+				if( markerPos == -1 )return QByteArray() ;
 
-				auto b = m.indexOf( "Saving" ) ;
+				auto begin = markerPos + strLen( marker ) ;
+				auto end = m.indexOf( '\n',begin ) ;
+				if( end == -1 )end = m.size() ;
 
-				if( b == -1 ){
-
-					b = m.indexOf( "Skipping " ) ;
+				auto value = m.mid( begin,end - begin ).trimmed() ;
+				if( stripDots && value.endsWith( "..." ) ){
+					value.chop( 3 ) ;
+					value = value.trimmed() ;
 				}
+				if( value.startsWith( "./" ) )value.remove( 0,2 ) ;
+				return value ;
+			} ;
 
-				if( a != -1 && b != -1 ){
+			auto merged = captureOutputLine( "Merged into ",false ) ;
+			if( !merged.isEmpty() ){
 
-					auto s = strLen( "Merged into " ) ;
-					m_title = m.mid( a + s, b - ( a + s ) ) ;
+				m_outputFile = merged ;
+				return m_outputFile ;
+			}
 
-					return m_title ;
-				}
+			auto downloading = captureOutputLine( "Downloading ",true ) ;
+			if( !downloading.isEmpty() ){
+
+				m_outputFile = downloading ;
+				return m_outputFile ;
 			}
 
 			return m_preProcessing.text() ;
