@@ -73,6 +73,56 @@ bool pathInside(const QString& baseDir,const QString& path)
 #endif
     return child.compare(base,cs)==0||child.startsWith(base+QDir::separator(),cs);
 }
+
+struct RepresentationHealth
+{
+    bool present=false;
+    bool verified=false;
+    QString label;
+};
+
+RepresentationHealth representationHealth(const archive::Paths& paths,const archive::Representation& representation)
+{
+    if(representation.state!="complete")return {false,false,QStringLiteral("Not complete")};
+    if(representation.path.isEmpty()||!paths.isSafeRelative(representation.path))
+        return {false,false,QStringLiteral("Missing")};
+    const QFileInfo file(paths.absoluteFromRelative(representation.path));
+    if(!file.isFile()||file.size()<=0)return {false,false,QStringLiteral("Missing")};
+
+    // verifiedAt is durable proof that a full verifier pass completed. Treat it
+    // as current only while the exact stored path remains a safe, non-empty file
+    // whose modification time has not advanced since that pass. This keeps GUI
+    // refresh cheap while failing closed after ordinary deletion/truncation/edit.
+    auto verifiedAt=QDateTime::fromString(representation.verifiedAt,Qt::ISODateWithMs);
+    if(!verifiedAt.isValid())verifiedAt=QDateTime::fromString(representation.verifiedAt,Qt::ISODate);
+    if(!verifiedAt.isValid()||file.lastModified().toUTC()>verifiedAt.toUTC())
+        return {true,false,QStringLiteral("Verification stale")};
+    return {true,true,QStringLiteral("Verified")};
+}
+
+QString representationDisplay(const archive::Representation& representation,const RepresentationHealth& health)
+{
+    return representation.state=="complete"
+        ? QStringLiteral("complete · %1").arg(health.label)
+        : representation.state;
+}
+
+QString healthAdjustedStatus(const archive::PlaylistItem& playlist,const archive::CanonicalItem* canonical,const archive::Paths& paths)
+{
+    const auto durable=archive::derivedStatus(playlist,canonical);
+    if(!canonical)return durable;
+    const auto video=representationHealth(paths,canonical->video);
+    const auto audio=representationHealth(paths,canonical->audio);
+    const bool bothPresent=video.present&&audio.present;
+    const bool bothVerified=video.verified&&audio.verified;
+    if(durable=="Protected"||durable=="Unavailable · Archived"){
+        if(!bothPresent)return QStringLiteral("Missing");
+        if(!bothVerified)return QStringLiteral("Verification Stale");
+    }else if(durable=="Removed · Archived"&&!bothVerified){
+        return QStringLiteral("Removed");
+    }
+    return durable;
+}
 }
 
 ArchiveTab::ArchiveTab(const Context& ctx):ArchiveTab(*ctx.Ui().tabWidget,&ctx.mainWidget()) {}
@@ -346,15 +396,24 @@ QVector<archive::CanonicalItem> ArchiveTab::itemsForSource(const archive::Source
 
 void ArchiveTab::refreshTable()
 {
-    if(!m_ready||!m_table||!archive::ui::rootAvailable(m_root))return;const auto source=selectedSource();archive::Store store{archive::Paths(m_root)};const auto playlist=store.loadPlaylistItems(source.key);const auto all=store.loadCanonicalItems();QHash<QString,archive::CanonicalItem> map;for(const auto& c:all)map[c.key]=c;
+    if(!m_ready||!m_table||!archive::ui::rootAvailable(m_root))return;
+    const auto source=selectedSource();const archive::Paths paths(m_root);archive::Store store{paths};
+    const auto playlist=store.loadPlaylistItems(source.key);const auto all=store.loadCanonicalItems();QHash<QString,archive::CanonicalItem> map;for(const auto& c:all)map[c.key]=c;
     const auto search=m_search->text().trimmed();const auto filter=m_filter->currentText();int protectedCount=0,needs=0,unavailable=0,removed=0;
     m_table->setRowCount(0);
-    for(const auto& p:playlist){const bool has=map.contains(p.itemKey);const auto c=has?map[p.itemKey]:archive::CanonicalItem{};const auto status=archive::derivedStatus(p,has?&c:nullptr);if(status=="Protected")++protectedCount;if(status.contains("Needs")||status=="Missing"||status=="Failed"||status=="Interrupted")++needs;if(p.availability!="public")++unavailable;if(p.membership=="removed")++removed;
+    for(const auto& p:playlist){
+        const bool has=map.contains(p.itemKey);const auto c=has?map[p.itemKey]:archive::CanonicalItem{};
+        const auto video=has?representationHealth(paths,c.video):RepresentationHealth{};
+        const auto audio=has?representationHealth(paths,c.audio):RepresentationHealth{};
+        const auto status=healthAdjustedStatus(p,has?&c:nullptr,paths);
+        if(status=="Protected")++protectedCount;
+        if(status.contains("Needs")||status=="Missing"||status=="Failed"||status=="Interrupted"||status=="Verification Stale")++needs;
+        if(p.availability!="public")++unavailable;if(p.membership=="removed")++removed;
         if(!search.isEmpty()&&!p.title.contains(search,Qt::CaseInsensitive)&&!p.providerId.contains(search,Qt::CaseInsensitive))continue;
         if(filter!="All"){
-            bool match=false;if(filter=="Protected")match=status=="Protected";else if(filter=="Needs Sync")match=status=="Needs Sync";else if(filter=="Missing")match=status=="Missing";else if(filter=="Unavailable")match=p.availability!="public";else if(filter=="Removed")match=p.membership=="removed";else match=status==filter;if(!match)continue;
+            bool match=false;if(filter=="Protected")match=status=="Protected";else if(filter=="Needs Sync")match=status=="Needs Sync"||status=="Verification Stale";else if(filter=="Missing")match=status=="Missing";else if(filter=="Unavailable")match=p.availability!="public";else if(filter=="Removed")match=p.membership=="removed";else match=status==filter;if(!match)continue;
         }
-        const int r=m_table->rowCount();m_table->insertRow(r);auto* pos=new QTableWidgetItem(p.position<0?QStringLiteral("-"):QString::number(p.position));pos->setData(Qt::UserRole,p.itemKey);m_table->setItem(r,0,pos);m_table->setItem(r,1,new QTableWidgetItem(p.title));m_table->setItem(r,2,new QTableWidgetItem(p.availability));m_table->setItem(r,3,new QTableWidgetItem(has?c.video.state:"missing"));m_table->setItem(r,4,new QTableWidgetItem(has?c.audio.state:"missing"));m_table->setItem(r,5,new QTableWidgetItem(status));
+        const int r=m_table->rowCount();m_table->insertRow(r);auto* pos=new QTableWidgetItem(p.position<0?QStringLiteral("-"):QString::number(p.position));pos->setData(Qt::UserRole,p.itemKey);m_table->setItem(r,0,pos);m_table->setItem(r,1,new QTableWidgetItem(p.title));m_table->setItem(r,2,new QTableWidgetItem(p.availability));m_table->setItem(r,3,new QTableWidgetItem(has?representationDisplay(c.video,video):"missing"));m_table->setItem(r,4,new QTableWidgetItem(has?representationDisplay(c.audio,audio):"missing"));m_table->setItem(r,5,new QTableWidgetItem(status));
     }
     m_healthLabel->setText(source.key.isEmpty()?tr("No playlist selected"):tr("%1  |  All %2  |  Protected %3  |  Needs Work %4  |  Unavailable %5  |  Removed %6  |  Last scan %7").arg(source.title.isEmpty()?source.key:source.title).arg(playlist.size()).arg(protectedCount).arg(needs).arg(unavailable).arg(removed).arg(pretty(source.lastScanAt)));
 }
@@ -365,9 +424,10 @@ void ArchiveTab::refreshDetails()
     const auto source=selectedSource();const auto key=selectedItemKey();archive::Store store{archive::Paths(m_root)};archive::PlaylistItem p;archive::CanonicalItem c;bool hp=false,hc=false;for(const auto& x:store.loadPlaylistItems(source.key))if(x.itemKey==key){p=x;hp=true;break;}for(const auto& x:store.loadCanonicalItems())if(x.key==key){c=x;hc=true;break;}
     if(!hp){m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();return;}
     m_sourceDetails->setPlainText(tr("Title: %1\nYouTube ID: %2\nOriginal URL: %3\nPlaylist position: %4\nMembership: %5\nAvailability: %6\nFirst seen: %7\nLast seen: %8").arg(p.title,pretty(p.providerId),pretty(p.url)).arg(p.position).arg(p.membership,p.availability,pretty(p.firstSeen),pretty(p.lastSeen)));
-    if(hc)m_archiveDetails->setPlainText(tr("Canonical key: %1\nVideo: %2\nVideo path: %3\nVideo origin: %4\nAudio: %5\nAudio path: %6\nAudio origin: %7\nMetadata: %8").arg(c.key,c.video.state,pretty(c.video.path),pretty(c.video.origin),c.audio.state,pretty(c.audio.path),pretty(c.audio.origin),pretty(c.metadataPath)));
-    const auto history=readText(archive::Paths(m_root).playlistHistoryFile(source.key));QStringList matching;for(const auto& line:history.split('\n'))if(line.contains(key))matching<<line;m_historyDetails->setPlainText(matching.join("\n"));
-    if(hc)m_recoveryDetails->setPlainText(tr("Recovery status: %1\nCurrent availability: %2\nVideo present: %3\nAudio present: %4\nExternal recovery is submitted through State/ArchiveMode/Imports/Pending according to ARCHIVE_AGENT.md.").arg(c.recoveryStatus,c.availability,c.video.state=="complete"?tr("Yes"):tr("No"),c.audio.state=="complete"?tr("Yes"):tr("No")));
+    const archive::Paths paths(m_root);const auto video=hc?representationHealth(paths,c.video):RepresentationHealth{};const auto audio=hc?representationHealth(paths,c.audio):RepresentationHealth{};
+    if(hc)m_archiveDetails->setPlainText(tr("Canonical key: %1\nVideo: %2\nVideo path: %3\nVideo origin: %4\nAudio: %5\nAudio path: %6\nAudio origin: %7\nMetadata: %8").arg(c.key,representationDisplay(c.video,video),pretty(c.video.path),pretty(c.video.origin),representationDisplay(c.audio,audio),pretty(c.audio.path),pretty(c.audio.origin),pretty(c.metadataPath)));
+    const auto history=readText(paths.playlistHistoryFile(source.key));QStringList matching;for(const auto& line:history.split('\n'))if(line.contains(key))matching<<line;m_historyDetails->setPlainText(matching.join("\n"));
+    if(hc)m_recoveryDetails->setPlainText(tr("Recovery status: %1\nCurrent availability: %2\nVideo integrity: %3\nAudio integrity: %4\nExternal recovery is submitted through State/ArchiveMode/Imports/Pending according to ARCHIVE_AGENT.md.").arg(c.recoveryStatus,c.availability,video.label,audio.label));
 }
 
 void ArchiveTab::refreshActivity()
