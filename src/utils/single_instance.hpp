@@ -127,7 +127,7 @@ namespace utils
 				m_lockOwned = m_lockFile.lock() ;
 				if( !m_lockOwned ){
 					std::cerr << "Failed to acquire single-instance startup lock: "
-						  << m_lockFile.error() << std::endl ;
+						  << static_cast< int >( m_lockFile.error() ) << std::endl ;
 					m_info.app.exit( 1 ) ;
 				}
 			}
