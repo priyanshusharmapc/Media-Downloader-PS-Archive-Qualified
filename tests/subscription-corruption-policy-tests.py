@@ -35,3 +35,11 @@ for fn in [
     assert "return ;" in section
 
 print("Subscription corruption preservation policy: PASS")
+
+# A syntactically valid JSON array is not enough: malformed records must not be
+# silently coerced through QJsonValue::toString().
+assert "!value.isObject()" in body
+assert 'object.value( "uiName" ).isString()' in body
+assert 'object.value( "url" ).isString()' in body
+assert '!options.isUndefined() && !options.isString()' in body
+assert "if( m_storeValid )m_array = array" in body
