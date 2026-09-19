@@ -336,7 +336,8 @@ archive::Source ArchiveTab::selectedSource() const
     const auto key=selectedSourceKey(); archive::Store store{archive::Paths(m_root)};for(const auto& s:store.loadSources())if(s.key==key)return s;return {};
 }
 QString ArchiveTab::selectedSourceKey() const{auto* i=m_sources?m_sources->currentItem():nullptr;return i?i->data(Qt::UserRole).toString():QString();}
-QString ArchiveTab::selectedItemKey() const{const auto rows=m_table?m_table->selectionModel()->selectedRows():QModelIndexList{};if(rows.isEmpty())return {};auto* i=m_table->item(rows.first().row(),0);return i?i->data(Qt::UserRole).toString():QString();}
+QString ArchiveTab::selectedItemKey() const{const auto rows=m_table?m_table->selectionModel()->selectedRows():QModelIndexList{};if(rows.isEmpty())return {};auto* i=m_table->item(rows.first().row(),0);return i?i->data(Qt::UserRole+1).toString():QString();}
+QString ArchiveTab::selectedEntryKey() const{const auto rows=m_table?m_table->selectionModel()->selectedRows():QModelIndexList{};if(rows.isEmpty())return {};auto* i=m_table->item(rows.first().row(),0);return i?i->data(Qt::UserRole).toString():QString();}
 
 QVector<archive::CanonicalItem> ArchiveTab::itemsForSource(const archive::Source& source) const
 {
@@ -346,7 +347,28 @@ QVector<archive::CanonicalItem> ArchiveTab::itemsForSource(const archive::Source
 
 void ArchiveTab::refreshTable()
 {
-    if(!m_ready||!m_table||!archive::ui::rootAvailable(m_root))return;const auto source=selectedSource();archive::Store store{archive::Paths(m_root)};const auto playlist=store.loadPlaylistItems(source.key);const auto all=store.loadCanonicalItems();QHash<QString,archive::CanonicalItem> map;for(const auto& c:all)map[c.key]=c;
+    if(!m_ready||!m_table||!archive::ui::rootAvailable(m_root))return;
+    const auto source=selectedSource();
+    archive::Store store{archive::Paths(m_root)};
+    QString playlistError;
+    const auto playlist=store.loadPlaylistItems(source.key,&playlistError);
+    if(!playlistError.isEmpty()){
+        m_table->setRowCount(0);
+        const auto message=tr("Playlist state error: %1").arg(playlistError);
+        m_healthLabel->setText(message);
+        m_statusLabel->setText(message);
+        return;
+    }
+    QString canonicalError;
+    const auto all=store.loadCanonicalItems(&canonicalError);
+    if(!canonicalError.isEmpty()){
+        m_table->setRowCount(0);
+        const auto message=tr("Canonical state error: %1").arg(canonicalError);
+        m_healthLabel->setText(message);
+        m_statusLabel->setText(message);
+        return;
+    }
+    QHash<QString,archive::CanonicalItem> map;for(const auto& c:all)map[c.key]=c;
     const auto search=m_search->text().trimmed();const auto filter=m_filter->currentText();int protectedCount=0,needs=0,unavailable=0,removed=0;
     m_table->setRowCount(0);
     for(const auto& p:playlist){const bool has=map.contains(p.itemKey);const auto c=has?map[p.itemKey]:archive::CanonicalItem{};const auto status=archive::derivedStatus(p,has?&c:nullptr);if(status=="Protected")++protectedCount;if(status.contains("Needs")||status=="Missing"||status=="Failed"||status=="Interrupted")++needs;if(p.availability!="public")++unavailable;if(p.membership=="removed")++removed;
@@ -354,7 +376,7 @@ void ArchiveTab::refreshTable()
         if(filter!="All"){
             bool match=false;if(filter=="Protected")match=status=="Protected";else if(filter=="Needs Sync")match=status=="Needs Sync";else if(filter=="Missing")match=status=="Missing";else if(filter=="Unavailable")match=p.availability!="public";else if(filter=="Removed")match=p.membership=="removed";else match=status==filter;if(!match)continue;
         }
-        const int r=m_table->rowCount();m_table->insertRow(r);auto* pos=new QTableWidgetItem(p.position<0?QStringLiteral("-"):QString::number(p.position));pos->setData(Qt::UserRole,p.itemKey);m_table->setItem(r,0,pos);m_table->setItem(r,1,new QTableWidgetItem(p.title));m_table->setItem(r,2,new QTableWidgetItem(p.availability));m_table->setItem(r,3,new QTableWidgetItem(has?c.video.state:"missing"));m_table->setItem(r,4,new QTableWidgetItem(has?c.audio.state:"missing"));m_table->setItem(r,5,new QTableWidgetItem(status));
+        const int r=m_table->rowCount();m_table->insertRow(r);auto* pos=new QTableWidgetItem(p.position<0?QStringLiteral("-"):QString::number(p.position));pos->setData(Qt::UserRole,p.entryKey);pos->setData(Qt::UserRole+1,p.itemKey);m_table->setItem(r,0,pos);m_table->setItem(r,1,new QTableWidgetItem(p.title));m_table->setItem(r,2,new QTableWidgetItem(p.availability));m_table->setItem(r,3,new QTableWidgetItem(has?c.video.state:"missing"));m_table->setItem(r,4,new QTableWidgetItem(has?c.audio.state:"missing"));m_table->setItem(r,5,new QTableWidgetItem(status));
     }
     m_healthLabel->setText(source.key.isEmpty()?tr("No playlist selected"):tr("%1  |  All %2  |  Protected %3  |  Needs Work %4  |  Unavailable %5  |  Removed %6  |  Last scan %7").arg(source.title.isEmpty()?source.key:source.title).arg(playlist.size()).arg(protectedCount).arg(needs).arg(unavailable).arg(removed).arg(pretty(source.lastScanAt)));
 }
@@ -362,11 +384,29 @@ void ArchiveTab::refreshTable()
 void ArchiveTab::refreshDetails()
 {
     if(!m_ready||!archive::ui::rootAvailable(m_root))return;
-    const auto source=selectedSource();const auto key=selectedItemKey();archive::Store store{archive::Paths(m_root)};archive::PlaylistItem p;archive::CanonicalItem c;bool hp=false,hc=false;for(const auto& x:store.loadPlaylistItems(source.key))if(x.itemKey==key){p=x;hp=true;break;}for(const auto& x:store.loadCanonicalItems())if(x.key==key){c=x;hc=true;break;}
+    const auto source=selectedSource();const auto key=selectedItemKey();const auto entryKey=selectedEntryKey();archive::Store store{archive::Paths(m_root)};
+    QString playlistError;const auto playlist=store.loadPlaylistItems(source.key,&playlistError);
+    QString canonicalError;const auto canonical=store.loadCanonicalItems(&canonicalError);
+    if(!playlistError.isEmpty()||!canonicalError.isEmpty()){
+        const auto message=tr("Archive state error: %1").arg(!playlistError.isEmpty()?playlistError:canonicalError);
+        m_sourceDetails->setPlainText(message);m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();m_statusLabel->setText(message);return;
+    }
+    archive::PlaylistItem p;archive::CanonicalItem c;bool hp=false,hc=false;
+    for(const auto& x:playlist)if(x.entryKey==entryKey){p=x;hp=true;break;}
+    for(const auto& x:canonical)if(x.key==key){c=x;hc=true;break;}
     if(!hp){m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();return;}
     m_sourceDetails->setPlainText(tr("Title: %1\nYouTube ID: %2\nOriginal URL: %3\nPlaylist position: %4\nMembership: %5\nAvailability: %6\nFirst seen: %7\nLast seen: %8").arg(p.title,pretty(p.providerId),pretty(p.url)).arg(p.position).arg(p.membership,p.availability,pretty(p.firstSeen),pretty(p.lastSeen)));
     if(hc)m_archiveDetails->setPlainText(tr("Canonical key: %1\nVideo: %2\nVideo path: %3\nVideo origin: %4\nAudio: %5\nAudio path: %6\nAudio origin: %7\nMetadata: %8").arg(c.key,c.video.state,pretty(c.video.path),pretty(c.video.origin),c.audio.state,pretty(c.audio.path),pretty(c.audio.origin),pretty(c.metadataPath)));
-    const auto history=readText(archive::Paths(m_root).playlistHistoryFile(source.key));QStringList matching;for(const auto& line:history.split('\n'))if(line.contains(key))matching<<line;m_historyDetails->setPlainText(matching.join("\n"));
+    const auto history=readText(archive::Paths(m_root).playlistHistoryFile(source.key));QStringList matching;
+    for(const auto& line:history.split('\n')){
+        if(line.trimmed().isEmpty())continue;
+        QJsonParseError pe;const auto doc=QJsonDocument::fromJson(line.toUtf8(),&pe);
+        if(pe.error==QJsonParseError::NoError&&doc.isObject()){
+            const auto object=doc.object();const auto eventEntry=object.value("entry_key").toString();
+            if((!eventEntry.isEmpty()&&eventEntry==entryKey)||(eventEntry.isEmpty()&&object.value("item_key").toString()==key))matching<<line;
+        }
+    }
+    m_historyDetails->setPlainText(matching.join("\n"));
     if(hc)m_recoveryDetails->setPlainText(tr("Recovery status: %1\nCurrent availability: %2\nVideo present: %3\nAudio present: %4\nExternal recovery is submitted through State/ArchiveMode/Imports/Pending according to ARCHIVE_AGENT.md.").arg(c.recoveryStatus,c.availability,c.video.state=="complete"?tr("Yes"):tr("No"),c.audio.state=="complete"?tr("Yes"):tr("No")));
 }
 
