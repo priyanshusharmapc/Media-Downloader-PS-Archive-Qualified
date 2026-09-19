@@ -352,6 +352,8 @@ private:
 		bool open( const QString& e )
 		{
 			m_path = e ;
+			m_writeFailed = false ;
+			m_writeError.clear() ;
 			m_file = std::make_unique< QFile >( e ) ;
 			m_file->remove() ;
 			return m_file->open( QIODevice::WriteOnly ) ;
@@ -361,9 +363,30 @@ private:
 			m_file->close() ;
 		}
 		QString rename( const QString& e ) ;
-		void write( const QByteArray& e )
+		bool write( const QByteArray& e )
 		{
-			m_file->write( e ) ;
+			if( m_writeFailed || !m_file ){
+				return false ;
+			}
+
+			const auto written = m_file->write( e ) ;
+			if( written != e.size() ){
+				m_writeFailed = true ;
+				m_writeError = m_file->errorString() ;
+				if( m_writeError.isEmpty() ){
+					m_writeError = QStringLiteral( "Short file write: %1 of %2 bytes" ).arg( written ).arg( e.size() ) ;
+				}
+				return false ;
+			}
+			return true ;
+		}
+		bool writeFailed() const
+		{
+			return m_writeFailed ;
+		}
+		const QString& writeError() const
+		{
+			return m_writeError ;
 		}
 		QFile& handle() const
 		{
@@ -375,6 +398,8 @@ private:
 		}
 	private:
 		QString m_path ;
+		QString m_writeError ;
+		bool m_writeFailed = false ;
 		utils::misc::unique_ptr< QFile > m_file ;
 	} ;
 
