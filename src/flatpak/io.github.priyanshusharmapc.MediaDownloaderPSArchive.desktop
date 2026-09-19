@@ -1,0 +1,9 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Type=Application
+Name=Media Downloader PS Archive
+Comment=Qualified PS Archive media downloader
+Icon=io.github.priyanshusharmapc.MediaDownloaderPSArchive
+Exec=io.github.priyanshusharmapc.MediaDownloaderPSArchive
+StartupWMClass=io.github.priyanshusharmapc.MediaDownloaderPSArchive
+Categories=Network;Qt

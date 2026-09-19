@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.priyanshusharmapc.MediaDownloaderPSArchive</id>
+  <name>Media Downloader PS Archive</name>
+  <summary>Qualified media downloader with PS Archive Mode</summary>
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <url type="homepage">https://github.com/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified</url>
+  <url type="bugtracker">https://github.com/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified/issues</url>
+  <url type="vcs-browser">https://github.com/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified</url>
+  <developer id="io.github.priyanshusharmapc">
+    <name>Media Downloader PS Archive contributors</name>
+  </developer>
+  <description>
+    <p>Media Downloader PS Archive is the qualified fork containing Archive Mode and its associated recovery and integrity controls.</p>
+  </description>
+  <launchable type="desktop-id">io.github.priyanshusharmapc.MediaDownloaderPSArchive.desktop</launchable>
+  <categories>
+    <category>Network</category>
+    <category>Qt</category>
+  </categories>
+  <provides>
+    <binary>io.github.priyanshusharmapc.MediaDownloaderPSArchive</binary>
+  </provides>
+</component>
