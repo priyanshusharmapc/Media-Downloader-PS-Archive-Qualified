@@ -1017,7 +1017,8 @@ QString networkAccess::downloadSpeed::calculate( const utils::network::progress&
 	}else{
 		// Keep diagnostic byte counts exact, but never present an impossible
 		// progress percentage above 100 when a server revises/misreports length.
-		const auto perc = std::min( 100.0,double( received ) * 100 / double( totalSize ) ) ;
+		const auto rawPerc = double( received ) * 100 / double( totalSize ) ;
+		const auto perc = rawPerc > 100.0 ? 100.0 : rawPerc ;
 		auto size       = m_locale.formattedDataSize( totalSize ) ;
 		auto current    = m_locale.formattedDataSize( received ) ;
 		auto percentage = QString::number( perc,'f',2 ) ;
