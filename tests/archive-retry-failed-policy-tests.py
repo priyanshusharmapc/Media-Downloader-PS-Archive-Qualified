@@ -19,6 +19,11 @@ assert 'state=="failed"||state=="interrupted"' in op
 assert "retryVideo=retryable(item.video.state)" in op
 assert "retryAudio=retryable(item.audio.state)" in op
 assert "executor.syncItem(item,retryVideo,retryAudio" in op
+assert "QSet<QString> eligibleKeys" in op
+assert "eligibleKeys.insert(p.itemKey)" in op
+assert "QSet<QString> processedKeys" in op
+assert "processedKeys.contains(p.itemKey)" in op
+assert "processedKeys.insert(p.itemKey)" in op
 assert "PlaylistDiscovery" not in op
 assert ".reconcile(" not in op
 
