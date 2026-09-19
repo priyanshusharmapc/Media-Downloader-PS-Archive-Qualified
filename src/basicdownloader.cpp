@@ -548,7 +548,7 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 
 					}else if( s.Settings().desktopNotifyOnAllDownloadComplete() ){
 
-						s.mainWindow().notifyOnDownloadComplete() ;
+						s.mainWindow().notifyOnAllDownloadComplete( "1 Download Complete" ) ;
 					}
 				}
 			}
