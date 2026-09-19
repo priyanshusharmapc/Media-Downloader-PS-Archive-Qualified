@@ -47,8 +47,46 @@
 #include <QDesktopServices>
 #include <QNetworkProxyFactory>
 #include <QDir>
+#include <QUrl>
 
 #include <cstring>
+
+QString engines::redactLogArgument( const QString& argument )
+{
+	QString value = argument ;
+	const auto lower = value.toLower() ;
+	const QStringList secretPrefixes = {
+		"--proxy-password=","--password=","--passwd=","--token=",
+		"--access-token=","--api-key=","--apikey=","--secret="
+	} ;
+	for( const auto& prefix : secretPrefixes ){
+		if( lower.startsWith( prefix ) ){
+			return value.left( prefix.size() ) + "<REDACTED>" ;
+		}
+	}
+
+	// Credentials embedded in URLs are common in proxy settings. Preserve the
+	// useful endpoint/user context while ensuring the password never reaches
+	// command/debug/history text.
+	QUrl url( value ) ;
+	if( url.isValid() && !url.scheme().isEmpty() && !url.password().isEmpty() ){
+		url.setPassword( "<REDACTED>" ) ;
+		return url.toString( QUrl::FullyEncoded ) ;
+	}
+	return value ;
+}
+
+QString engines::redactLogEnvironment( const QString& key,const QString& value )
+{
+	const auto lower = key.toLower() ;
+	if( lower.contains( "password" ) || lower.contains( "passwd" ) ||
+		lower.contains( "token" ) || lower.contains( "secret" ) ||
+		lower.contains( "authorization" ) || lower.contains( "api_key" ) ||
+		lower.contains( "apikey" ) ){
+		return "<REDACTED>" ;
+	}
+	return engines::redactLogArgument( value ) ;
+}
 
 QStringList engines::dirEntries( const QString& e ) const
 {
@@ -1841,10 +1879,22 @@ void engines::engine::baseEngine::runCommandOnDownloadedFile( const std::vector<
 QString engines::engine::baseEngine::commandString( const engines::engine::exeArgs::cmd& cmd )
 {
 	auto m = "\"" + cmd.exe() + "\"" ;
+	bool redactNext = false ;
 
 	for( const auto& it : cmd.args() ){
-
-		m += " \"" + it + "\"" ;
+		QString rendered ;
+		if( redactNext ){
+			rendered = "<REDACTED>" ;
+			redactNext = false ;
+		}else{
+			rendered = engines::redactLogArgument( it ) ;
+			const auto option = it.toLower() ;
+			redactNext = option == "--proxy-password" || option == "--password" ||
+				option == "--passwd" || option == "--token" ||
+				option == "--access-token" || option == "--api-key" ||
+				option == "--apikey" || option == "--secret" ;
+		}
+		m += " \"" + rendered + "\"" ;
 	}
 
 	return m ;
@@ -2927,7 +2977,8 @@ QProcessEnvironment engines::engine::baseEngine::optionsEnvironment::update( con
 
 	for( const auto& it : m_pairs ){
 
-		s += "\nEnv: " + it.key + "=" + it.value  ;
+		// The child still receives the exact value; only diagnostics are scrubbed.
+		s += "\nEnv: " + it.key + "=" + engines::redactLogEnvironment( it.key,it.value ) ;
 
 		m.insert( it.key,it.value ) ;
 	}
