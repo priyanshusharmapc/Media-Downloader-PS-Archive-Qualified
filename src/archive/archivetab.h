@@ -121,6 +121,7 @@ private:
     QPushButton* m_stop=nullptr;
     QPushButton* m_retry=nullptr;
     QToolButton* m_more=nullptr;
+    QAction* m_openPlaylistAction=nullptr;
     QPushButton* m_activityToggle=nullptr;
     QFutureWatcher<QString>* m_watcher=nullptr;
     QString m_root;
