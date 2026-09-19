@@ -453,7 +453,18 @@ void ArchiveTab::removePlaylist()
 
 void ArchiveTab::scanSelected(){const auto s=selectedSource();if(!s.key.isEmpty())runSources({s},false,tr("Scanning %1").arg(s.title));}
 void ArchiveTab::syncSelected(){const auto s=selectedSource();if(!s.key.isEmpty())runSources({s},true,tr("Syncing %1").arg(s.title));}
-void ArchiveTab::retryFailed(){syncSelected();}
+void ArchiveTab::retryFailed()
+{
+    const auto source=selectedSource();
+    if(source.key.isEmpty()||m_busy)return;
+
+    QString error;
+    if(!ensureReady(&error)){m_statusLabel->setText(error);return;}
+
+    m_stopRequested=false;
+    const auto name=tr("Retrying failed work for %1").arg(source.title.isEmpty()?source.key:source.title);
+    runAsync(name,[this,source]{return operationRetryFailed(source);});
+}
 void ArchiveTab::syncAll()
 {
     if(m_busy)return;
@@ -540,6 +551,79 @@ QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool do
     result["failures"]=QJsonArray::fromStringList(failures);
     result["warning_count"]=warnings.size();result["warnings"]=QJsonArray::fromStringList(warnings);
     logger.event(totalFailures||!warnings.isEmpty()?"WARNING":"INFO","application",doDownloads?"sync_session_completed":"scan_session_completed",result);
+    return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
+}
+
+
+QString ArchiveTab::operationRetryFailed(const archive::Source& source)
+{
+    QString error;
+    if(!archive::ui::initializeRoot(m_root,&error))return QString("ERROR:")+error;
+
+    archive::Paths paths(m_root);
+    archive::Store store(paths);
+    archive::ActivityLogger logger(paths);
+    archive::SyncLock lock(paths);
+    if(!lock.tryLock())return "ERROR:"+lock.errorString();
+
+    const auto playlist=store.loadPlaylistItems(source.key,&error);
+    if(!error.isEmpty())return "ERROR:"+error;
+    const auto canonical=store.loadCanonicalItems(&error);
+    if(!error.isEmpty())return "ERROR:"+error;
+
+    QHash<QString,archive::CanonicalItem> map;
+    for(const auto& item:canonical)map[item.key]=item;
+
+    const auto retryable=[](const QString& state){
+        return state=="failed"||state=="interrupted";
+    };
+
+    int eligible=0;
+    for(const auto& p:playlist){
+        if(p.membership!="active"||!map.contains(p.itemKey))continue;
+        const auto& item=map[p.itemKey];
+        if(retryable(item.video.state)||retryable(item.audio.state))++eligible;
+    }
+
+    int processed=0;
+    int failuresCount=0;
+    QStringList failures;
+    logger.event("INFO","application","retry_failed_started",{{"source_key",source.key},{"eligible",eligible}});
+
+    for(const auto& p:playlist){
+        if(m_stopRequested.load())break;
+        if(p.membership!="active"||!map.contains(p.itemKey))continue;
+
+        const auto item=map[p.itemKey];
+        const bool retryVideo=retryable(item.video.state);
+        const bool retryAudio=retryable(item.audio.state);
+        if(!retryVideo&&!retryAudio)continue;
+
+        ++processed;
+        const auto itemName=p.title.isEmpty()?p.itemKey:p.title;
+        postOperationProgress(tr("Retry failed media"),tr("%1 | item %2/%3").arg(itemName).arg(processed).arg(eligible),processed-1,eligible,failuresCount);
+
+        archive::MediaExecutor executor(runtimeConfig(),store,logger);
+        QString itemError;
+        if(!executor.syncItem(item,retryVideo,retryAudio,&itemError)){
+            ++failuresCount;
+            failures<<p.itemKey+": "+itemError;
+        }
+
+        postOperationProgress(tr("Retry failed media"),tr("Processed %1/%2").arg(processed).arg(eligible),processed,eligible,failuresCount);
+    }
+
+    lock.unlock();
+
+    QJsonObject result;
+    result["observed"]=eligible;
+    result["completed_items"]=processed-failuresCount;
+    result["failure_count"]=failuresCount;
+    result["warning_count"]=0;
+    result["stopped"]=m_stopRequested.load();
+    result["failures"]=QJsonArray::fromStringList(failures);
+
+    logger.event(failuresCount?"WARNING":"INFO","application","retry_failed_completed",result);
     return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
 }
 
