@@ -566,7 +566,7 @@ class ArchiveIntegration(unittest.TestCase):
         unrelated_args[unrelated_args.index('-VideoUrl') + 1] = 'https://www.youtube.com/watch?v=ZZZ999yyy88'
         unrelated = run(unrelated_args + ['-AllowExistingArchive'], env=self.env, timeout=120)
         self.assertNotEqual(unrelated.returncode, 0)
-        self.assertIn('not an active member', unrelated.stdout + unrelated.stderr)
+        self.assertIn('not an active occurrence', unrelated.stdout + unrelated.stderr)
         self.assertEqual(len(list(self.root.glob('local-harness-evidence-*.json'))), 1)
 
         # A wrong artifact is rejected even if the package claims the same
