@@ -35,6 +35,9 @@
 
 #include <QString>
 #include <QEventLoop>
+#include <QTemporaryDir>
+#include <QFile>
+#include <QDir>
 
 #define TEST_ENGINE_PREFIX "--media-downloader-test-engine"
 
@@ -105,6 +108,12 @@ public:
 	}
 	void start( const QByteArray& )
 	{
+		for( const auto& arg : m_args.args ){
+			if( arg == TEST_ENGINE_PREFIX"-path-ownership" ){
+				return this->testPathOwnership() ;
+			}
+		}
+
 		Tests tests ;
 
 		QString s ;
@@ -154,6 +163,56 @@ public:
 				return true ;
 			}
 		} ) ;
+	}
+	void testPathOwnership()
+	{
+		QTemporaryDir temp ;
+		if( !temp.isValid() ){
+			std::cerr << "path-ownership=FAIL temp" << std::endl ;
+			return m_args.app.exit( 1 ) ;
+		}
+		const auto root = QDir( temp.path() ).filePath( "bin" ) ;
+		const auto sibling = QDir( temp.path() ).filePath( "bin-tools" ) ;
+		QDir().mkpath( QDir( root ).filePath( "nested" ) ) ;
+		QDir().mkpath( sibling ) ;
+
+		const auto internal = QDir( root ).filePath( "tool" ) ;
+		const auto nested = QDir( root ).filePath( "nested/tool2" ) ;
+		const auto external = QDir( sibling ).filePath( "tool" ) ;
+		for( const auto& path : QStringList{ internal,nested,external } ){
+			QFile file( path ) ;
+			if( !file.open( QIODevice::WriteOnly ) ){
+				std::cerr << "path-ownership=FAIL create" << std::endl ;
+				return m_args.app.exit( 1 ) ;
+			}
+			file.write( "fixture" ) ;
+		}
+
+		const auto normalized = QDir( root ).filePath( "nested/../tool" ) ;
+		bool ok = engines::executableOwnedByBinRoot( internal,root ) &&
+			engines::executableOwnedByBinRoot( nested,root ) &&
+			engines::executableOwnedByBinRoot( normalized,root ) &&
+			!engines::executableOwnedByBinRoot( external,root ) ;
+
+#ifndef Q_OS_WIN
+		const auto linked = QDir( root ).filePath( "linked-tool" ) ;
+		if( QFile::link( external,linked ) ){
+			ok = ok && !engines::executableOwnedByBinRoot( linked,root ) ;
+		}
+#else
+		// Windows canonical paths are case-insensitive; case-only spelling must
+		// not change ownership while a sibling-prefix path must remain rejected.
+		ok = ok && engines::executableOwnedByBinRoot( internal,root.toUpper() ) &&
+			!engines::executableOwnedByBinRoot( external,root.toUpper() ) ;
+#endif
+
+		if( ok ){
+			std::cout << "path-ownership=PASS" << std::endl ;
+			m_args.app.exit( 0 ) ;
+		}else{
+			std::cerr << "path-ownership=FAIL" << std::endl ;
+			m_args.app.exit( 1 ) ;
+		}
 	}
 private:
 	QList< QByteArray > m_list ;
