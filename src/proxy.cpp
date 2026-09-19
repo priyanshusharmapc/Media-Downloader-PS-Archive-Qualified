@@ -88,6 +88,10 @@ static void _get_proxy_from_gateway_linux( Context& ctx,const QByteArray& addr,b
 
 	if( !file.open( QIODevice::ReadOnly ) ){
 
+		// A failed gateway lookup must still leave networking in a deliberate
+		// state. Returning here would retain whichever proxy happened to be
+		// active before the user selected the gateway-based configuration.
+		ctx.setNetworkProxy( firstTime ) ;
 		return ;
 	}
 
