@@ -74,13 +74,23 @@ private:
 		// absolute identity for them.
 		auto clean = QDir::cleanPath( QDir::fromNativeSeparators( path ) ) ;
 
+		// Device namespaces are not Library filesystem paths. Accept only the
+		// two extended filesystem forms this enumerator understands: drive paths
+		// and UNC shares. GLOBALROOT/pipe/device namespaces fail closed.
+		if( clean.startsWith( "//./" ) )return {} ;
+
 		if( clean.startsWith( "//?/" ) ){
+			const auto tail = clean.mid( 4 ) ;
+			const bool extendedUnc = tail.startsWith( "UNC/" ) && tail.mid( 4 ).split( '/',Qt::SkipEmptyParts ).size() >= 2 ;
+			const bool extendedDrive = tail.size() >= 3 && tail[ 0 ].isLetter() && tail[ 1 ] == ':' && tail[ 2 ] == '/' ;
+			if( !extendedUnc && !extendedDrive )return {} ;
 			return QDir::toNativeSeparators( clean ).toStdWString() ;
 		}
 
 		QString qualified ;
 
 		if( clean.startsWith( "//" ) ){
+			if( clean.mid( 2 ).split( '/',Qt::SkipEmptyParts ).size() < 2 )return {} ;
 			qualified = "//?/UNC/" + clean.mid( 2 ) ;
 		}else if( QDir::isAbsolutePath( clean ) ){
 			qualified = "//?/" + clean ;
