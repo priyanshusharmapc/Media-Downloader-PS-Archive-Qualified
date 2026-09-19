@@ -48,6 +48,7 @@
 #include <QNetworkProxyFactory>
 #include <QDir>
 #include <QUrl>
+#include <QSaveFile>
 
 #include <cstring>
 
@@ -768,45 +769,54 @@ QString engines::addEngine( const QByteArray& data,const QString& extensionFileN
 	if( json ){
 
 		auto object = json.toObject() ;
-
 		auto name = object.value( "Name" ).toString() ;
 
 		if( !name.isEmpty() ){
 
-			auto e = m_enginePaths.enginePath( extensionFileName ) ;
+			const auto path = m_enginePaths.enginePath( extensionFileName ) ;
 
-			QFile f( e ) ;
+			// A failed custom install must never truncate a previously working
+			// definition with the same filename. Replacement needs an explicit
+			// remove/update workflow with its own rollback semantics.
+			if( QFileInfo::exists( path ) ){
 
-			if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-				f.write( data ) ;
-
-				f.flush() ;
-
-				f.close() ;
-
-				for( int i = 0 ; i < 5 ; i++ ){
-
-					if( QFile::exists( e ) ){
-
-						break ;
-					}else{
-						utility::waitForOneSecond() ;
-					}
-				}
-
-				if( this->addEngine( extensionFileName,id ) ){
-
-					return name ;
-				}else{
-					return {} ;
-				}
+				m_logger.add( QObject::tr( "Plugin definition already exists: %1" ).arg( path ),id ) ;
+				return {} ;
 			}
+
+			// Publish atomically so startup can never observe a partial JSON file.
+			QSaveFile file( path ) ;
+			if( !file.open( QIODevice::WriteOnly ) ){
+
+				m_logger.add( QObject::tr( "Failed To Save Plugin Definition: %1" ).arg( file.errorString() ),id ) ;
+				return {} ;
+			}
+
+			if( file.write( data ) != data.size() || !file.commit() ){
+
+				m_logger.add( QObject::tr( "Failed To Save Plugin Definition: %1" ).arg( file.errorString() ),id ) ;
+				return {} ;
+			}
+
+			if( this->addEngine( extensionFileName,id ) ){
+
+				return name ;
+			}
+
+			// Admission failed after publication. This file did not exist before
+			// the attempt, so removing it is a rollback rather than destructive
+			// replacement of user state.
+			const auto rollbackError = utility::removeFile( path ) ;
+			if( !rollbackError.isEmpty() ){
+
+				m_logger.add( QObject::tr( "Failed To Roll Back Rejected Plugin Definition: %1: %2" ).arg( path,rollbackError ),id ) ;
+			}
+
+			return {} ;
 		}
 	}
 
 	m_logger.add( QObject::tr( "Failed To Load A Plugin" ) + ": " + json.errorString(),id ) ;
-
 	return {} ;
 }
 
