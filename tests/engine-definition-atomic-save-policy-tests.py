@@ -18,3 +18,11 @@ assert "f.cancelWriting()" in body
 assert "QIODevice::Truncate" not in body
 assert "utility::waitForOneSecond()" not in body
 print("engine definition atomic replacement policy: PASS")
+
+# Atomic publication is not complete until runtime admission succeeds.
+assert "const bool hadPrevious = QFileInfo::exists( e )" in body
+assert "previous = old.readAll()" in body
+assert "QSaveFile restore( e )" in body
+assert "restore.write( previous ) != previous.size()" in body
+assert "QFile::remove( e )" in body
+assert body.index("this->addEngine( extensionFileName,id )") < body.index("QSaveFile restore( e )")
