@@ -196,38 +196,63 @@ gallery_dl::gallery_dl( const engines& engines,const engines::engine& engine,QJs
 
 bool gallery_dl::parse( const int& s,std::vector< QByteArray >& mm,QByteArray& data )
 {
+	if( s < 0 || s >= data.size() ){
+
+		return true ;
+	}
+
 	int counter = 0 ;
+	bool inString = false ;
+	bool escaped = false ;
 
-	int ss = s - 1 ;
+	// QLocal/QProcess output is a byte stream, so an object may end at any
+	// future chunk. Walk only bytes that are present and ignore structural
+	// braces that occur inside JSON strings.
+	for( int ss = s ; ss < data.size() ; ++ss ){
 
-	while( true ){
+		const auto m = data.at( ss ) ;
 
-		ss++ ;
+		if( inString ){
 
-		auto m = data[ ss ] ;
+			if( escaped ){
+
+				escaped = false ;
+			}else if( m == '\\' ){
+
+				escaped = true ;
+			}else if( m == '"' ){
+
+				inString = false ;
+			}
+
+			continue ;
+		}
+
+		if( m == '"' ){
+
+			inString = true ;
+			continue ;
+		}
 
 		if( m == '{' ){
 
-			counter++ ;
-
+			++counter ;
 		}else if( m == '}' ){
 
-			counter-- ;
-		}
+			--counter ;
 
-		if( counter == 0 ){
+			if( counter == 0 ){
 
-			mm.emplace_back( data.mid( s,ss + 1 ) ) ;
+				mm.emplace_back( data.mid( s,ss - s + 1 ) ) ;
+				data = data.mid( ss + 1 ) ;
 
-			data = data.mid( ss + 1 ) ;
-
-			return false ;
-
-		}else if( ss >= data.size() ){
-
-			return true ;
+				return false ;
+			}
 		}
 	}
+
+	// Keep the incomplete object buffered until more bytes arrive.
+	return true ;
 }
 
 std::vector< QByteArray > gallery_dl::parseJsonData( QByteArray& data )
