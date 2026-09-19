@@ -40,6 +40,12 @@ void bun::init( settings&,Logger& logger,const engines::enginePaths& enginePath 
 {
 	auto m = enginePath.enginePath( "bun.json" ) ;
 
+	// Match sibling supporting engines: preserve existing metadata unless an
+	// explicit migration requires changing it.
+	if( QFile::exists( m ) ){
+		return ;
+	}
+
 	QJsonObject mainObj ;
 
 	utility::addJsonCmd json( mainObj ) ;
