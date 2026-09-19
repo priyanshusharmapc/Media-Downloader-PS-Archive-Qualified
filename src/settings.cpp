@@ -1066,13 +1066,12 @@ void settings::setHighDpiScalingFactorValue( double m )
 double settings::highDpiScalingFactorValue()
 {
 	auto m = this->getOption( "HighDpiScalingFactorValue",1.0 ) ;
+	constexpr double minimumScaleFactor = 0.05 ;
 
-	if( m == 0.0 ){
-
-		return 1.0 ;
-	}else{
-		return m ;
-	}
+	// Zero/negative persisted values are invalid scale factors. Reset is an
+	// explicit UI action that stores 1.0, so invalid values clamp to the
+	// supported minimum instead of masquerading as a reset.
+	return m < minimumScaleFactor ? minimumScaleFactor : m ;
 }
 
 double settings::highDpiScalingFactorInterval()
