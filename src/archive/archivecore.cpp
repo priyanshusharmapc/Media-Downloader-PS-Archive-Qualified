@@ -110,8 +110,13 @@ Representation repFromJson(const QJsonObject& o)
     r.path=o.value("path").toString();
     r.origin=o.value("origin").toString();
     r.verifiedAt=o.value("verified_at").toString();
-    r.verifiedSha256=o.value("verified_sha256").toString();
-    if(o.value("verified_size").isDouble())r.verifiedSize=static_cast<qint64>(o.value("verified_size").toDouble());
+    r.verifiedSha256=o.value("verified_sha256").toString().toLower();
+    const auto persistedSize=o.value("verified_size");
+    if(persistedSize.isDouble()){
+        const auto n=persistedSize.toDouble();
+        if(std::isfinite(n)&&n>=0&&std::floor(n)==n&&n<=static_cast<double>(std::numeric_limits<qint64>::max()))
+            r.verifiedSize=static_cast<qint64>(n);
+    }
     r.verificationProfile=o.value("verification_profile").toString();
     r.error=o.value("error").toString();
     return r;
@@ -1311,9 +1316,9 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
     // Deep verification timeout scales with media duration. Ten minutes remains
     // the floor for short files, while long valid media is not rejected merely
     // because decoding it cannot finish within a fixed wall-clock ceiling.
-    const qint64 durationTimeout=static_cast<qint64>(duration*2000.0);
-    const int integrityTimeout=static_cast<int>(std::max<qint64>(10*60*1000,
-        std::min<qint64>(24LL*60*60*1000,durationTimeout)));
+    const auto boundedDurationMs=std::min(24.0*60.0*60.0*1000.0,duration*2000.0);
+    const qint64 durationTimeout=static_cast<qint64>(boundedDurationMs);
+    const int integrityTimeout=static_cast<int>(std::max<qint64>(10*60*1000,durationTimeout));
     const auto integrity=runProcess(ffmpeg,integrityArgs,m_config.archiveRoot,integrityTimeout);
     if(!integrity.ok){
         const auto detail=integrity.standardError.trimmed().left(1600);
@@ -1349,7 +1354,8 @@ void stampVerifiedRepresentation(const Paths& paths,Representation& representati
 bool verifiedRepresentationUnchanged(const Paths& paths,const Representation& representation)
 {
     if(representation.state!="complete"||representation.verificationProfile!=mediaVerificationProfile||
-       representation.verifiedSha256.isEmpty()||representation.verifiedSize<0)return false;
+       !QRegularExpression("^[0-9a-f]{64}$").match(representation.verifiedSha256).hasMatch()||
+       representation.verifiedSize<0)return false;
     const auto absolute=paths.absoluteFromRelative(representation.path);
     QFileInfo info(absolute);
     if(absolute.isEmpty()||!info.isFile()||info.size()!=representation.verifiedSize)return false;
