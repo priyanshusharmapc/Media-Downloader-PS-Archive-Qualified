@@ -341,10 +341,6 @@ bool directoryEntries::valid( const char * e )
 		return false ;
 	}
 
-	if( std::strncmp( e,"info_",5 ) == 0 ){
-
-		return false ;
-	}
 
 	return true ;
 }
@@ -356,10 +352,6 @@ bool directoryEntries::valid( const wchar_t * s )
 		return false ;
 	}
 
-	if( std::wcsncmp( s,L"info_",5 ) == 0 ){
-
-		return false ;
-	}
 
 	return true ;
 }
