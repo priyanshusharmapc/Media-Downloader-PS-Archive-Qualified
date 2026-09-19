@@ -1175,9 +1175,10 @@ QString MediaExecutor::findAttemptById(const QString& relativeDir,const QString&
         if(!fi.fileName().contains("["+id+"]")||!fi.fileName().contains("["+attempt+"]"))continue;
         if(!extensions.isEmpty()&&!extensions.contains(fi.suffix().toLower()))continue;
         const auto rel=m_store.paths().relativeToRoot(p);
-        if(!m_store.paths().isSafeRelative(rel))continue;
-        const auto verified=relativeDir=="Video"?m_verifier.verifyVideo(rel):m_verifier.verifyAudio(rel);
-        if(verified.ok)return rel;
+        // The unique attempt marker establishes which completed child invocation
+        // produced this path. Content verification belongs to the caller so that
+        // valid-but-noncanonical media can still reach the normalization path.
+        if(m_store.paths().isSafeRelative(rel))return rel;
     }
     return {};
 }
