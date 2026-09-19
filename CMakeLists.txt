@@ -166,6 +166,14 @@ endif()
 
 include(CTest)
 
+if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(
+        NAME update-channel-policy
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/update-channel-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
+    set_tests_properties(update-channel-policy PROPERTIES TIMEOUT 30)
+endif()
+
 add_executable(archive-cli
     src/archive/archivecli.cpp
     src/archive/archivecore.cpp

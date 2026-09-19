@@ -92,3 +92,10 @@ membership handling for suspect responses.
 [Transaction outcomes and projection repair](remediation/025.md) documents
 accurate accepted counts, separate post-commit warnings, CLI exit codes, and
 non-destructive report-only recovery.
+
+
+## Application update trust boundary
+
+[Fork-bound application updates](remediation/003.md) documents the qualified
+fork release endpoint, opt-in automatic update policy, and release-asset
+repository validation.
