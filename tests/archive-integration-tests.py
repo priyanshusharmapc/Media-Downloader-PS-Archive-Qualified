@@ -190,6 +190,40 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertEqual(self.durable_bytes(), committed)
         self.assertEqual(self.media_hashes(), media)
 
+    def test_playlist_binding_requires_active_occurrence(self):
+        scan = self.scan()
+        self.assertIn('source_key=PLAUDIT', scan.stdout)
+        matching = self.command('playlist-binding', SOURCE_URL, VIDEO_URL)
+        self.assertIn('member=true', matching.stdout)
+        self.assertIn('source_key=PLAUDIT', matching.stdout)
+        self.assertIn('item_key=youtube:' + VIDEO_ID, matching.stdout)
+        self.assertIn('active_occurrences=1', matching.stdout)
+        self.assertIn('entry_key=', matching.stdout)
+
+        unrelated = 'https://www.youtube.com/watch?v=ZZZ999yyy88'
+        rejected = self.command('playlist-binding', SOURCE_URL, unrelated, expect=1)
+        self.assertIn('member=false', rejected.stdout)
+        self.assertIn('not an active occurrence', rejected.stderr)
+
+        # A removed historical occurrence is evidence, not active membership.
+        self.plan['discovery']['entries'] = [
+            {'id': 'xyz987QWE65', 'title': 'Second historical title', 'playlist_index': 1, 'availability': 'public'}
+        ]
+        self.write_plan()
+        self.scan()
+        removed = self.command('playlist-binding', SOURCE_URL, VIDEO_URL, expect=1)
+        self.assertIn('member=false', removed.stdout)
+
+        # Duplicate active occurrences still prove membership without guessing
+        # which occurrence is the canonical target.
+        entry = {'id': VIDEO_ID, 'title': 'Known historical title', 'playlist_index': 1, 'availability': 'public'}
+        self.plan['discovery']['entries'] = [entry, dict(entry, playlist_index=2)]
+        self.write_plan()
+        self.scan()
+        duplicate = self.command('playlist-binding', SOURCE_URL, VIDEO_URL)
+        self.assertIn('member=true', duplicate.stdout)
+        self.assertIn('active_occurrences=2', duplicate.stdout)
+
     def test_scan_sync_verify_and_idempotent_rerun(self):
         self.scan()
         self.command('sync-item', VIDEO_URL)
@@ -496,7 +530,18 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertEqual(len(receipt), 1)
         evidence = json.loads(receipt[0].read_text(encoding='utf-8-sig'))
         self.assertEqual(evidence['item_key'], 'youtube:' + VIDEO_ID)
+        self.assertEqual(evidence['source_key'], 'PLAUDIT')
+        self.assertEqual(evidence['active_occurrences'], 1)
+        self.assertTrue(evidence['entry_key'])
         self.assertEqual(evidence['result'], 'PASS')
+
+        unrelated_args = [powershell, '-NoProfile', '-File', script, '-ArchiveRoot', self.root, '-PlaylistUrl', SOURCE_URL,
+                          '-VideoUrl', 'https://www.youtube.com/watch?v=ZZZ999yyy88', '-ExpectedCommit', commit, '-AllowExistingArchive']
+        unrelated = run(unrelated_args, env=self.env, timeout=120)
+        self.assertNotEqual(unrelated.returncode, 0)
+        self.assertIn('not an active occurrence', unrelated.stdout + unrelated.stderr)
+        self.assertEqual(len(list(self.root.glob('local-harness-evidence-*.json'))), 1)
+
         (self.package / 'PORTABLE_MANIFEST.txt').write_text('tampered')
         result = run(args + ['-AllowExistingArchive'], env=self.env, timeout=120)
         self.assertNotEqual(result.returncode, 0)

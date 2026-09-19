@@ -22,6 +22,7 @@ void usage(QTextStream& out){out<<"Usage:\n"
     "  archive-cli ingest-pending <archive-root>\n"
     "  archive-cli rebuild-projections <archive-root>\n"
     "  archive-cli scan <archive-root> <youtube-playlist-url> [display-name]\n"
+    "  archive-cli playlist-binding <archive-root> <youtube-playlist-url> <youtube-video-url>\n"
     "  archive-cli sync-item <archive-root> <youtube-video-url>\n"
     "  archive-cli verify-item <archive-root> <youtube-video-url>\n";}
 }
@@ -31,11 +32,14 @@ int main(int argc,char** argv){
     const auto command=args[1];
     const bool valid=(QStringList{"preflight","ingest-pending","rebuild-projections"}.contains(command)&&args.size()==3)||
         (QStringList{"validate","sync-item","verify-item"}.contains(command)&&args.size()==4)||
-        (command=="scan"&&(args.size()==4||args.size()==5));
+        (command=="scan"&&(args.size()==4||args.size()==5))||
+        (command=="playlist-binding"&&args.size()==5);
     if(!valid||args[2].trimmed().isEmpty()){usage(error);return 2;}
-    const auto sourceKey=command=="scan"?archive::sourceKeyFromUrl(args[3]):QString();
-    const auto id=(command=="sync-item"||command=="verify-item")?archive::videoIdFromUrl(args[3]):QString();
-    if((command=="scan"&&sourceKey.isEmpty())||((command=="sync-item"||command=="verify-item")&&id.isEmpty())){
+    const auto sourceKey=(command=="scan"||command=="playlist-binding")?archive::sourceKeyFromUrl(args[3]):QString();
+    const auto id=(command=="sync-item"||command=="verify-item")?archive::videoIdFromUrl(args[3]):
+        command=="playlist-binding"?archive::videoIdFromUrl(args[4]):QString();
+    if(((command=="scan"||command=="playlist-binding")&&sourceKey.isEmpty())||
+       ((command=="sync-item"||command=="verify-item"||command=="playlist-binding")&&id.isEmpty())){
         error<<"Invalid YouTube URL or identity; no archive state was changed\n";return 2;
     }
     archive::Paths paths(args[2]);archive::RuntimeConfig config{paths.root(),QCoreApplication::applicationDirPath()};
@@ -78,7 +82,7 @@ int main(int argc,char** argv){
         source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
         for(const auto& previous:sources)if(previous.key==sourceKey){source=previous;source.url=args[3];if(args.size()==5)source.title=args[4];break;}
         archive::PlaylistDiscovery discovery(config,logger);const auto snapshot=discovery.discover(source);const auto result=store.reconcile(source,snapshot,&logger);
-        out<<"complete="<<(snapshot.complete?"true":"false")<<"\nobserved="<<result.observed<<"\nactive="<<result.active<<"\nremoved="<<result.removed<<"\nunavailable="<<result.unavailable<<"\n";
+        out<<"source_key="<<sourceKey<<"\ncomplete="<<(snapshot.complete?"true":"false")<<"\nobserved="<<result.observed<<"\nactive="<<result.active<<"\nremoved="<<result.removed<<"\nunavailable="<<result.unavailable<<"\n";
         out<<"committed="<<(result.committed?"true":"false")<<"\nprojections="<<(!result.committed?"not_attempted":result.projectionsCurrent?"current":"dirty")<<"\n";
         if(!result.committed){error<<result.error<<"\n";return 1;}
         if(!result.projectionWarning.isEmpty())error<<result.projectionWarning<<"\n";
@@ -86,6 +90,27 @@ int main(int argc,char** argv){
         // Partial discovery keeps its existing exit 3, even with dirty views.
         // A complete committed scan with dirty views has distinct exit 4.
         return !snapshot.complete?3:!result.projectionsCurrent?4:0;
+    }
+    if(command=="playlist-binding"){
+        const auto playlist=store.loadPlaylistItems(sourceKey,&stateError);
+        if(!stateError.isEmpty()){error<<stateError<<"\n";return 1;}
+        const auto key="youtube:"+id;
+        int activeOccurrences=0;
+        QString entryKey;
+        for(const auto& occurrence:playlist){
+            if(occurrence.itemKey==key && occurrence.providerId==id && occurrence.membership=="active"){
+                ++activeOccurrences;
+                if(entryKey.isEmpty()) entryKey=occurrence.entryKey;
+            }
+        }
+        out<<"source_key="<<sourceKey<<"\nitem_key="<<key<<"\nactive_occurrences="<<activeOccurrences<<"\n";
+        if(!entryKey.isEmpty()) out<<"entry_key="<<entryKey<<"\n";
+        out<<"member="<<(activeOccurrences>0?"true":"false")<<"\n";
+        if(activeOccurrences<1){
+            error<<"Requested video is not an active occurrence of the scanned playlist\n";
+            return 1;
+        }
+        return 0;
     }
     const auto key="youtube:"+id;auto items=store.loadCanonicalItems(&stateError);
     if(!stateError.isEmpty()){error<<stateError<<"\n";return 1;}
