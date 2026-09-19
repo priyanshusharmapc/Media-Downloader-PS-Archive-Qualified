@@ -19,8 +19,11 @@ key_start = core.index("QString sourceKeyFromUrl")
 key_end = core.index("QString videoIdFromUrl", key_start)
 key = core[key_start:key_end]
 
-# 194: pasted surrounding whitespace is normalized before identity/persistence.
+# 194: pasted whitespace and equivalent URL forms converge to one durable URL.
 assert "getText(" in add and ".trimmed()" in add
+assert 'const auto canonicalUrl=QStringLiteral("https://www.youtube.com/playlist?list=")+key' in add
+assert "source.url=canonicalUrl" in add
+assert '{"url",canonicalUrl}' in add
 
 # 195: arbitrary text/paths/unsupported schemes cannot become durable sources.
 assert 'url.scheme()!="https"&&url.scheme()!="http"' in key
@@ -34,6 +37,7 @@ assert "if(key.isEmpty())" in add
 assert "store.loadSources" in add
 assert "source.key==key" in add
 assert "already registered" in add
+assert "m_sources->setCurrentRow(i)" in add
 assert add.index("source.key==key") < add.index("sources.append(source)")
 
 print("Archive source admission policy: PASS")
