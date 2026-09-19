@@ -681,49 +681,51 @@ void settings::setDownloadFolder( const QString& m )
 
 QString settings::downloadFolder( const QString& defaultPath,settings::sLogger& logger )
 {
-	auto mediaDownloaderCWD = utility::stringConstants::mediaDownloaderCWD() ;
-
-	auto mm = utility::stringConstants::mediaDownloaderDefaultDownloadPath() ;
+	const auto mediaDownloaderCWD = utility::stringConstants::mediaDownloaderCWD() ;
+	const auto defaultMarker = utility::stringConstants::mediaDownloaderDefaultDownloadPath() ;
 
 	if( !m_settings.contains( "DownloadFolder" ) ){
 
-		m_settings.setValue( "DownloadFolder",mm ) ;
+		// Only genuine first-use initialization writes the default identity.
+		m_settings.setValue( "DownloadFolder",defaultMarker ) ;
 	}
 
-	auto m = m_settings.value( "DownloadFolder" ).toString() ;
+	const auto configured = m_settings.value( "DownloadFolder" ).toString() ;
+	auto resolved = configured ;
 
-	if( m.startsWith( mediaDownloaderCWD ) ){
+	if( resolved.startsWith( mediaDownloaderCWD ) ){
 
-		m.replace( mediaDownloaderCWD,QDir::currentPath() ) ;
+		resolved.replace( mediaDownloaderCWD,QDir::currentPath() ) ;
 
-	}else if( m.startsWith( mm ) ){
+	}else if( resolved.startsWith( defaultMarker ) ){
 
-		m.replace( mm,defaultPath ) ;
+		resolved.replace( defaultMarker,defaultPath ) ;
 	}
 
-	// A download root must be a directory, not merely an existing filesystem
-	// object. Accepting a regular file defers the error into unrelated download
-	// and metadata paths and makes the persisted setting look valid.
-	if( QFileInfo( m ).isDir() ){
+	if( QFileInfo( resolved ).isDir() ){
 
-		return m ;
-	}else{
-		auto id = utility::loggerID() ;
+		return resolved ;
+	}
 
-		auto s = utility::barLine() ;
+	// The built-in default is application-owned fallback state, so creating it
+	// is safe. An explicitly configured removable/network/cloud path is user
+	// identity and must never be overwritten merely because it is offline.
+	QDir().mkpath( defaultPath ) ;
 
-		logger.add( s,id ) ;
-
-		logger.add( QObject::tr( "Resetting download folder to default" ).toUtf8(),id ) ;
-
-		logger.add( s,id ) ;
-
-		m_settings.setValue( "DownloadFolder",mm ) ;
-
-		QDir().mkpath( defaultPath ) ;
+	if( configured.startsWith( defaultMarker ) ){
 
 		return defaultPath ;
 	}
+
+	auto id = utility::loggerID() ;
+	const auto bar = utility::barLine() ;
+	logger.add( bar,id ) ;
+	logger.add( QObject::tr( "Configured download folder is unavailable; using the default folder for this operation" ).toUtf8(),id ) ;
+	logger.add( bar,id ) ;
+
+	// Operational fallback is intentionally non-persistent. Once the configured
+	// destination becomes available again, the next lookup uses it automatically.
+	return defaultPath ;
 }
 
 QString settings::downloadFolderImp( settings::sLogger logger )
