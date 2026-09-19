@@ -30,7 +30,7 @@ index 37edc552aeda20a3050c82fe8d805f4bff93a26c..7f77cb877f25399230e19ebd31225e6c
 +   require(f.store.reconcile(f.source,snapshot).committed,"refused observations could not preserve history");
 +   require(f.store.loadPlaylistItems(f.source.key).size()==1,"wrong-source membership was inserted");
 +  }
-+  const auto valid=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",noEntries}}}).toJson(),{},0);
++  const auto valid=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",noEntries}}).toJson(),{},0);
 +  require(valid.complete,"exact provider identity rejected a complete empty snapshot");
 +  require(f.store.reconcile(f.source,valid).committed,"valid complete snapshot not committed");
 +  require(f.store.loadPlaylistItems(f.source.key).first().membership=="removed","legitimate removal inference was disabled");
