@@ -434,10 +434,16 @@ void ArchiveTab::addPlaylist()
     archive::Paths paths(m_root);archive::SyncLock lock(paths);if(!lock.tryLock()){QMessageBox::warning(m_page,tr("Archive"),lock.errorString());return;}
     archive::Store store(paths);auto sources=store.loadSources(&error);if(!error.isEmpty()){QMessageBox::critical(m_page,tr("Archive"),error);return;}
     for(const auto& source:sources)if(source.key==key){QMessageBox::information(m_page,tr("Add Playlist"),tr("This playlist is already registered."));return;}
-    archive::Source source;source.key=key;source.url=url;source.title=title.isEmpty()?key:title;source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);sources.append(source);
-    if(!store.saveSources(sources,&error)){QMessageBox::critical(m_page,tr("Add Playlist"),error);return;}
-    archive::ActivityLogger logger(paths);logger.event("INFO","source","playlist_added",{{"source_key",key},{"url",url},{"title",source.title}});
-    lock.unlock();refreshAll();for(int i=0;i<m_sources->count();++i)if(m_sources->item(i)->data(Qt::UserRole).toString()==key){m_sources->setCurrentRow(i);break;}
+    archive::Source source;source.key=key;source.url=url;source.title=title.isEmpty()?key:title;source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    lock.unlock();
+
+    // A syntactically valid URL is only a candidate until provider discovery
+    // proves it is an authoritative complete playlist snapshot. Failed first
+    // discovery must leave no durable active source behind.
+    m_stopRequested=false;
+    runAsync(tr("Adding playlist"),[this,source]{
+        return operationScanOrSync({source},true,true);
+    });
 }
 void ArchiveTab::removePlaylist()
 {
@@ -497,7 +503,7 @@ void ArchiveTab::runSources(const QVector<archive::Source>& sources,bool downloa
     runAsync(name,[this,sources,downloads]{return operationScanOrSync(sources,downloads);});
 }
 
-QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool doDownloads)
+QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool doDownloads,bool requireCompleteBeforeFirstCommit)
 {
     // Admission is repeated in the worker; UI enablement is not a filesystem
     // guarantee, and an offline configured root must never be recreated here.
@@ -513,8 +519,17 @@ QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool do
         if(m_stopRequested.load())break;++sourceIndex;const auto sourceName=source.title.isEmpty()?source.key:source.title;
         postOperationProgress(tr("Discovery"),tr("Source %1/%2: %3").arg(sourceIndex).arg(sources.size()).arg(sourceName),sourceIndex-1,sources.size(),totalFailures);
         archive::PlaylistDiscovery discovery(runtimeConfig(),logger);auto snapshot=discovery.discover(source);
+        if(requireCompleteBeforeFirstCommit&&!snapshot.complete){
+            ++totalFailures;
+            failures<<source.key+": "+(snapshot.error.isEmpty()?tr("Initial discovery did not produce a complete authoritative playlist snapshot"):snapshot.error);
+            logger.event("WARNING","source","playlist_admission_rejected",{{"source_key",source.key},{"error",snapshot.error}});
+            postOperationProgress(tr("Add rejected"),snapshot.error,sourceIndex,sources.size(),totalFailures);
+            continue;
+        }
         postOperationProgress(tr("Reconcile"),tr("Reconciling %1 observed item(s) for %2").arg(snapshot.items.size()).arg(sourceName),sourceIndex-1,sources.size(),totalFailures);
-        auto sum=store.reconcile(source,snapshot,&logger);if(!sum.committed){failures<<source.key+": "+sum.error;++totalFailures;postOperationProgress(tr("Reconcile failed"),sum.error,sourceIndex,sources.size(),totalFailures);continue;}
+        auto sum=store.reconcile(source,snapshot,&logger);
+        if(requireCompleteBeforeFirstCommit&&sum.committed)
+            logger.event("INFO","source","playlist_added",{{"source_key",source.key},{"url",source.url},{"title",source.title}});if(!sum.committed){failures<<source.key+": "+sum.error;++totalFailures;postOperationProgress(tr("Reconcile failed"),sum.error,sourceIndex,sources.size(),totalFailures);continue;}
         if(!sum.projectionWarning.isEmpty())warnings<<source.key+": "+sum.projectionWarning;
         totalObserved+=sum.observed;if(!snapshot.complete){++totalFailures;failures<<source.key+": "+snapshot.error;postOperationProgress(tr("Discovery incomplete"),snapshot.error,sourceIndex,sources.size(),totalFailures);continue;}
         if(!doDownloads){postOperationProgress(tr("Source complete"),tr("%1 scanned successfully").arg(sourceName),sourceIndex,sources.size(),totalFailures);continue;}
