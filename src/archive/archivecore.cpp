@@ -1436,10 +1436,24 @@ ValidationResult RecoveryImporter::validate(const QString& packageDir) const
     r.packageId=o.value("package_id").toString();
     if(!detail::sourceKeySafe(r.packageId)||r.packageId!=dirInfo.fileName())r.errors<<"package_id must match its safe directory name (letters, digits, underscore or hyphen, 1 to 160 characters)";
     if(detail::sourceKeySafe(r.packageId)&&QFileInfo::exists(QDir(m_store.paths().importsAccepted()).filePath(r.packageId)))r.errors<<"An accepted package already has this identity; existing evidence is immutable";
-    const auto target=o.value("target").toObject();const auto id=target.value("youtube_id").toString();r.itemKey=target.value("item_key").toString();
+    if(!o.value("target").isObject())r.errors<<"target must be an object";
+    const auto target=o.value("target").toObject();
+    const auto itemKeyValue=target.value("item_key");
+    const auto youtubeIdValue=target.value("youtube_id");
+    const auto id=youtubeIdValue.toString();
+    r.itemKey=itemKeyValue.toString();
+
+    // Keep runtime validation identical to the published recovery-package
+    // schema. External agents must never see a package accepted here that the
+    // schema rejects, especially placeholder identities.
+    if(target.contains("item_key")&&(!itemKeyValue.isString()||
+       !QRegularExpression("^youtube:[A-Za-z0-9_-]{11}$").match(r.itemKey).hasMatch()))
+        r.errors<<"target.item_key must be a canonical YouTube item key";
+    if(target.contains("youtube_id")&&(!youtubeIdValue.isString()||!detail::videoIdSafe(id)))
+        r.errors<<"target.youtube_id must be an 11-character YouTube ID";
     if(r.itemKey.isEmpty()&&detail::videoIdSafe(id))r.itemKey="youtube:"+id;
-    if(r.itemKey.isEmpty())r.errors<<"target.item_key or a valid target.youtube_id is required";
-    if(target.contains("youtube_id")&&!detail::videoIdSafe(id))r.errors<<"target.youtube_id must be an 11-character YouTube ID";
+    if(!target.contains("item_key")&&!target.contains("youtube_id"))
+        r.errors<<"target.item_key or target.youtube_id is required";
     const auto provenance=o.value("provenance").toObject();
     if(provenance.value("method").toString().trimmed().isEmpty())r.errors<<"provenance.method is required";
     if(provenance.contains("confidence")&&!QStringList{"low","medium","high","verified"}.contains(provenance.value("confidence").toString()))r.errors<<"Invalid provenance.confidence";
