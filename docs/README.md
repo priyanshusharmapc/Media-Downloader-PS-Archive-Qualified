@@ -99,3 +99,9 @@ non-destructive report-only recovery.
 [Representation restart recovery](remediation/007.md) documents how stale
 `running` leases become `interrupted` only at a fresh Archive operation
 boundary, and how unavailable media becomes durably `blocked_unavailable`.
+
+## Application update trust boundary
+
+[Fork-bound application updates](remediation/003.md) documents the qualified
+fork release endpoint, opt-in automatic update policy, and release-asset
+repository validation.
