@@ -206,8 +206,10 @@ bool isUnavailable(const QString& a)
 
 bool isSourceAccessible(const QString& availability)
 {
-    // "unknown" is not positive evidence that the provider source has revived.
-    return !availability.isEmpty() && availability!="unknown" && !isUnavailable(availability);
+    // Revival requires positive provider evidence. Discovery normalizes all
+    // ordinary accessible states (including unlisted) to "public"; unknown or
+    // future/unrecognized tokens must not clear external-recovery state.
+    return availability=="public";
 }
 
 void updateRecoveryStatus(CanonicalItem& item)
