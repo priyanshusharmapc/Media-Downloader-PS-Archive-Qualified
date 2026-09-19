@@ -36,7 +36,6 @@ public:
 	dManager( const QString& path,std::atomic_bool& c ) :
 		m_path( this->setPath( path ) ),m_continue( c )
 	{
-		m_continue = true ;
 	}
 	void removeDirectoryContents()
 	{
@@ -227,7 +226,6 @@ public:
 		m_path( path.toUtf8().constData() ),
 		m_continue( c )
 	{
-		m_continue = true ;
 	}
 	directoryEntries readAll()
 	{
@@ -366,7 +364,7 @@ bool directoryEntries::valid( const wchar_t * s )
 
 directoryEntries directoryManager::readAll( const QString& e )
 {
-	std::atomic_bool s ;
+	std::atomic_bool s{ true } ;
 
 	return directoryManager::readAll( e,s ) ;
 }
