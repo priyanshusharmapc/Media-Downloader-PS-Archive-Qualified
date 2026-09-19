@@ -50,6 +50,28 @@
 
 #include <cstring>
 
+bool engines::executableOwnedByBinRoot( const QString& executable,const QString& binRoot )
+{
+	const QFileInfo rootInfo( binRoot ) ;
+	const QFileInfo executableInfo( executable ) ;
+	if( !rootInfo.exists() || !rootInfo.isDir() || !executableInfo.exists() || !executableInfo.isFile() ){
+		return false ;
+	}
+
+	const auto canonicalRoot = QDir::fromNativeSeparators( rootInfo.canonicalFilePath() ) ;
+	const auto canonicalExecutable = QDir::fromNativeSeparators( executableInfo.canonicalFilePath() ) ;
+	if( canonicalRoot.isEmpty() || canonicalExecutable.isEmpty() ){
+		return false ;
+	}
+
+	const auto rootPrefix = canonicalRoot.endsWith( '/' ) ? canonicalRoot : canonicalRoot + "/" ;
+#ifdef Q_OS_WIN
+	return canonicalExecutable.startsWith( rootPrefix,Qt::CaseInsensitive ) ;
+#else
+	return canonicalExecutable.startsWith( rootPrefix,Qt::CaseSensitive ) ;
+#endif
+}
+
 QStringList engines::dirEntries( const QString& e ) const
 {
 	auto filters = QDir::Filter::Dirs | QDir::Filter::NoDotAndDotDot ;
@@ -769,10 +791,13 @@ void engines::removeEngine( const QString& ee,int id )
 				utility::removeFolder( m.filePath() ) ;
 			}
 		}else{
-			auto exe = QDir::fromNativeSeparators( engine->exePath().realExe() ) ;
-			auto binPath = QDir::fromNativeSeparators( m_enginePaths.binPath() ) ;
+			const auto exe = QDir::fromNativeSeparators( engine->exePath().realExe() ) ;
+			const auto binPath = QDir::fromNativeSeparators( m_enginePaths.binPath() ) ;
 
-			if( exe.startsWith( binPath ) && QFile::exists( exe ) ){
+			// Destructive cleanup is permitted only for an executable whose
+			// canonical path is a true child of the canonical application bin
+			// directory. A sibling such as "bin-tools" is never application-owned.
+			if( engines::executableOwnedByBinRoot( exe,binPath ) ){
 
 				engine->removeFiles( { exe },binPath ) ;
 			}
@@ -1195,9 +1220,9 @@ void engines::engine::parseMultipleCmdArgs( Logger& logger,
 
 		if( a && b && c ){
 
-			if( m.startsWith( m_exeFolderPath ) ){
+			if( engines::executableOwnedByBinRoot( m,m_exeFolderPath ) ){
 				/*
-				 * backend found in internal bin folder
+				 * backend found in the canonical internal bin folder
 				 */
 				m_exePath = m ;
 
