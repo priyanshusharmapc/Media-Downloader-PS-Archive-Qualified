@@ -14,6 +14,7 @@ import tempfile
 import time
 import unittest
 import zipfile
+from archive_normalization_cleanup import NormalizationCleanupCases
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--cli', required=True, type=Path)
@@ -49,7 +50,7 @@ def cleanup_path(path: Path, attempts: int = 120) -> None:
     if last:
         raise last
 
-class ArchiveIntegration(unittest.TestCase):
+class ArchiveIntegration(NormalizationCleanupCases, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.fixture = Path(tempfile.mkdtemp(prefix='archive-media-fixtures-'))

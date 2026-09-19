@@ -13,6 +13,7 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QMap>
+#include "archivehistory.h"
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <winioctl.h>
@@ -138,15 +139,6 @@ inline bool readArray(const QString& path,const QString& kind,QJsonArray* array,
     if(pe.error!=QJsonParseError::NoError||!doc.isArray())return reject(error,"Invalid "+kind+" state in "+path+": expected a JSON array ("+pe.errorString()+")");
     if(!arrayShape(doc.array(),kind,error))return false;
     *array=doc.array();return true;
-}
-inline bool historyValid(const QByteArray& bytes,QString* error){
-    if(!bytes.isEmpty()&&!bytes.endsWith('\n'))return reject(error,"Incomplete history record");
-    for(const auto& line:bytes.split('\n')){
-        if(line.trimmed().isEmpty())continue;
-        QJsonParseError pe;const auto doc=QJsonDocument::fromJson(line,&pe);
-        if(pe.error!=QJsonParseError::NoError||!doc.isObject())return reject(error,"Corrupt history record; original history was preserved");
-    }
-    return true;
 }
 // A root identity survives loss of otherwise empty registries. Its version is
 // deliberately independent of per-record schemas; unknown versions are not

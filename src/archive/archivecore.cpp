@@ -1,5 +1,6 @@
 #include "archivecore.h"
 #include "archivesafety.h"
+#include "archiveprocess.h"
 #include <QMutex>
 #include <QMutexLocker>
 #include <QUuid>
@@ -239,39 +240,7 @@ bool copyResource(const QString& resource,const QString& destination,QString* er
 
 ProcessResult runProcess(const QString& program,const QStringList& args,const QString& cwd,int timeoutMs)
 {
-    ProcessResult r;
-    if(program.isEmpty()){r.error="Required executable was not found";return r;}
-    QProcess process;if(!cwd.isEmpty())process.setWorkingDirectory(cwd);
-    process.setProcessChannelMode(QProcess::SeparateChannels);process.start(program,args);
-    if(!process.waitForStarted(10000)){r.error=process.errorString();return r;}
-    process.closeWriteChannel();
-    QByteArray output,errors;QElapsedTimer timer;timer.start();bool overflow=false,timedOut=false;
-    const auto drain=[&]{
-        const auto chunk=process.readAllStandardOutput();
-        if(output.size()+chunk.size()>64*1024*1024)overflow=true;else output+=chunk;
-        errors+=process.readAllStandardError();
-        if(errors.size()>256*1024)errors=QByteArray("WARNING: earlier diagnostic output truncated\n")+errors.right(256*1024-64);
-    };
-    while(process.state()!=QProcess::NotRunning){
-        process.waitForReadyRead(100);drain();
-        timedOut=timer.elapsed()>timeoutMs;
-        if(overflow||timedOut){
-#ifdef Q_OS_WIN
-            const auto pid=process.processId();
-            if(pid>0){
-                QProcess killer;killer.start("taskkill",{"/PID",QString::number(pid),"/T","/F"});
-                killer.waitForFinished(5000);
-            }else process.kill();
-#else
-            process.kill();
-#endif
-            process.waitForFinished(5000);break;
-        }
-    }
-    drain();r.standardOutput=QString::fromUtf8(output);r.standardError=QString::fromUtf8(errors);
-    if(overflow||timedOut){r.error=overflow?"Process output exceeded the safety limit":"Process timed out";return r;}
-    r.exitCode=process.exitCode();r.ok=process.exitStatus()==QProcess::NormalExit&&r.exitCode==0;
-    if(!r.ok)r.error=QString("Process exited with code %1").arg(r.exitCode);return r;
+    return detail::runContainedProcess(program,args,cwd,timeoutMs);
 }
 
 QJsonObject historyEvent(const QString& event,const QString& itemKey,const QJsonObject& detail={})
@@ -533,9 +502,52 @@ bool freshArchiveRoot(const Paths& paths,QString* error)
     return true;
 }
 
+// A missing occurrence file is only a first-admission state when every
+// retained lifecycle record agrees. Never reconstruct membership from today's
+// provider snapshot after a managed file or its whole directory was lost.
+bool missingPlaylistStateAllowed(const Paths& paths,const QString& sourceKey,const QJsonArray& sources,QString* error)
+{
+    const auto rejectMissing=[&](){return detail::reject(error,
+        "Missing authoritative playlist items.json for "+sourceKey+
+        "; existing evidence was preserved. Restore the original state before scanning.");};
+    const auto neverScanned=[](const QJsonObject& source,bool legacyAdmission){
+        // Legacy minimal registry entries are valid first admissions only in
+        // the absence of independent metadata/history evidence. Present but
+        // malformed lifecycle fields are not equivalent to absent fields.
+        if(legacyAdmission&&!source.contains("last_scan_at")&&!source.contains("last_scan_status"))return true;
+        return source.value("last_scan_at").isString()&&source.value("last_scan_at").toString().isEmpty()&&
+            source.value("last_scan_status")==QJsonValue("never");
+    };
+    if(!detail::sourceKeySafe(sourceKey)||!detail::noLinks(paths.playlistItemsFile(sourceKey)))return rejectMissing();
+    for(const auto& value:sources){
+        const auto source=value.toObject();
+        if(source.value("key").toString()==sourceKey&&!neverScanned(source,true))return rejectMissing();
+    }
+    const auto history=paths.playlistHistoryFile(sourceKey);
+    // Even an empty history file is durable evidence of a prior reconciliation.
+    if(QFileInfo::exists(history)||!detail::noLinks(history))return rejectMissing();
+    const auto meta=paths.playlistFile(sourceKey);
+    if(!detail::noLinks(meta))return rejectMissing();
+    if(QFileInfo::exists(meta)){
+        QByteArray bytes;if(!detail::readBytes(meta,&bytes,error))return false;
+        QJsonParseError parseError;const auto document=QJsonDocument::fromJson(bytes,&parseError);
+        if(parseError.error!=QJsonParseError::NoError||!document.isObject()||
+           document.object().value("key")!=QJsonValue(sourceKey)||!neverScanned(document.object(),false))return rejectMissing();
+    }
+    return true;
+}
+
+bool missingPlaylistStateAllowed(const Paths& paths,const QString& sourceKey,QString* error)
+{
+    QJsonArray sources;
+    if(!detail::readArray(paths.sourcesFile(),"source",&sources,error))return false;
+    return missingPlaylistStateAllowed(paths,sourceKey,sources,error);
+}
+
 bool readPlaylistArrayWithMigration(const Paths& paths,const QString& sourceKey,QJsonArray* array,QString* error,bool missingAllowed)
 {
     const auto path=paths.playlistItemsFile(sourceKey);
+    if(missingAllowed&&!QFileInfo::exists(path)&&!missingPlaylistStateAllowed(paths,sourceKey,error))return false;
     if(detail::readArray(path,"playlist",array,error,missingAllowed))return true;
 
     // The only supported legacy shape predates occurrence identity entirely.
@@ -585,6 +597,13 @@ bool validateStoreGraph(const Paths& paths,const QJsonArray& sources,const QJson
     QSet<QString> sourceKeys,canonicalKeys;
     for(const auto& value:sources)sourceKeys.insert(value.toObject().value("key").toString());
     for(const auto& value:canonical)canonicalKeys.insert(value.toObject().value("key").toString());
+
+    // Checking only directories that still exist misses complete source-folder
+    // loss. Validate all registered owners before any legacy migration writes.
+    for(const auto& sourceKey:sourceKeys){
+        if(!QFileInfo::exists(paths.playlistItemsFile(sourceKey))&&
+           !missingPlaylistStateAllowed(paths,sourceKey,sources,error))return false;
+    }
 
     for(const auto& dir:QDir(paths.playlists()).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
         if(!detail::sourceKeySafe(dir)||!detail::noLinks(paths.sourceDir(dir)))
@@ -720,6 +739,8 @@ bool Store::savePlaylistItems(const QString& sourceKey,const QVector<PlaylistIte
     if(!detail::sourceKeySafe(sourceKey))return detail::reject(error,"Invalid source key");
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
     QJsonArray prior;const auto next=vectorToArray(items,playlistItemToJson);
+    if(!QFileInfo::exists(m_paths.playlistItemsFile(sourceKey))&&
+       !missingPlaylistStateAllowed(m_paths,sourceKey,error))return false;
     if(!detail::readArray(m_paths.playlistItemsFile(sourceKey),"playlist",&prior,error,true)||!detail::arrayShape(next,"playlist",error))return false;
     return detail::commitTransaction(m_paths.root(),{{"Playlists/"+sourceKey+"/items.json",QJsonDocument(next).toJson()}},error);
 }
@@ -736,7 +757,17 @@ bool Store::appendHistory(const QString& sourceKey,const QJsonObject& e,QString*
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
     if(!detail::sourceKeySafe(sourceKey))return detail::reject(error,"Invalid source key");
-    return appendLine(m_paths.playlistHistoryFile(sourceKey),QJsonDocument(e).toJson(QJsonDocument::Compact),error);
+    // Validate both the existing stream and the new event before publishing.
+    // Atomic journalled replacement prevents partial appends from corrupting
+    // canonical history when a write/flush fails or the process is interrupted.
+    if(!detail::historyEventValid(e,error))return false;
+    const auto path=m_paths.playlistHistoryFile(sourceKey);
+    QByteArray history;
+    if(QFileInfo::exists(path)&&!detail::readBytes(path,&history,error))return false;
+    if(!detail::historyValid(history,error))return false;
+    history+=QJsonDocument(e).toJson(QJsonDocument::Compact)+"\n";
+    return detail::commitTransaction(m_paths.root(),{
+        {"Playlists/"+sourceKey+"/history.jsonl",history}},error);
 }
 
 bool Store::updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error)
@@ -806,7 +837,7 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
 
     QByteArray history;
     if(QFileInfo::exists(m_paths.playlistHistoryFile(source.key)) && !detail::readBytes(m_paths.playlistHistoryFile(source.key),&history,&error)){summary.error=error;return summary;}
-    if(!history.isEmpty()&&!history.endsWith('\n')){summary.error="Incomplete history record; preserve and repair before reconciliation";return summary;}
+    if(!detail::historyValid(history,&error)){summary.error=error;return summary;}
     const auto record=[&](const QJsonObject& event){history+=QJsonDocument(event).toJson(QJsonDocument::Compact)+"\n";};
     QVector<PlaylistItem> result;
     QSet<QString> observedKeys;
@@ -1441,7 +1472,13 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     if(!verify.ok){
         const auto input=Paths(m_config.archiveRoot).absoluteFromRelative(rel);
         const auto token=QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const auto tempRel="Temp/normalize-"+token+".mp4";const auto tmp=Paths(m_config.archiveRoot).absoluteFromRelative(tempRel);
+        // Own all staging bytes until publication. RAII also covers encoder,
+        // verifier, and rename failures without touching the downloaded original.
+        if(!detail::noLinks(m_store.paths().temp()))return fail("Unsafe normalization staging directory",rel);
+        QTemporaryDir staging(QDir(m_store.paths().temp()).filePath("normalize-"+token+"-XXXXXX"));
+        if(!staging.isValid()||!detail::noLinks(staging.path()))return fail("Cannot create normalization staging directory",rel);
+        const auto tmp=staging.filePath("normalized.mp4");
+        const auto tempRel=m_store.paths().relativeToRoot(tmp);
         const QStringList fargs={"-nostdin","-n","-i",input,"-map","0:v:0","-map","0:a:0?","-map","0:s?","-map_metadata","0","-map_chapters","0",
             "-vf","scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
             "-c:v","libx264","-preset","medium","-crf","18","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-c:s","mov_text",tmp};
@@ -1503,7 +1540,13 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
     auto verify=m_verifier.verifyAudio(rel);
     if(!verify.ok){
         const auto token=QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const auto tempRel="Temp/normalize-"+token+".m4a";const auto tmp=Paths(m_config.archiveRoot).absoluteFromRelative(tempRel);
+        // Own all staging bytes until publication. RAII also covers encoder,
+        // verifier, and rename failures without touching the downloaded original.
+        if(!detail::noLinks(m_store.paths().temp()))return fail("Unsafe normalization staging directory",rel);
+        QTemporaryDir staging(QDir(m_store.paths().temp()).filePath("normalize-"+token+"-XXXXXX"));
+        if(!staging.isValid()||!detail::noLinks(staging.path()))return fail("Cannot create normalization staging directory",rel);
+        const auto tmp=staging.filePath("normalized.m4a");
+        const auto tempRel=m_store.paths().relativeToRoot(tmp);
         const auto input=Paths(m_config.archiveRoot).absoluteFromRelative(rel);
         const auto result=run(m_tools.ffmpeg(),{"-nostdin","-n","-i",input,"-map","0:a:0","-vn","-map_metadata","0","-map_chapters","0","-c:a","aac","-b:a","192k",tmp},"audio-normalization");
         const auto staged=m_verifier.verifyAudio(tempRel);
