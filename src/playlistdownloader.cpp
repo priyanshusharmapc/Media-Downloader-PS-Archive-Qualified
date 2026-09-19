@@ -576,7 +576,7 @@ void playlistdownloader::customContextMenuRequested()
 
 		m_table.removeAllSelected() ;
 
-		m_ui.pbBDDownload->setEnabled( m_table.rowCount() ) ;
+		m_ui.pbPLDownload->setEnabled( m_table.rowCount() ) ;
 	} ) ;
 
 	if( m_settings.autoHideDownloadWhenCompleted() ){
