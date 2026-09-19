@@ -1,0 +1,94 @@
+name: Audit2 local remediation inputs
+
+on:
+  push:
+    branches: ['work/audit2-bootstrap-20260919']
+    paths: ['.github/workflows/audit2-bootstrap.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    container: debian:trixie
+    timeout-minutes: 15
+    steps:
+      - name: Install snapshot tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates python3
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export credential-free source history and issue snapshots
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_REPOSITORY_ID: '1371730232'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'priyanshusharmapc/Media-Downloader-PS-Archive-Qualified'
+          test "$GITHUB_REPOSITORY_ID" = "$EXPECTED_REPOSITORY_ID"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git cat-file -e b53457008af9af7716e4745bdd2812458e95766f^{commit}
+          mkdir -p /tmp/source-inputs
+          git bundle create /tmp/source-inputs/repository.bundle --all
+          git bundle verify /tmp/source-inputs/repository.bundle
+          git rev-parse refs/remotes/origin/audit2-remediation > /tmp/source-inputs/integration-commit.txt
+          python3 - <<'PY'
+          import datetime, hashlib, json, os, pathlib, urllib.request
+          out = pathlib.Path('/tmp/source-inputs')
+          base = 'https://api.github.com/repos/' + os.environ['GITHUB_REPOSITORY']
+          def get(path):
+              request = urllib.request.Request(base + path, headers={
+                  'Authorization': 'Bearer ' + os.environ['GH_TOKEN'],
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28'})
+              with urllib.request.urlopen(request, timeout=60) as response:
+                  return json.load(response)
+          repo = get('')
+          assert str(repo['id']) == os.environ['EXPECTED_REPOSITORY_ID']
+          for number in (2, 3):
+              issue = get('/issues/' + str(number))
+              comments = []
+              page = 1
+              while True:
+                  batch = get('/issues/%d/comments?per_page=100&page=%d' % (number, page))
+                  comments.extend(batch)
+                  if len(batch) < 100:
+                      break
+                  page += 1
+              (out / ('issue-%d.json' % number)).write_text(json.dumps({'issue': issue, 'comments': comments}, indent=2), encoding='utf-8')
+          identity = {'repository': repo['full_name'], 'repository_id': repo['id'],
+                      'workflow_commit': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'],
+                      'baseline': 'b53457008af9af7716e4745bdd2812458e95766f',
+                      'captured_at': datetime.datetime.now(datetime.timezone.utc).isoformat()}
+          (out / 'identity.json').write_text(json.dumps(identity, indent=2), encoding='utf-8')
+          with (out / 'SHA256SUMS').open('w') as sums:
+              for path in sorted(out.iterdir()):
+                  if path.name != 'SHA256SUMS':
+                      sums.write(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audit2-source-and-ledgers-${{ github.run_id }}
+          path: /tmp/source-inputs
+          retention-days: 7
+          if-no-files-found: error
+      - name: Download matching Debian Qt6 development dependencies
+        run: |
+          apt-get --download-only -y install qt6-base-dev qt6-base-dev-tools
+          mkdir -p /tmp/qt-inputs
+          cp /var/cache/apt/archives/*.deb /tmp/qt-inputs/
+          cd /tmp/qt-inputs
+          sha256sum *.deb > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audit2-debian-trixie-qt6-${{ github.run_id }}
+          path: /tmp/qt-inputs
+          retention-days: 7
+          if-no-files-found: error
