@@ -166,10 +166,9 @@ void themes::setTheme( QApplication& app,const QJsonObject& obj ) const
 
 	auto s = obj.value( "QToolTipStyleSheet" ).toString() ;
 
-	if( !s.isEmpty() ){
-
-		app.setStyleSheet( s ) ;
-	}
+	// QApplication stylesheets are process-global persistent state. Applying
+	// an empty stylesheet is required to clear rules from the previous theme.
+	app.setStyleSheet( s ) ;
 }
 
 themes::JObject themes::baseTheme() const
