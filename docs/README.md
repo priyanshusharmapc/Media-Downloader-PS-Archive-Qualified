@@ -78,3 +78,11 @@ Do not add hardcoded "latest" build identities to maintained docs. Point readers
 [Discovery admission](remediation/009-031.md) explains provider identity binding,
 explicit occurrence indexes, retained missing-index fallback, and fail-closed
 membership handling for suspect responses.
+
+## Archive admission and missing registries
+
+[Missing-registry admission](remediation/012.md) describes orphan-evidence refusal, durable root identity, supported legacy admission and non-destructive recovery expectations.
+
+## Archive Root selection
+
+[Archive Root configuration and recovery](ARCHIVE_ROOT_CONFIGURATION.md) documents explicit opt-in, offline-root behavior, transactional selection, and settings compatibility for audit findings 001 and 032.

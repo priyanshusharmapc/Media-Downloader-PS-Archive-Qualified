@@ -124,6 +124,98 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
    require(f.store.reconcile(source,reordered).committed,"reordered unresolved reconciliation failed");const auto after=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty()&&after.size()==2,"reordered unresolved occurrences missing");
    QSet<QString> beforeKeys,afterKeys;for(const auto& item:before)beforeKeys.insert(item.itemKey);for(const auto& item:after)afterKeys.insert(item.itemKey);require(beforeKeys==afterKeys,"unresolved reorder changed canonical identities");
   }
+
+ else if(name=="orphan-data"){
+  // Registry loss must never turn existing media, state or recovery evidence
+  // into a new empty archive. Each path is isolated and checked byte-for-byte.
+  const QStringList evidence{
+   "Video/kept.mp4", "Audio/kept.m4a", "Metadata/kept.json",
+   "State/download-archive.txt", "State/ArchiveMode/catalog.json",
+   "Temp/interrupted.part", "Video/.hidden-media",
+   "State/ArchiveMode/Imports/Pending/old/manifest.json",
+   "State/ArchiveMode/Imports/Accepted/old/receipt.json",
+   "State/ArchiveMode/Imports/Rejected/old/manifest.json",
+   "State/ArchiveMode/Logs/Activity/2000-01-01/history.jsonl",
+   "ARCHIVE_AGENT.md"
+  };
+  for(const auto& relative:evidence){
+   QTemporaryDir tmp(testTempTemplate());require(tmp.isValid(),"temporary root");
+   Paths paths(tmp.path());const auto file=QDir(tmp.path()).filePath(relative);
+   const QByteArray bytes="preserve this existing archive evidence\n";put(file,bytes);
+   Store store(paths);QString error;
+   require(!store.initialize(&error),"orphan evidence accepted as fresh: "+relative);
+   require(!error.isEmpty(),"orphan refusal needs an actionable error");
+   require(get(file)==bytes,"orphan evidence changed: "+relative);
+   require(!QFileInfo::exists(paths.sourcesFile())&&!QFileInfo::exists(paths.itemsFile()),"empty registries were created beside "+relative);
+   require(!store.initialize(&error),"repeated initialization bypassed orphan refusal");
+  }
+  for(const auto& relative:QStringList{"Video/old-empty-directory","Playlists/PLLOST","Metadata/old-empty-directory"}){
+   QTemporaryDir tmp(testTempTemplate());require(tmp.isValid(),"temporary root");
+   Paths paths(tmp.path());require(QDir().mkpath(QDir(tmp.path()).filePath(relative)),"make orphan directory");
+   Store store(paths);QString error;require(!store.initialize(&error),"orphan directory accepted: "+relative);
+  }
+ }
+ else if(name=="archive-identity"){
+  QTemporaryDir tmp(testTempTemplate());require(tmp.isValid(),"temporary root");
+  Paths paths(tmp.path());Store store(paths);QString error;
+  // Root-level unrelated documentation is not an archive payload. Generated
+  // empty layout from the existing logger/lock constructors remains admissible.
+  put(QDir(tmp.path()).filePath("operator-notes.txt"),"keep notes\n");
+  require(paths.ensureLayout(&error),error);
+  require(store.initialize(&error),"genuinely fresh root rejected: "+error);
+  const auto identity=QDir(paths.archiveState()).filePath("archive-identity.json");
+  require(QFileInfo::exists(identity),"fresh archive has no durable identity");
+  const auto identityBytes=get(identity);const auto object=QJsonDocument::fromJson(identityBytes).object();
+  require(object.value("schema_version")==1&&!object.value("archive_id").toString().isEmpty(),"invalid identity marker");
+  require(store.initialize(&error),error);require(get(identity)==identityBytes,"identity changed after restart");
+  // Even an otherwise empty previously initialized archive must not reset.
+  require(QFile::remove(paths.sourcesFile())&&QFile::remove(paths.itemsFile()),"remove fixture registries");
+  require(!store.initialize(&error),"identified archive silently reset after both registries disappeared");
+  require(get(identity)==identityBytes,"lost-registry refusal changed identity");
+  require(get(QDir(tmp.path()).filePath("operator-notes.txt"))=="keep notes\n","unrelated file changed");
+ }
+ else if(name=="legacy-admission"){
+  Fixture f;const auto identity=QDir(f.paths.archiveState()).filePath("archive-identity.json");
+  if(QFileInfo::exists(identity))require(QFile::remove(identity),"remove fixture identity for legacy test");
+  const auto sources=get(f.paths.sourcesFile()),items=get(f.paths.itemsFile());
+  const auto playlist=get(f.paths.playlistItemsFile(f.source.key));
+  const auto history=get(f.paths.playlistHistoryFile(f.source.key));QString error;
+  require(f.store.initialize(&error),"valid legacy archive rejected: "+error);
+  require(QFileInfo::exists(identity),"legacy archive identity migration missing");
+  require(get(f.paths.sourcesFile())==sources&&get(f.paths.itemsFile())==items,"legacy registry rewritten by identity migration");
+  require(get(f.paths.playlistItemsFile(f.source.key))==playlist&&get(f.paths.playlistHistoryFile(f.source.key))==history,"legacy history changed");
+  const QByteArray damaged="{\"schema_version\":99,\"archive_id\":\"broken\"}\n";put(identity,damaged);
+  require(!f.store.initialize(&error),"unsupported identity marker accepted");
+  require(!error.isEmpty(),"unsupported marker must explain its refusal");
+  require(get(identity)==damaged&&get(f.paths.itemsFile())==items,"unsupported marker or registry overwritten");
+  require(QFile::remove(identity)&&QFile::remove(f.paths.sourcesFile()),"prepare incomplete registry");
+  require(!f.store.initialize(&error),"one missing legacy registry accepted");
+  require(get(f.paths.itemsFile())==items,"incomplete legacy state overwritten");
+ }
+
+ else if(name=="admission-journal"){
+  QTemporaryDir tmp(testTempTemplate());require(tmp.isValid(),"temporary root");Paths paths(tmp.path());Store store(paths);QString error;
+  require(paths.ensureLayout(&error),error);
+  const QString identityRel="State/ArchiveMode/archive-identity.json";
+  const auto identity=QJsonDocument(QJsonObject{{"schema_version",1},{"format","mdps-archive"},
+      {"archive_id","11111111-2222-4333-8444-555555555555"},
+      {"created_at","2026-01-01T00:00:00.000Z"},{"admitted_from","fresh"}}).toJson();
+  QMap<QString,QByteArray> writes{{identityRel,identity},{"State/ArchiveMode/items.json","[]\n"},{"State/ArchiveMode/sources.json","[]\n"}};
+  QJsonArray operations;
+  for(auto i=writes.begin();i!=writes.end();++i)operations.append(QJsonObject{
+      {"path",i.key()},{"before_exists",false},{"before_sha256",detail::digest({})},
+      {"after_base64",QString::fromLatin1(i.value().toBase64())},{"after_sha256",detail::digest(i.value())}});
+  const auto journal=QJsonDocument(QJsonObject{{"schema_version",1},{"operations",operations}}).toJson();
+  put(detail::journalPath(paths.root()),journal);
+  // Simulate a process dying after the first atomic replacement. Restart must
+  // honor the complete durable intent, not reject or generate a new identity.
+  put(QDir(paths.root()).filePath(identityRel),identity);
+  require(store.initialize(&error),"interrupted initialization did not recover: "+error);
+  require(get(QDir(paths.root()).filePath(identityRel))==identity,"restart changed journaled identity");
+  require(get(paths.itemsFile())=="[]\n"&&get(paths.sourcesFile())=="[]\n","restart did not restore exact registry payloads");
+  require(!QFileInfo::exists(detail::journalPath(paths.root())),"completed admission intent not retired");
+  require(store.initialize(&error),"repeated admission recovery failed");
+ }
  else if(name=="source-traversal"){Fixture f;Source s=f.source;s.key="..";Snapshot snap;snap.sourceKey=s.key;snap.complete=true;require(!f.store.reconcile(s,snap).committed,"unsafe source key must fail");}
  else if(name=="state-shape"){Fixture f;put(f.paths.itemsFile(),"{\"unexpected\":true}");QString e;f.store.loadCanonicalItems(&e);require(!e.isEmpty(),"wrong JSON root must be an error");const auto before=get(f.paths.itemsFile());Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(!f.store.reconcile(f.source,s).committed,"corrupt store must block writes");require(get(f.paths.itemsFile())==before,"corrupt state was overwritten");}
  else if(name=="source-state-corruption"){Fixture f;put(f.paths.sourcesFile(),"not json");Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(!f.store.reconcile(f.source,s).committed,"corrupt sources must block reconciliation");require(get(f.paths.sourcesFile())=="not json","source registry destroyed");}
