@@ -635,10 +635,16 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 
 void basicdownloader::tabEntered()
 {
-	auto e = m_ui.cbEngineType->currentText() ;
-	auto m = m_settings.lastUsedOption( e,settings::tabName::basic ) ;
+	// Preserve an in-progress editor draft across ordinary tab navigation.
+	// Programmatic history restoration leaves isModified() false; user edits,
+	// including intentionally clearing the field, set it true.
+	if( !m_ui.lineEditOptions->isModified() ){
 
-	m_ui.lineEditOptions->setText( m ) ;
+		auto e = m_ui.cbEngineType->currentText() ;
+		auto m = m_settings.lastUsedOption( e,settings::tabName::basic ) ;
+		m_ui.lineEditOptions->setText( m ) ;
+	}
+
 	m_ui.lineEditURL->setFocus() ;
 	m_ctx.logger().updateView( true ) ;
 }
