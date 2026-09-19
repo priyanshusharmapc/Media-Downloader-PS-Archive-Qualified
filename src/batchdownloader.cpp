@@ -1907,9 +1907,18 @@ void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 
 		Items items ;
 
-		if( list.startsWith( '[' ) || list.startsWith( '{' ) ){
+		auto jsonCandidate = list.trimmed() ;
 
-			this->parseDataFromFile( items,list ) ;
+		// JSON permits leading whitespace. Also tolerate a UTF-8 BOM from
+		// external editors before deciding whether this is structured input.
+		if( jsonCandidate.startsWith( "\xEF\xBB\xBF" ) ){
+			jsonCandidate.remove( 0,3 ) ;
+			jsonCandidate = jsonCandidate.trimmed() ;
+		}
+
+		if( jsonCandidate.startsWith( '[' ) || jsonCandidate.startsWith( '{' ) ){
+
+			this->parseDataFromFile( items,jsonCandidate ) ;
 		}else{
 			list.replace( "\r","" ) ;
 
