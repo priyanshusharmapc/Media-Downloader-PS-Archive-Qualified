@@ -2,14 +2,15 @@
 #define MDPS_ARCHIVETAB_H
 
 #include "archivecore.h"
-#include "../context.hpp"
-#include "../utility.h"
 
 #include <QObject>
 #include <QFutureWatcher>
 #include <QJsonObject>
 
 #include <atomic>
+
+class Context;
+namespace utility { enum class mainWindowKeyCombo; }
 
 class QLabel;
 class QLineEdit;
@@ -29,6 +30,12 @@ class ArchiveTab : public QObject
     Q_OBJECT
 public:
     explicit ArchiveTab(const Context& ctx);
+    // The Archive page only needs its host tabs, not the downloader engines.
+    // This constructor also permits real widget-level lifecycle qualification.
+    explicit ArchiveTab(QTabWidget& hostTabs,QWidget* owner=nullptr);
+    // Accept a user-selected root transactionally. Busy/failed selections do
+    // not change the active archive or its persisted configuration.
+    bool setRoot(const QString& candidate,QString* error=nullptr);
     ~ArchiveTab() override;
     void keyPressed(utility::mainWindowKeyCombo);
     void init_done();
@@ -42,7 +49,6 @@ public:
     void textAlignmentChanged(Qt::LayoutDirection);
 private:
     QString configuredRoot() const;
-    void persistRoot(const QString& root);
     archive::RuntimeConfig runtimeConfig() const;
     bool ensureReady(QString* error=nullptr);
     void buildUi();
@@ -54,6 +60,7 @@ private:
     void refreshDetails();
     void refreshActivity();
     void setBusy(bool busy,const QString& text={});
+    void updateActionState();
     void postOperationProgress(const QString& stage,const QString& detail,int current=0,int total=0,int failures=0);
     archive::Source selectedSource() const;
     QString selectedSourceKey() const;
@@ -75,7 +82,7 @@ private:
     void runAsync(const QString& operationName,const std::function<QString()>& fn);
     QString operationScanOrSync(QVector<archive::Source> sources,bool doDownloads);
 
-    const Context& m_ctx;
+    QTabWidget& m_hostTabs;
     QWidget* m_page=nullptr;
     QLabel* m_rootLabel=nullptr;
     QLabel* m_systemOverall=nullptr;
@@ -105,6 +112,7 @@ private:
     QTextEdit* m_historyDetails=nullptr;
     QTextEdit* m_recoveryDetails=nullptr;
     QPlainTextEdit* m_activity=nullptr;
+    QPushButton* m_browse=nullptr;
     QPushButton* m_add=nullptr;
     QPushButton* m_remove=nullptr;
     QPushButton* m_scan=nullptr;
@@ -117,6 +125,8 @@ private:
     QFutureWatcher<QString>* m_watcher=nullptr;
     QString m_root;
     bool m_busy=false;
+    bool m_ready=false;
+    bool m_controlsEnabled=true;
     std::atomic_bool m_stopRequested{false};
 };
 
