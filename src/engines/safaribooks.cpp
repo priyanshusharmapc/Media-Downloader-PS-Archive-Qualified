@@ -182,12 +182,14 @@ void safaribooks::sendCredentials( const QString& credentials,QProcess& exe )
 			exe.write( m_engine.userName().toUtf8() + "\n" ) ;
 			exe.write( m_engine.password().toUtf8() + "\n" ) ;
 		}else{
-			auto m = util::split( credentials,':',true ) ;
+			// Credentials are serialized as username:password for compatibility.
+			// Split exactly once so delimiter characters inside the password remain intact.
+			const auto separator = credentials.indexOf( ':' ) ;
 
-			if( m.size() > 1 ){
+			if( separator > 0 ){
 
-				exe.write( m.at( 0 ).toUtf8() + "\n" ) ;
-				exe.write( m.at( 1 ).toUtf8() + "\n" ) ;
+				exe.write( credentials.left( separator ).toUtf8() + "\n" ) ;
+				exe.write( credentials.mid( separator + 1 ).toUtf8() + "\n" ) ;
 			}
 		}
 
