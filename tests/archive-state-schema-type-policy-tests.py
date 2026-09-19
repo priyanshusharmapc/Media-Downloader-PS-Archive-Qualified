@@ -25,3 +25,9 @@ assert "integerField(o,"position"" in body
 assert "integerField(o,"last_position"" in body
 
 print("Persisted Archive state type validation policy: PASS")
+
+# Integer type validation also enforces the model's only allowed negative
+# sentinel; arbitrary negative positions must fail closed.
+assert 'o.value("position").toInt() < -1' in body
+assert 'o.value("last_position").toInt() < -1' in body
+assert '"Invalid playlist position range"' in body
