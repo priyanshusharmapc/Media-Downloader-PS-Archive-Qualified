@@ -653,17 +653,25 @@ bool verifyAcceptedEvidence(const Paths& paths,QString* error)
 
         const auto expected=receipt.value("file_sha256").toObject();
         QSet<QString> observed;
-        QDirIterator files(packageDir,QDir::Files|QDir::Hidden,QDirIterator::Subdirectories);
-        while(files.hasNext()){
-            const auto file=files.next();
-            const auto rel=QDir(packageDir).relativeFilePath(file);
+        // Integrity includes the filesystem shape, not only regular files. A
+        // post-acceptance junction/symlink directory must not hide from a
+        // file-only iterator and later be followed by backup/forensic tooling.
+        QDirIterator entries(packageDir,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,
+                             QDirIterator::Subdirectories);
+        while(entries.hasNext()){
+            const auto path=entries.next();
+            const auto info=entries.fileInfo();
+            const auto rel=QDir(packageDir).relativeFilePath(path);
+            if(!detail::relativeSafe(rel)||!detail::noLinks(path)||info.isSymLink())
+                return detail::reject(error,"Unsafe entry in Accepted recovery package: "+packageName+"/"+rel);
+            if(info.isDir())continue;
+            if(!info.isFile())
+                return detail::reject(error,"Special entry in Accepted recovery package: "+packageName+"/"+rel);
             if(rel=="receipt.json")continue;
-            if(!detail::relativeSafe(rel)||!detail::noLinks(file))
-                return detail::reject(error,"Unsafe file in Accepted recovery package: "+packageName+"/"+rel);
             observed.insert(rel);
             if(!expected.contains(rel)||!expected.value(rel).isString())
                 return detail::reject(error,"Unrecorded file in Accepted recovery package: "+packageName+"/"+rel);
-            const auto digest=detail::fileDigest(file,error);
+            const auto digest=detail::fileDigest(path,error);
             if(digest.isEmpty())return false;
             if(digest!=expected.value(rel).toString())
                 return detail::reject(error,"Accepted recovery evidence hash mismatch: "+packageName+"/"+rel);
