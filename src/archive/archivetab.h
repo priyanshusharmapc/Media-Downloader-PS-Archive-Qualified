@@ -80,7 +80,7 @@ private:
     void openProjection(const QString& name);
     void runSources(const QVector<archive::Source>& sources,bool doDownloads,const QString& operationName);
     void runAsync(const QString& operationName,const std::function<QString()>& fn);
-    QString operationScanOrSync(QVector<archive::Source> sources,bool doDownloads);
+    QString operationScanOrSync(QVector<archive::Source> sources,bool doDownloads,bool requireCompleteBeforeFirstCommit=false);
 
     QTabWidget& m_hostTabs;
     QWidget* m_page=nullptr;
