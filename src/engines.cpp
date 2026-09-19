@@ -2773,32 +2773,69 @@ QString engines::engine::baseEngine::timer::duration( qint64 milliseconds )
 
 int engines::engine::baseEngine::timer::toSeconds( const QString& e )
 {
-	auto _toNumber = []( const QString& e ){
+	auto _toNumber = []( const QString& value,int& out ){
 
-		return e.toInt() ;
+		bool ok = false ;
+		const auto number = value.toInt( &ok ) ;
+
+		if( !ok || number < 0 ){
+
+			return false ;
+		}
+
+		out = number ;
+		return true ;
 	} ;
 
 	if( e.endsWith( "m" ) ){
 
 		auto s = e ;
-		s.replace( "m","" ) ;
+		s.chop( 1 ) ;
 
-		return 60 * _toNumber( s ) ;
+		int minutes = 0 ;
+
+		return _toNumber( s,minutes ) ? 60 * minutes : 0 ;
 	}
 
-	auto m = util::split( e,':',true ) ;
+	// Keep empty fields so malformed text such as "1::2" cannot be silently
+	// reinterpreted as a valid two-component duration.
+	const auto parts = util::split( e,':',false ) ;
 
-	if( m.size() == 3 ){
+	if( parts.size() == 3 ){
 
-		return 3600 * _toNumber( m[ 0 ] ) + 60 * _toNumber( m[ 1 ] ) + _toNumber( m[ 2 ] ) ;
+		int hours = 0 ;
+		int minutes = 0 ;
+		int seconds = 0 ;
 
-	}else if( m.size() == 2 ){
+		if( !_toNumber( parts[ 0 ],hours ) ||
+		    !_toNumber( parts[ 1 ],minutes ) ||
+		    !_toNumber( parts[ 2 ],seconds ) ||
+		    minutes >= 60 || seconds >= 60 ){
 
-		return 3600 * _toNumber( m[ 0 ] ) + 360 * _toNumber( m[ 1 ] ) ;
+			return 0 ;
+		}
 
-	}else if( m.size() == 1 ){
+		return 3600 * hours + 60 * minutes + seconds ;
 
-		return 3600 * _toNumber( m[ 0 ] ) ;
+	}else if( parts.size() == 2 ){
+
+		int minutes = 0 ;
+		int seconds = 0 ;
+
+		if( !_toNumber( parts[ 0 ],minutes ) ||
+		    !_toNumber( parts[ 1 ],seconds ) ||
+		    seconds >= 60 ){
+
+			return 0 ;
+		}
+
+		return 60 * minutes + seconds ;
+
+	}else if( parts.size() == 1 ){
+
+		// Preserve the historical one-component interpretation as hours.
+		int hours = 0 ;
+		return _toNumber( parts[ 0 ],hours ) ? 3600 * hours : 0 ;
 	}else{
 		return 0 ;
 	}
