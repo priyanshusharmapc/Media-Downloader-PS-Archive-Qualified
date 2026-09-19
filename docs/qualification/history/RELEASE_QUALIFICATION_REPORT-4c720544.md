@@ -6,6 +6,10 @@
 
 The final candidate passed the repaired implementation, regression, Windows/Linux, sanitizer, package, target-host, live-media, recovery, filesystem, GUI-settings, low-memory and endurance gates. The final source/package identity is unambiguous below. No P0, P1 or release-blocking P2 product defect remains.
 
+## Historical evidence availability
+
+The `Qualification-Evidence/...` paths below are references to the original private/local qualification workspace. Those evidence objects are **not included in this publication repository and are unavailable for direct independent inspection from this repository**. They are preserved here only to document what the historical qualification record claimed to have inspected. This historical record is not current-candidate qualification evidence.
+
 ## Identity
 
 - Repository: `priyanshusharmapc/Media-Downloader-PS`
