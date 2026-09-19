@@ -837,7 +837,7 @@ private:
 
 				auto m = m_table.item( row,column )->text() ;
 
-				if( !l.contains( m ) ){
+				if( !m.isEmpty() && !l.contains( m ) ){
 
 					l.append( m ) ;
 				}
@@ -872,6 +872,12 @@ private:
 		m.addSeparator() ;
 
 		for( const auto& it : l ){
+
+			// Empty cells are valid table state but cannot form a named filter bucket.
+			if( it.isEmpty() ){
+
+				continue ;
+			}
 
 			auto s = it ;
 			s[ 0 ] = s[ 0 ].toUpper() ;
