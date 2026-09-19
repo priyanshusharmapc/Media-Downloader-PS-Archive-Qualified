@@ -2820,9 +2820,11 @@ void batchdownloader::addToList( const QString& u,const batchdownloader::downloa
 		{
 			Items items ;
 
-			for( const auto& it : util::split( m_url,'\n',true ) ){
+			for( const auto& raw : util::split( m_url,'\n',true ) ){
 
-				if( it.startsWith( "#" ) ){
+				const auto it = raw.trimmed() ;
+
+				if( it.isEmpty() || it.startsWith( "#" ) ){
 
 					continue ;
 
@@ -2865,7 +2867,9 @@ void batchdownloader::addToList( const QString& u,const batchdownloader::downloa
 
 			auto m = util::split( it,' ',true ) ;
 
-			if( m.size() < 3 ){
+			// The option list is optional. "yt-dlp URL" is a complete command;
+			// only the executable by itself is malformed.
+			if( m.size() < 2 ){
 
 				return ;
 			}
