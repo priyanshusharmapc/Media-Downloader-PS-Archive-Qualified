@@ -1428,6 +1428,22 @@ static QJsonArray _saveDownloadList( tableWidget& tableWidget,bool noFinishedSuc
 			obj.insert( "downloadExtraOptions",e.extraDownloadingOptions ) ;
 		}
 
+		// These fields are consumed separately during command construction and
+		// therefore must survive both manual JSON save and exit autosave.
+		if( !e.subtitle.isEmpty() ){
+			obj.insert( "subtitle",e.subtitle ) ;
+		}
+		if( !e.timeInterval.isEmpty() ){
+			obj.insert( "timeInterval",e.timeInterval ) ;
+		}
+		if( !e.chapters.isEmpty() ){
+			obj.insert( "chapters",e.chapters ) ;
+		}
+		if( e.splitByChapters ){
+			obj.insert( "splitByChapters",true ) ;
+		}
+
+		obj.insert( "savedJobSchemaVersion",1 ) ;
 		arr.append( obj ) ;
 	} ;
 
