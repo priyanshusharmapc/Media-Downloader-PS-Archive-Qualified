@@ -1142,7 +1142,7 @@ private:
 
 			ss = QString( "Proto: %1\n" ).arg( proto ) ;
 		}else{
-			auto m = QString( "Proto: %1%2\ncontainer: %2\n" ) ;
+			auto m = QString( "Proto: %1\ncontainer: %2\n" ) ;
 			ss = m.arg( proto,container ) ;
 		}
 
