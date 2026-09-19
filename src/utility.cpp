@@ -33,6 +33,7 @@
 #include <QFileDialog>
 #include <QSysInfo>
 #include <QFile>
+#include <QSaveFile>
 #include <QJsonDocument>
 
 #include <ctime>
@@ -1474,13 +1475,19 @@ void utility::saveDownloadList( const Context& ctx,tableWidget& tableWidget,bool
 
 		if( QFile::exists( e ) ){
 
-			auto m = engines::file( e,ctx.logger() ).readAll() ;
+			auto prior = engines::file( e,ctx.logger() ).readAll() ;
+			QJsonParseError parseError ;
+			const auto priorDoc = QJsonDocument::fromJson( prior,&parseError ) ;
 
-			QFile::remove( e ) ;
+			// A damaged autosave is recovery evidence. Never destroy it merely
+			// because a replacement save was attempted.
+			if( parseError.error != QJsonParseError::NoError || !priorDoc.isArray() ){
 
-			const auto rr = QJsonDocument::fromJson( m ).array() ;
+				ctx.logger().add( "Refusing to replace invalid autoSavedList.json: " + parseError.errorString(),utility::loggerID() ) ;
+				return ;
+			}
 
-			for( const auto& it : rr ){
+			for( const auto& it : priorDoc.array() ){
 
 				arr.append( it ) ;
 			}
@@ -1489,8 +1496,18 @@ void utility::saveDownloadList( const Context& ctx,tableWidget& tableWidget,bool
 		if( arr.size() ){
 
 			auto m = QJsonDocument( arr ).toJson( QJsonDocument::Indented ) ;
+			QSaveFile out( e ) ;
 
-			engines::file( e,ctx.logger() ).write( m ) ;
+			if( !out.open( QIODevice::WriteOnly ) ){
+
+				ctx.logger().add( "Failed to open autosave for atomic replacement: " + e,utility::loggerID() ) ;
+				return ;
+			}
+
+			if( out.write( m ) != m.size() || !out.commit() ){
+
+				ctx.logger().add( "Failed to atomically replace autosave: " + e,utility::loggerID() ) ;
+			}
 		}
 	}
 }
