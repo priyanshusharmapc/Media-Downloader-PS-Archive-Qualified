@@ -366,13 +366,54 @@ void ArchiveTab::refreshDetails()
     if(!hp){m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();return;}
     m_sourceDetails->setPlainText(tr("Title: %1\nYouTube ID: %2\nOriginal URL: %3\nPlaylist position: %4\nMembership: %5\nAvailability: %6\nFirst seen: %7\nLast seen: %8").arg(p.title,pretty(p.providerId),pretty(p.url)).arg(p.position).arg(p.membership,p.availability,pretty(p.firstSeen),pretty(p.lastSeen)));
     if(hc)m_archiveDetails->setPlainText(tr("Canonical key: %1\nVideo: %2\nVideo path: %3\nVideo origin: %4\nAudio: %5\nAudio path: %6\nAudio origin: %7\nMetadata: %8").arg(c.key,c.video.state,pretty(c.video.path),pretty(c.video.origin),c.audio.state,pretty(c.audio.path),pretty(c.audio.origin),pretty(c.metadataPath)));
-    const auto history=readText(archive::Paths(m_root).playlistHistoryFile(source.key));QStringList matching;for(const auto& line:history.split('\n'))if(line.contains(key))matching<<line;m_historyDetails->setPlainText(matching.join("\n"));
+    const auto history=readText(archive::Paths(m_root).playlistHistoryFile(source.key));
+    QStringList matching;
+    for(const auto& line:history.split('\n')){
+        if(line.trimmed().isEmpty())continue;
+        QJsonParseError error;
+        const auto doc=QJsonDocument::fromJson(line.toUtf8(),&error);
+        if(error==QJsonParseError::NoError&&doc.isObject()&&doc.object().value("item_key").toString()==key)matching<<line;
+    }
+    m_historyDetails->setPlainText(matching.join("\n"));
     if(hc)m_recoveryDetails->setPlainText(tr("Recovery status: %1\nCurrent availability: %2\nVideo present: %3\nAudio present: %4\nExternal recovery is submitted through State/ArchiveMode/Imports/Pending according to ARCHIVE_AGENT.md.").arg(c.recoveryStatus,c.availability,c.video.state=="complete"?tr("Yes"):tr("No"),c.audio.state=="complete"?tr("Yes"):tr("No")));
 }
 
 void ArchiveTab::refreshActivity()
 {
-    if(!archive::ui::rootAvailable(m_root))return;const auto base=archive::Paths(m_root).activityLogs();QDir d(base);const auto days=d.entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name|QDir::Reversed);QStringList lines;for(const auto& day:days){QDir dd(d.filePath(day));const auto files=dd.entryList(QDir::Files,QDir::Time);for(const auto& f:files){for(const auto& line:readText(dd.filePath(f)).split('\n')){if(line.trimmed().isEmpty())continue;QJsonParseError pe;const auto doc=QJsonDocument::fromJson(line.toUtf8(),&pe);if(pe.error==QJsonParseError::NoError&&doc.isObject()){const auto o=doc.object();lines<<QString("%1  %2  %3").arg(o.value("timestamp").toString(),o.value("event").toString(),QString::fromUtf8(QJsonDocument(o.value("details").toObject()).toJson(QJsonDocument::Compact)));}else lines<<line;if(lines.size()>=200)break;}if(lines.size()>=200)break;}if(lines.size()>=200)break;}std::reverse(lines.begin(),lines.end());m_activity->setPlainText(lines.join("\n"));
+    if(!archive::ui::rootAvailable(m_root))return;
+
+    const auto base=archive::Paths(m_root).activityLogs();
+    QDir d(base);
+    const auto days=d.entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name|QDir::Reversed);
+    QStringList lines;
+
+    // Traverse newest files first and each file from tail to head. The bounded
+    // buffer therefore contains the newest records rather than the oldest
+    // prefix of the newest file. Reverse only once for chronological display.
+    for(const auto& day:days){
+        QDir dd(d.filePath(day));
+        const auto files=dd.entryList(QDir::Files,QDir::Time);
+        for(const auto& f:files){
+            const auto fileLines=readText(dd.filePath(f)).split('\n');
+            for(int i=fileLines.size()-1;i>=0&&lines.size()<200;--i){
+                const auto& line=fileLines[i];
+                if(line.trimmed().isEmpty())continue;
+                QJsonParseError pe;
+                const auto doc=QJsonDocument::fromJson(line.toUtf8(),&pe);
+                if(pe.error==QJsonParseError::NoError&&doc.isObject()){
+                    const auto o=doc.object();
+                    lines<<QString("%1  %2  %3").arg(o.value("timestamp").toString(),o.value("event").toString(),QString::fromUtf8(QJsonDocument(o.value("details").toObject()).toJson(QJsonDocument::Compact)));
+                }else{
+                    lines<<line;
+                }
+            }
+            if(lines.size()>=200)break;
+        }
+        if(lines.size()>=200)break;
+    }
+
+    std::reverse(lines.begin(),lines.end());
+    m_activity->setPlainText(lines.join("\n"));
 }
 
 void ArchiveTab::updateActionState()
