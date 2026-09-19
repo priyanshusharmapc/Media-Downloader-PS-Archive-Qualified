@@ -202,7 +202,7 @@ private:
 		} ;
 		utility::vector< subscription::entry > entries() ;
 	private:
-		bool save() ;
+		bool save( const QJsonArray& ) ;
 		QString m_path ;
 		tableMiniWidget< int,2 >& m_table ;
 		QWidget& m_ui ;
