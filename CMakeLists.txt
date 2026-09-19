@@ -169,6 +169,14 @@ include(CTest)
 if(BUILD_TESTING)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_test(
+        NAME release-identity-policy
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/release-identity-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
+    set_tests_properties(release-identity-policy PROPERTIES TIMEOUT 30)
+endif()
+
+if(BUILD_TESTING)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    add_test(
         NAME package-identity-policy
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/package-identity-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
     set_tests_properties(package-identity-policy PROPERTIES TIMEOUT 30)

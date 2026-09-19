@@ -267,6 +267,40 @@ jobs:
             $relative = [IO.Path]::GetRelativePath($out,$_.Path).Replace('\','/')
             "$($_.Hash.ToLowerInvariant())  $relative"
           } | Sort-Object | Set-Content "$out/SHA256SUMS.txt" -Encoding ascii
+      - name: Generate and validate exact release identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'portable/Media-Downloader-PS'
+          $artifactName = "Media-Downloader-PS-Windows-Qt6-$env:GITHUB_SHA"
+          $payloadName = "Media-Downloader-PS-Windows-Qt6-$env:GITHUB_SHA.zip"
+          $payloadZip = Join-Path $env:GITHUB_WORKSPACE "portable/$payloadName"
+          if (Test-Path -LiteralPath $payloadZip) { Remove-Item -LiteralPath $payloadZip -Force }
+          Compress-Archive -Path (Join-Path $out '*') -DestinationPath $payloadZip -CompressionLevel Optimal
+          $payloadSha = (Get-FileHash -LiteralPath $payloadZip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $identity = [ordered]@{
+            schema_version = 1
+            repository = $env:GITHUB_REPOSITORY
+            git_ref = $env:GITHUB_REF
+            commit = $env:GITHUB_SHA
+            run_id = $env:GITHUB_RUN_ID
+            run_attempt = $env:GITHUB_RUN_ATTEMPT
+            artifact_name = $artifactName
+            payload_file = $payloadName
+            payload_sha256 = $payloadSha
+          }
+          $identityPath = Join-Path $env:GITHUB_WORKSPACE 'portable/current-release.json'
+          $identity | ConvertTo-Json | Set-Content -LiteralPath $identityPath -Encoding utf8
+          $check = Get-Content -LiteralPath $identityPath -Raw | ConvertFrom-Json
+          if ($check.repository -ne $env:GITHUB_REPOSITORY -or
+              $check.commit -ne $env:GITHUB_SHA -or
+              [string]$check.run_id -ne [string]$env:GITHUB_RUN_ID -or
+              [string]$check.run_attempt -ne [string]$env:GITHUB_RUN_ATTEMPT -or
+              $check.git_ref -ne $env:GITHUB_REF -or
+              $check.artifact_name -ne $artifactName -or
+              $check.payload_sha256 -ne $payloadSha) {
+            throw 'Generated release identity is not bound to the executing qualification run'
+          }
       - name: GUI settings preserve package seal
         shell: pwsh
         run: |
