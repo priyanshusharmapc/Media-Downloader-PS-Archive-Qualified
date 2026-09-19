@@ -99,3 +99,9 @@ non-destructive report-only recovery.
 [Representation restart recovery](remediation/007.md) documents how stale
 `running` leases become `interrupted` only at a fresh Archive operation
 boundary, and how unavailable media becomes durably `blocked_unavailable`.
+
+## Qualified runtime tool boundary
+
+[Sealed runtime tool resolution](remediation/005.md) documents the default
+package-only resolver and the explicit, non-qualified development opt-in for
+system `PATH` tools.

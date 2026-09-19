@@ -43,6 +43,28 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
   if(!makeDirectoryLink(target,link)&&lastLinkError==1314u){QTextStream(stdout)<<"SKIP: symbolic-link privilege unavailable\n";return 77;}
  }
 #endif
+ if(name=="sealed-tool-policy"){
+  QTemporaryDir appRoot(testTempTemplate()),pathRoot(testTempTemplate());
+  require(appRoot.isValid()&&pathRoot.isValid(),"temporary tool roots");
+#ifdef Q_OS_WIN
+  const auto toolName=QString("yt-dlp.exe");
+#else
+  const auto toolName=QString("yt-dlp");
+#endif
+  const auto fake=QDir(pathRoot.path()).filePath(toolName);
+  require(QFile::copy(QCoreApplication::applicationFilePath(),fake),"copy PATH substitute");
+  QFile::setPermissions(fake,QFile::permissions(fake)|QFileDevice::ExeOwner|QFileDevice::ExeUser|QFileDevice::ExeGroup|QFileDevice::ExeOther);
+  const auto oldPath=qgetenv("PATH");
+  qputenv("PATH",(pathRoot.path()+QDir::listSeparator()+QString::fromLocal8Bit(oldPath)).toLocal8Bit());
+  RuntimeConfig sealed{appRoot.path(),appRoot.path()};
+  require(ToolResolver(sealed).ytDlp().isEmpty(),"sealed mode accepted a PATH substitute");
+  RuntimeConfig development{appRoot.path(),appRoot.path(),true};
+  const auto resolved=ToolResolver(development).ytDlp();
+  require(!resolved.isEmpty()&&QFileInfo(resolved).fileName().compare(toolName,Qt::CaseInsensitive)==0,
+          "explicit development mode could not opt into system tools");
+  qputenv("PATH",oldPath);
+  return 0;
+ }
  if(name=="discovery-shape"){Source s;auto r=PlaylistDiscovery::parse(s,"{}","",0);require(!r.complete,"non-playlist JSON must not be complete");}
 
  else if(name=="discovery-root-identity"){

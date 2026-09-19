@@ -79,7 +79,11 @@ class ArchiveIntegration(unittest.TestCase):
         shutil.copy2(CLI, self.cli)
         (self.package / 'bin').mkdir()
         shutil.copy2(FAKE, self.package / 'bin' / ('yt-dlp.exe' if os.name == 'nt' else 'yt-dlp'))
-        # Resolve actual media tools through PATH; Windows DLL search retains the CI Qt bin directory.
+        # Normal Archive execution is sealed to package-owned tool executables.
+        # Keep the real tool directories on PATH only to prove they are not used
+        # as a silent fallback when a bundled executable is removed.
+        shutil.copy2(FFMPEG, self.package / 'bin' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'))
+        shutil.copy2(FFPROBE, self.package / 'bin' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe'))
         self.env = dict(os.environ, ARCHIVE_TEST_PLAN=str(self.base / 'plan.json'))
         self.env['PATH'] = str(Path(FFMPEG).parent) + os.pathsep + str(Path(FFPROBE).parent) + os.pathsep + self.env.get('PATH', '')
         self.plan = {
@@ -223,6 +227,19 @@ class ArchiveIntegration(unittest.TestCase):
         duplicate = self.command('playlist-binding', SOURCE_URL, VIDEO_URL)
         self.assertIn('member=true', duplicate.stdout)
         self.assertIn('active_occurrences=2', duplicate.stdout)
+
+    def test_missing_sealed_ffprobe_refuses_path_substitute(self):
+        self.scan()
+        bundled = self.package / 'bin' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+        self.assertTrue(bundled.exists())
+        bundled.unlink()
+        # A valid FFprobe remains visible on PATH. Qualified/default execution
+        # must still fail instead of crossing the package trust boundary.
+        result = self.command('sync-item', VIDEO_URL, expect=1)
+        self.assertIn('sync=FAIL', result.stderr)
+        item = self.first()
+        self.assertNotEqual(item['video']['state'], 'complete')
+        self.assertNotEqual(item['audio']['state'], 'complete')
 
     def test_scan_sync_verify_and_idempotent_rerun(self):
         self.scan()
