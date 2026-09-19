@@ -51,7 +51,7 @@ public:
 		QByteArray fileName( const Logger::Data& ) ;
 		const QByteArray& parseOutput( const Logger::Data::QByteArrayList&,bool = true ) ;
 		bool hasNewError( const std::vector< QByteArray >& errors,const QByteArray& error ) ;
-		void setFileName( const QByteArray& ) ;
+		void setFileName( const QByteArray&,bool ownedByInvocation = true ) ;
 		engines::engine::baseEngine::preProcessing m_preProcessing ;
 		engines::engine::baseEngine::postProcessing m_postProcessing ;
 
@@ -59,6 +59,8 @@ public:
 		QByteArray m_tmp ;
 		bool m_mergeSeen = false ;
 		std::vector< QByteArray > m_fileNames ;
+		// Only outputs created by this invocation are eligible for cancellation cleanup.
+		std::vector< QByteArray > m_ownedFileNames ;
 		std::vector< QByteArray > m_errors ;
 		yt_dlp& m_parent ;
 	} ;
