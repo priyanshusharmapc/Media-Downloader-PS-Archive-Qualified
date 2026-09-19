@@ -233,12 +233,22 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 				}else{
 					this->hashDoNotMatch( md.hash,m,md.id ) ;
 
+					const auto cleanupError = utility::removeFile( md.tmpFile ) ;
+					if( !cleanupError.isEmpty() ){
+						this->failedToRemove( m_appName,md.tmpFile,cleanupError,md.id ) ;
+					}
+
 					md.status.done() ;
 
 					m_tabManager.enableAll() ;
 				}
 			}
 		}else{
+			const auto cleanupError = utility::removeFile( md.tmpFile ) ;
+			if( !cleanupError.isEmpty() ){
+				this->failedToRemove( m_appName,md.tmpFile,cleanupError,md.id ) ;
+			}
+
 			md.status.done() ;
 
 			this->post( m_appName,this->reportError( p ),md.id ) ;
@@ -675,6 +685,13 @@ void networkAccess::finished( networkAccess::Opts opts ) const
 		for( const auto& it : opts.networkError ){
 
 			this->post( engine.name(),it,opts.id ) ;
+		}
+
+		// Failed or rejected component payloads are not recovery evidence. Remove
+		// the temporary file immediately instead of leaking it until a retry.
+		const auto cleanupError = utility::removeFile( opts.filePath ) ;
+		if( !cleanupError.isEmpty() ){
+			this->failedToRemove( engine.name(),opts.filePath,cleanupError,opts.id ) ;
 		}
 
 		m_tabManager.enableAll() ;
