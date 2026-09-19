@@ -124,6 +124,45 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
    require(f.store.reconcile(source,reordered).committed,"reordered unresolved reconciliation failed");const auto after=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty()&&after.size()==2,"reordered unresolved occurrences missing");
    QSet<QString> beforeKeys,afterKeys;for(const auto& item:before)beforeKeys.insert(item.itemKey);for(const auto& item:after)afterKeys.insert(item.itemKey);require(beforeKeys==afterKeys,"unresolved reorder changed canonical identities");
   }
+  else if(name=="placeholder-promotion"){
+   Fixture f;Source source;source.key="PLPROMOTE";source.url="https://www.youtube.com/playlist?list=PLPROMOTE";source.title="Promotion";
+   Snapshot first;first.sourceKey=source.key;first.complete=true;first.scannedAt="2026-01-01T00:00:00.000Z";
+   for(int position:QList<int>{1,2}){PlaylistItem item;item.title="Resolvable title";item.url="https://example.invalid/stable";item.position=position;item.itemKey=canonicalKey({},source.key,position,item.title);item.availability="public";first.items.append(item);}
+   require(f.store.reconcile(source,first).committed,"initial placeholder reconciliation failed");
+   QString e;auto beforeRows=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty()&&beforeRows.size()==2,"initial placeholder rows missing");
+   QHash<int,PlaylistItem> byPosition;for(const auto& row:beforeRows)byPosition[row.position]=row;
+   const auto promotedOldKey=byPosition.value(2).itemKey;const auto promotedEntry=byPosition.value(2).entryKey;const auto firstSeen=byPosition.value(2).firstSeen;
+
+   auto canonical=f.store.loadCanonicalItems(&e);require(e.isEmpty(),"load canonical before promotion");
+   bool attached=false;for(auto& item:canonical)if(item.key==promotedOldKey){item.video.state="complete";item.video.path="Video/preserved.mp4";item.video.origin="test";item.video.verifiedAt="2026-01-01T00:00:01.000Z";item.recoveryStatus="unrecovered";attached=true;}
+   require(attached&&f.store.saveCanonicalItems(canonical,&e),"attach placeholder representation: "+e);
+
+   Snapshot second;second.sourceKey=source.key;second.complete=true;second.scannedAt="2026-01-02T00:00:00.000Z";
+   PlaylistItem unresolved;unresolved.title="Resolvable title";unresolved.url="https://example.invalid/stable";unresolved.position=1;unresolved.itemKey=canonicalKey({},source.key,1,unresolved.title);unresolved.availability="public";second.items.append(unresolved);
+   PlaylistItem resolved;resolved.providerId="AAA111bbb22";resolved.title="Resolvable title";resolved.url="https://example.invalid/stable";resolved.position=2;resolved.itemKey=canonicalKey(resolved.providerId,source.key,2,resolved.title);resolved.availability="public";second.items.append(resolved);
+   const auto promoted=f.store.reconcile(source,second);require(promoted.committed,"resolved placeholder promotion failed: "+promoted.error);
+
+   const auto afterRows=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty()&&afterRows.size()==2,"promoted playlist row count changed");
+   bool sawResolved=false,sawUnresolved=false;for(const auto& row:afterRows){
+    if(row.providerId=="AAA111bbb22"){sawResolved=true;require(row.itemKey=="youtube:AAA111bbb22","resolved canonical key not promoted");require(row.entryKey==promotedEntry,"occurrence entry identity changed");require(row.firstSeen==firstSeen,"promotion reset first-seen evidence");}
+    else {sawUnresolved=true;require(row.position==1&&row.membership=="active","unresolved sibling was not preserved");}
+   }
+   require(sawResolved&&sawUnresolved,"duplicate placeholder promotion lost an occurrence");
+
+   const auto afterCanonical=f.store.loadCanonicalItems(&e);require(e.isEmpty(),"load canonical after promotion");
+   bool sawNew=false,sawOld=false;for(const auto& item:afterCanonical){if(item.key=="youtube:AAA111bbb22"){sawNew=true;require(item.video.state=="complete"&&item.video.path=="Video/preserved.mp4","representation state detached during promotion");require(item.recoveryStatus=="unrecovered","recovery state detached during promotion");}if(item.key==promotedOldKey)sawOld=true;}
+   require(sawNew&&!sawOld,"placeholder canonical record was duplicated instead of promoted");
+   const auto history=get(f.paths.playlistHistoryFile(source.key));require(history.contains("\"event\":\"identity_promoted\""),"promotion history event missing");require(history.contains(promotedOldKey.toUtf8()),"promotion history lost old identity");
+
+   // With two unmatched candidates and no unique position match, the resolved
+   // observation must not guess which placeholder owns the historical state.
+   Fixture ambiguous;Source ambiguousSource=source;ambiguousSource.key="PLAMBIG";Snapshot a;a.sourceKey=ambiguousSource.key;a.complete=true;
+   for(int position:QList<int>{1,2}){PlaylistItem item;item.title="Ambiguous";item.url="https://example.invalid/ambiguous";item.position=position;item.itemKey=canonicalKey({},ambiguousSource.key,position,item.title);item.availability="public";a.items.append(item);}
+   require(ambiguous.store.reconcile(ambiguousSource,a).committed,"ambiguous setup failed");
+   Snapshot b;b.sourceKey=ambiguousSource.key;b.complete=true;PlaylistItem r;r.providerId="CCC333ddd44";r.title="Ambiguous";r.url="https://example.invalid/ambiguous";r.position=99;r.itemKey=canonicalKey(r.providerId,ambiguousSource.key,99,r.title);r.availability="public";b.items.append(r);
+   require(ambiguous.store.reconcile(ambiguousSource,b).committed,"ambiguous resolved observation failed");
+   const auto ambiguousHistory=get(ambiguous.paths.playlistHistoryFile(ambiguousSource.key));require(!ambiguousHistory.contains("\"event\":\"identity_promoted\""),"ambiguous placeholders were auto-merged");
+  }
 
  else if(name=="orphan-data"){
   // Registry loss must never turn existing media, state or recovery evidence
