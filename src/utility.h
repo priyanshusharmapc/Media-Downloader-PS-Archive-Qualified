@@ -2222,7 +2222,7 @@ namespace utility
 					// A non-empty persisted string can still tokenize to zero
 					// arguments (for example, whitespace-only legacy settings).
 					// Do not index/remove element 0 until a real executable token exists.
-					if( args.isEmpty() ){
+					if( args.isEmpty() || args.at( 0 ).trimmed().isEmpty() ){
 						return ;
 					}
 
