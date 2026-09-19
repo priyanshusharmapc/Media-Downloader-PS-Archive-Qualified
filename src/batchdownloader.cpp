@@ -591,11 +591,15 @@ void batchdownloader::showCustomContext()
 		}
 	}
 
-	connect( mm,&QMenu::triggered,[ this ]( QAction * ac ){
+	connect( mm,&QMenu::triggered,[ this,row ]( QAction * ac ){
+
+		if( row < 0 || row >= m_table.rowCount() ){
+			return ;
+		}
 
 		auto u = tableWidget::type::EngineName ;
 
-		m_table.setDownloadingOptions( u,m_table.currentRow(),ac->objectName() ) ;
+		m_table.setDownloadingOptions( u,row,ac->objectName() ) ;
 	} ) ;
 
 	auto subMenu = utility::setUpMenu( m_ctx,{},false,false,true,&m ) ;
