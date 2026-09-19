@@ -353,7 +353,9 @@ void ArchiveTab::refreshTable()
     QString playlistError;
     const auto playlist=store.loadPlaylistItems(source.key,&playlistError);
     if(!playlistError.isEmpty()){
+        m_stateReadable=false; updateActionState();
         m_table->setRowCount(0);
+        m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();
         const auto message=tr("Playlist state error: %1").arg(playlistError);
         m_healthLabel->setText(message);
         m_statusLabel->setText(message);
@@ -362,12 +364,15 @@ void ArchiveTab::refreshTable()
     QString canonicalError;
     const auto all=store.loadCanonicalItems(&canonicalError);
     if(!canonicalError.isEmpty()){
+        m_stateReadable=false; updateActionState();
         m_table->setRowCount(0);
+        m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();
         const auto message=tr("Canonical state error: %1").arg(canonicalError);
         m_healthLabel->setText(message);
         m_statusLabel->setText(message);
         return;
     }
+    m_stateReadable=true; updateActionState();
     QHash<QString,archive::CanonicalItem> map;for(const auto& c:all)map[c.key]=c;
     const auto search=m_search->text().trimmed();const auto filter=m_filter->currentText();int protectedCount=0,needs=0,unavailable=0,removed=0;
     m_table->setRowCount(0);
@@ -388,13 +393,18 @@ void ArchiveTab::refreshDetails()
     QString playlistError;const auto playlist=store.loadPlaylistItems(source.key,&playlistError);
     QString canonicalError;const auto canonical=store.loadCanonicalItems(&canonicalError);
     if(!playlistError.isEmpty()||!canonicalError.isEmpty()){
+        m_stateReadable=false;updateActionState();
         const auto message=tr("Archive state error: %1").arg(!playlistError.isEmpty()?playlistError:canonicalError);
         m_sourceDetails->setPlainText(message);m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();m_statusLabel->setText(message);return;
     }
     archive::PlaylistItem p;archive::CanonicalItem c;bool hp=false,hc=false;
     for(const auto& x:playlist)if(x.entryKey==entryKey){p=x;hp=true;break;}
     for(const auto& x:canonical)if(x.key==key){c=x;hc=true;break;}
-    if(!hp){m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();return;}
+    if(!hp||entryKey.isEmpty()||key.isEmpty()||p.itemKey!=key){
+        m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();
+        if(hp&&p.itemKey!=key)m_statusLabel->setText(tr("Archive selection identity mismatch; refresh the view."));
+        return;
+    }
     m_sourceDetails->setPlainText(tr("Title: %1\nYouTube ID: %2\nOriginal URL: %3\nPlaylist position: %4\nMembership: %5\nAvailability: %6\nFirst seen: %7\nLast seen: %8").arg(p.title,pretty(p.providerId),pretty(p.url)).arg(p.position).arg(p.membership,p.availability,pretty(p.firstSeen),pretty(p.lastSeen)));
     if(hc)m_archiveDetails->setPlainText(tr("Canonical key: %1\nVideo: %2\nVideo path: %3\nVideo origin: %4\nAudio: %5\nAudio path: %6\nAudio origin: %7\nMetadata: %8").arg(c.key,c.video.state,pretty(c.video.path),pretty(c.video.origin),c.audio.state,pretty(c.audio.path),pretty(c.audio.origin),pretty(c.metadataPath)));
     const auto history=readText(archive::Paths(m_root).playlistHistoryFile(source.key));QStringList matching;
@@ -420,7 +430,7 @@ void ArchiveTab::updateActionState()
     // Busy state and root readiness are separate: ending a worker must never
     // re-enable archive mutations after a drive has disappeared. Browse stays
     // available for recovery when idle, including a fresh installation.
-    const bool ready=m_controlsEnabled&&!m_busy&&m_ready&&archive::ui::rootAvailable(m_root);
+    const bool ready=m_controlsEnabled&&!m_busy&&m_ready&&m_stateReadable&&archive::ui::rootAvailable(m_root);
     const QList<QWidget*> controls={m_add,m_remove,m_scan,m_syncSelected,m_syncAll,m_retry,m_more,m_sources,m_search,m_filter};
     for(auto* widget:controls)widget->setEnabled(ready);
     m_browse->setEnabled(m_controlsEnabled&&!m_busy);
