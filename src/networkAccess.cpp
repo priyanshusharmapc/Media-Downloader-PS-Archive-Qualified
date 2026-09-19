@@ -175,8 +175,14 @@ QString promoteUpdateDirectoryContents( const QString& stageRoot,const QString& 
                 if( !restore.isEmpty() )rollbackErrors << restore ;
             }
         }
-        removeUpdatePath( backupRoot ) ;
-        if( !rollbackErrors.isEmpty() )failure += QObject::tr( "; rollback errors: %1" ).arg( rollbackErrors.join( "; " ) ) ;
+        if( rollbackErrors.isEmpty() ){
+            removeUpdatePath( backupRoot ) ;
+        }else{
+            // Never delete forensic recovery material when restoration failed.
+            // The backup directory is intentionally retained for manual repair.
+            failure += QObject::tr( "; rollback errors: %1; previous payload retained at %2" )
+                .arg( rollbackErrors.join( "; " ),backupRoot ) ;
+        }
         return failure ;
     }
 
