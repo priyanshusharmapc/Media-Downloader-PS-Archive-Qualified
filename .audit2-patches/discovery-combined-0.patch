@@ -1,0 +1,157 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index b1882da01a50a2f997abae90ac860686f6510e45..e120eb590ca159d412ec22047c9fa27f0fb09012 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -484,6 +484,10 @@ if(BUILD_TESTING)
+     else()
+         target_link_libraries(archive-hardening-tests Qt5::Core)
+     endif()
++    foreach(case discovery-root-identity discovery-explicit-index discovery-position-uniqueness)
++        add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
++        set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30)
++    endforeach()
+     foreach(case discovery-shape discovery-null discovery-count discovery-error portable-paths reserved-device-variants reparse-policy root-symlink parent-symlink linked-state linked-media placeholder-position placeholder-reorder source-traversal state-shape source-state-corruption snapshot-identity import-identity import-id-only import-schema partial-recovery-status nested-redaction deleted-title linked-package-file)
+         add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
+         set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
+diff --git a/docs/README.md b/docs/README.md
+index 04c1e1de71dadfb2d1744609bc3ac20d653e6f8e..9c873f81b29bfbbb57f7bbc1bac19c1df91ceb55 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -73,6 +73,12 @@ A code change that alters one of these contracts is incomplete until the corresp
+ 
+ Do not add hardcoded "latest" build identities to maintained docs. Point readers to package identity and CI evidence instead.
+ 
++## Discovery trust and playlist history
++
++[Discovery admission](remediation/009-031.md) explains provider identity binding,
++explicit occurrence indexes, retained missing-index fallback, and fail-closed
++membership handling for suspect responses.
++
+ ## Archive admission and missing registries
+ 
+ [Missing-registry admission](remediation/012.md) describes orphan-evidence refusal, durable root identity, supported legacy admission and non-destructive recovery expectations.
+diff --git a/docs/remediation/009-031.md b/docs/remediation/009-031.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..3c29437b04cf95ba4e99b01488b729959758736c
+--- /dev/null
++++ b/docs/remediation/009-031.md
+@@ -0,0 +1,58 @@
++# Discovery admission: MDPS-AUDIT2-009 and MDPS-AUDIT2-031
++
++Base: `8a62c9b2c5d63f4f9c1cfa6373884e37bf1348c1` on `audit2-remediation`.
++Frozen forensic baseline: `b53457008af9af7716e4745bdd2812458e95766f`.
++Claim: issue #3 comment `5738251655`. Historical findings are not edited.
++
++## Corrected invariants
++
++009 (High): the requested source key is not proof of provider identity. A missing,
++empty, incorrectly typed or mismatched root playlist ID is now an explicitly
++refused observation. It neither inserts wrong-source memberships nor authorizes
++removals. A matching provider ID remains eligible for a complete snapshot,
++including an actually empty playlist that legitimately removes old occurrences.
++
++031 (Medium): a present `playlist_index` must be a finite, integral positive JSON
++number within the supported integer range. Wrong types, nulls, fractions, zero,
++negative and overflowing values are not silently replaced by array order.
++Contradictory positions make a snapshot partial, so absence is not removal
++proof. Completely absent indexes retain the deterministic one-based array-order
++fallback. Repeated videos at distinct positions remain supported occurrences.
++
++The parser continues to retain attributable positive observations from partial
++snapshots, except entries with invalid indexes. Existing process, count, warning
++and transient-failure guards remain in force. This change does not resolve 044's
++separate media scheduling behavior on warning-bearing partial snapshots.
++
++## User-visible behavior
++
++Suspect extractor responses now report an incomplete-discovery or identity error.
++Existing playlist history and active membership are retained; the operator can
++retry discovery after correcting the source or extractor response. Neither
++historical media nor state is deleted to make a malformed snapshot acceptable.
++No migration of already valid archives is required.
++
++## Executable evidence
++
++Three new hardening cases fail against unchanged production source before the
++fix: `archive-discovery-root-identity`, `archive-discovery-explicit-index` and
++`archive-discovery-position-uniqueness`. These use real Store reconciliation to
++check that suspect discovery cannot remove historical membership. The root case
++also checks refusal of wrong-source additions and successful legitimate removal.
++
++The full local Linux Debug suite contains 31 cases, including all existing tests.
++The same suite is run with AddressSanitizer and UndefinedBehaviorSanitizer,
++leak detection and halt-on-error. Final actual results, commit, PR and GitHub
++qualification belong in issue #3; local success alone is not integration evidence.
++
++The pre-existing nonzero-exit fixture now includes its intended playlist ID.
++Its assertions that observed entries survive, completion is false, and the
++removal-safety diagnostic is present are unchanged. The initial run with the
++old unbound fixture failed and was retained; new identity cases explicitly
++assert refusal of that old missing-ID input. This is an input-contract fixture
++correction, not removal of partial-observation behavior or weaker assertions.
++
++Cross-finding review also strengthened the existing null-entry, count-mismatch
++and process-error fixtures with matching provider IDs and paired valid controls.
++Their original failure assertions remain; the added checks prevent the new
++identity gate from masking those independent historical safety guards.
+diff --git a/src/archive/archivecore.cpp b/src/archive/archivecore.cpp
+index a16bfa7bdc6f909df6e176a0e19983a643e60729..21543c8e23de93427bdcc2fa40751f4375ea4e1d 100644
+--- a/src/archive/archivecore.cpp
++++ b/src/archive/archivecore.cpp
+@@ -1011,14 +1011,38 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
+     const auto root=doc.object();
+     if(!root.value("entries").isArray()){s.error="Playlist entries must be an array; removal inference disabled";return s;}
+     const auto entries=root.value("entries").toArray();
+-    bool malformed=root.contains("id")&&!source.key.isEmpty()&&root.value("id").toString()!=source.key;
++    // Requested identity is not provider evidence. Removal inference requires
++    // an explicit matching playlist ID, even for a complete-looking empty list.
++    if(!detail::sourceKeySafe(source.key)||!root.value("id").isString()||root.value("id").toString()!=source.key){
++        // Unbound observations cannot safely be attributed to this source,
++        // even as additions. Keep its historical membership entirely intact.
++        s.error="Missing or mismatched provider playlist identity; observations and removal inference refused";
++        return s;
++    }
++    bool malformed=false;
++    QSet<int> positions;
+     int pos=0;
+     for(const auto& value:entries){
+         ++pos;
+         if(!value.isObject()){malformed=true;continue;}
+         const auto e=value.toObject();
+         PlaylistItem p;
+-        p.position=e.value("playlist_index").toInt(pos);
++        // Array order is the supported fallback only when the field is absent.
++        // Qt's toInt(default) otherwise silently repairs strings, null and
++        // fractions, which must not authorize destructive membership changes.
++        if(e.contains("playlist_index")){
++            const auto index=e.value("playlist_index");
++            const auto number=index.toDouble();
++            if(!index.isDouble()||!std::isfinite(number)||std::floor(number)!=number||number<1||number>INT_MAX){
++                malformed=true;continue;
++            }
++            p.position=static_cast<int>(number);
++        }else p.position=pos;
++        // Repeated videos are valid occurrences, but contradictory positions
++        // are not evidence of complete enumeration. Retain usable observations
++        // without granting removal authority to this snapshot.
++        if(positions.contains(p.position))malformed=true;
++        positions.insert(p.position);
+         p.providerId=e.value("id").toString();
+         if(!p.providerId.isEmpty()&&!detail::videoIdSafe(p.providerId)){malformed=true;continue;}
+         if(p.position<1){malformed=true;continue;}
+diff --git a/tests/archive-core-tests.cpp b/tests/archive-core-tests.cpp
+index 6eef3b22a4a03a7fecd083d7702b97b0feac09af..bce4ac416a7f06cf6c45384f29e7d422762921a6 100644
+--- a/tests/archive-core-tests.cpp
++++ b/tests/archive-core-tests.cpp
+@@ -52,8 +52,9 @@ int main(int argc,char** argv)
+     check(store.saveSources({source},&error),"save sources: "+error);
+     auto round=store.loadSources(&error); check(round.size()==1&&round[0].key==source.key,"source registry round-trip");
+ 
+-    // Parsed observations from a nonzero yt-dlp run are useful evidence, but never a complete snapshot.
+-    const QByteArray partialJson=R"({"entries":[{"id":"abc123DEF45","title":"Observed before failure","playlist_index":1,"url":"https://www.youtube.com/watch?v=abc123DEF45","availability":"public"}]})";
++    // Bound observations from a nonzero yt-dlp run remain useful evidence.
++    // Unknown provider identity is tested separately as a refused observation.
++    const QByteArray partialJson=R"({"id":"PLTEST123","entries":[{"id":"abc123DEF45","title":"Observed before failure","playlist_index":1,"url":"https://www.youtube.com/watch?v=abc123DEF45","availability":"public"}]})";
+     const auto parsedNonzero=PlaylistDiscovery::parse(source,partialJson,"extractor failed after partial output",1);
+     check(parsedNonzero.items.size()==1,"nonzero discovery retains observed entries");
+     check(!parsedNonzero.complete,"nonzero discovery cannot be complete");
