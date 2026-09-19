@@ -97,7 +97,16 @@ if ((Test-Path -LiteralPath $root) -and !$AllowExistingArchive -and @(Get-ChildI
 $started = [DateTime]::UtcNow.ToString('o')
 $null = Invoke-Archive -CommandArgs @('preflight', $root)
 $scan = Invoke-Archive -CommandArgs @('scan', $root, $PlaylistUrl, 'Local harness playlist')
-if ($scan['complete'] -ne 'true' -or [int]$scan['observed'] -lt 1) { throw 'Playlist discovery was not complete and nonempty' }
+if ($scan['complete'] -ne 'true' -or [int]$scan['observed'] -lt 1 -or !$scan['source_key']) { throw 'Playlist discovery was not complete and nonempty' }
+
+# Qualification must bind the requested video to the exact persisted playlist
+# occurrence produced by the scan above. sync-item is intentionally capable of
+# creating a standalone canonical item, so it cannot serve as proof of playlist
+# membership.
+$binding = Invoke-Archive -CommandArgs @('playlist-binding', $root, $PlaylistUrl, $VideoUrl)
+if ($binding['member'] -ne 'true' -or $binding['source_key'] -ne $scan['source_key'] -or !$binding['item_key'] -or !$binding['entry_key'] -or [int]$binding['active_occurrences'] -lt 1) {
+    throw 'Requested video is not an active member of the scanned playlist'
+}
 $sync = Invoke-Archive -CommandArgs @('sync-item', $root, $VideoUrl)
 $verify = Invoke-Archive -CommandArgs @('verify-item', $root, $VideoUrl)
 if ($sync['sync'] -ne 'PASS' -or $verify['verify'] -ne 'PASS' -or !$sync['item_key'] -or $verify['item_key'] -ne $sync['item_key']) { throw 'Exact requested item did not verify' }
@@ -109,7 +118,8 @@ if ($repeat['sync'] -ne 'PASS' -or $verifiedAgain['verify'] -ne 'PASS' -or $veri
 foreach ($path in $before.Keys) { if (!$after.ContainsKey($path) -or $before[$path] -ne $after[$path]) { throw "Rerun changed canonical media: $path" } }
 $evidence = @{
     schema_version=1; result='PASS'; started_at=$started; completed_at=[DateTime]::UtcNow.ToString('o');
-    source_commit=$ExpectedCommit; ci_run_id=$identity.run_id; item_key=$verify['item_key'];
+    source_commit=$ExpectedCommit; ci_run_id=$identity.run_id; source_key=$binding['source_key']; item_key=$verify['item_key'];
+    entry_key=$binding['entry_key']; active_occurrences=[int]$binding['active_occurrences'];
     observed=[int]$scan['observed']; verified_media=$after; rerun='identical-canonical-media';
     manifest_sha256=(Get-FileHash -LiteralPath $sumPath -Algorithm SHA256).Hash.ToLowerInvariant()
 }
