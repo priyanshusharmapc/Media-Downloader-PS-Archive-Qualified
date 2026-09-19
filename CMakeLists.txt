@@ -10,6 +10,8 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
+# Archive widgets share the main window form with their standalone UI tests.
+set(CMAKE_AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -501,13 +503,16 @@ if(BUILD_TESTING)
     add_test(NAME archive-media-integrity COMMAND archive-media-integrity-tests)
     set_tests_properties(archive-media-integrity PROPERTIES TIMEOUT 900)
 
-    add_executable(archive-gui-settings-tests tests/archive-gui-settings-tests.cpp src/archive/archivesettings.cpp)
+    add_executable(archive-gui-settings-tests tests/archive-gui-settings-tests.cpp
+        src/archive/archivesettings.cpp src/archive/archivetab.cpp src/archive/archivetab.h
+        src/archive/archivecore.cpp src/archive/archive.qrc src/mainwindow.ui)
     if(BUILD_WITH_QT6)
-        target_link_libraries(archive-gui-settings-tests Qt6::Core)
+        target_link_libraries(archive-gui-settings-tests Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent)
     else()
-        target_link_libraries(archive-gui-settings-tests Qt5::Core)
+        target_link_libraries(archive-gui-settings-tests Qt5::Core Qt5::Widgets Qt5::Network Qt5::Concurrent)
     endif()
     add_test(NAME archive-gui-settings COMMAND archive-gui-settings-tests)
+    set_tests_properties(archive-gui-settings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
 endif()
 
 if(BUILD_TESTING)
