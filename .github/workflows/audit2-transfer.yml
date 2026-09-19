@@ -1,0 +1,75 @@
+name: Audit2 verified local commit transport
+
+on:
+  push:
+    branches: ['work/audit2-transfer-20260919']
+    paths: ['.audit2-incoming/request.json']
+
+permissions:
+  contents: write
+
+jobs:
+  transfer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify bundle and fast-forward only the named fix branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, re, subprocess
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          def run(*args):
+              subprocess.run(['git', *args], check=True)
+          assert os.environ['GITHUB_REPOSITORY'] == 'priyanshusharmapc/Media-Downloader-PS-Archive-Qualified'
+          assert os.environ['GITHUB_REPOSITORY_ID'] == '1371730232'
+          request = json.loads(pathlib.Path('.audit2-incoming/request.json').read_text())
+          assert request['repository_id'] == 1371730232
+          for key in ('base', 'head', 'tree'):
+              assert re.fullmatch('[0-9a-f]{40}', request[key]), key
+          assert re.fullmatch('fix/audit2-[a-z0-9-]+', request['branch'])
+          assert re.fullmatch('[0-9a-f]{64}', request['sha256'])
+          assert 1 <= len(request['parts']) <= 32
+          encoded = ''
+          for name in request['parts']:
+              assert re.fullmatch('[a-z0-9.-]+', name), name
+              encoded += pathlib.Path('.audit2-incoming', name).read_text().strip()
+          payload = base64.b64decode(encoded, validate=True)
+          assert hashlib.sha256(payload).hexdigest() == request['sha256']
+          bundle = pathlib.Path('/tmp/verified-incoming.bundle')
+          bundle.write_bytes(payload)
+          run('fetch', 'origin', 'audit2-remediation')
+          assert git('rev-parse', 'FETCH_HEAD') == request['base'], 'Integration advanced; rebase locally and resubmit'
+          run('merge-base', '--is-ancestor', 'b53457008af9af7716e4745bdd2812458e95766f', request['base'])
+          run('bundle', 'verify', str(bundle))
+          run('fetch', str(bundle), 'refs/heads/' + request['branch'])
+          assert git('rev-parse', 'FETCH_HEAD') == request['head']
+          assert git('rev-parse', request['head'] + '^{tree}') == request['tree']
+          run('merge-base', '--is-ancestor', request['base'], request['head'])
+          assert 0 < int(git('rev-list', '--count', request['base'] + '..' + request['head'])) <= 50
+          # Never move main, the frozen baseline, or the integration branch here.
+          # The push is non-forced; parallel target-branch changes cause failure.
+          run('push', 'origin', request['head'] + ':refs/heads/' + request['branch'])
+          run('update-ref', 'refs/heads/' + request['branch'], request['head'])
+          out = pathlib.Path('/tmp/transport-result'); out.mkdir()
+          (out / 'identity.json').write_text(json.dumps(request, indent=2))
+          run('bundle', 'create', str(out / 'repository.bundle'), '--all')
+          with (out / 'SHA256SUMS').open('w') as hashes:
+              for path in sorted(out.iterdir()):
+                  if path.name != 'SHA256SUMS':
+                      hashes.write(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n')
+          print('Transferred verified commit:', request['head'])
+          print('Fix branch:', request['branch'])
+          print('Integration and baseline refs were not changed.')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audit2-transport-state-${{ github.run_id }}
+          path: /tmp/transport-result
+          retention-days: 7
+          if-no-files-found: error
