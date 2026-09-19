@@ -96,7 +96,7 @@ void logWindow::Hide()
 	auto w = QString::number( r.width() ) ;
 	auto h = QString::number( r.height() ) ;
 
-	m_settings.setWindowDimensions( "LogWindow",x + "-" + y + "-" + w + "-" + h ) ;
+	m_settings.setWindowDimensions( "LogWindow",x + " " + y + " " + w + " " + h ) ;
 
 	this->hide() ;
 	this->clear() ;
@@ -125,7 +125,7 @@ void logWindow::Show( bool s )
 
 	if( !w.isEmpty() ){
 
-		auto m = util::split( w,'-',true ) ;
+		auto m = util::split( w,' ',true ) ;
 
 		if( m.size() == 4 ){
 
