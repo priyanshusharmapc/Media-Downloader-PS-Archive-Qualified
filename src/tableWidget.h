@@ -800,7 +800,17 @@ private:
 					const auto& a = this->getId( s ) ;
 					const auto& b = this->getId( e ) ;
 
-					return tableWidget::compare( a,b,m_ascending ) ;
+					bool aNumber = false ;
+					bool bNumber = false ;
+					const auto an = a.toDouble( &aNumber ) ;
+					const auto bn = b.toDouble( &bNumber ) ;
+
+					if( aNumber && bNumber ){
+						return m_ascending ? an < bn : an > bn ;
+					}
+
+					const auto order = QString::compare( a,b,Qt::CaseInsensitive ) ;
+					return m_ascending ? order < 0 : order > 0 ;
 				}else{
 					const auto& a = this->getSize( s ) ;
 					const auto& b = this->getSize( e ) ;
