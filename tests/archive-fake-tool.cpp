@@ -23,7 +23,7 @@ int main(int argc,char** argv){
  if(!args.contains("--no-overwrites")||!args.contains("--"))return 92;
  const bool audio=args.contains("-x");const auto source=plan.value(audio?"audio_file":"video_file").toString();
  const auto id=plan.value("video_id").toString("abc123DEF45");
- QString suffix;const int oi=args.indexOf("-o");if(oi>=0){const auto match=QRegularExpression("\\[repair-[^\\]]+\\]").match(args.value(oi+1));if(match.hasMatch())suffix=" "+match.captured();}
+ QString suffix;const int oi=args.indexOf("-o");if(oi>=0){const auto match=QRegularExpression("\\[(?:repair|download)-[^\\]]+\\]").match(args.value(oi+1));if(match.hasMatch())suffix=" "+match.captured();}
  const auto folder=audio?"Audio":"Video";QDir().mkpath(folder);
  const auto dest=QString(folder)+"/fixture ["+id+"]"+suffix+"."+QFileInfo(source).suffix();
  if(!QFileInfo::exists(dest)&&!QFile::copy(source,dest))return 93;
