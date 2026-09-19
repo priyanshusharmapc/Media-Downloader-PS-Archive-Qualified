@@ -314,7 +314,7 @@ void batchdownloader::addClipboardUrl()
 {
 	auto m = utility::clipboardText() ;
 
-	if( m.startsWith( "http" ) ){
+	if( utility::isHttpUrl( m ) ){
 
 		this->addToList( m,{ this->showMetaData(),this->autoDownloadWhenAdded() } ) ;
 
@@ -1915,7 +1915,7 @@ void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 
 			for( const auto& it : util::split( list,'\n',true ) ){
 
-				if( it.startsWith( "http" ) ){
+				if( utility::isHttpUrl( it ) ){
 
 					items.add( it ) ;
 				}
