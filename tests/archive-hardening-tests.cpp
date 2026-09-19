@@ -322,7 +322,31 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
  else if(name=="snapshot-identity"){Fixture f;Snapshot s;s.sourceKey="PLWRONG";s.complete=true;require(!f.store.reconcile(f.source,s).committed,"cross-source snapshot accepted");}
  else if(name=="import-identity"){Fixture f;const auto p=f.package({{"target",QJsonObject{{"item_key",f.item.itemKey},{"youtube_id","xyz987QWE65"}}}});RecoveryImporter i(f.config,f.store,f.logger);require(!i.validate(p).ok,"conflicting identities accepted");}
  else if(name=="import-id-only"){Fixture f;const auto p=f.package({{"target",QJsonObject{{"youtube_id",f.item.providerId}}}});RecoveryImporter i(f.config,f.store,f.logger);require(i.validate(p).ok,"documented youtube_id-only target rejected");}
- else if(name=="import-schema"){Fixture f;const auto p=f.package({{"package_id","../unsafe"},{"provenance",QJsonObject{{"method","old_local_backup"},{"confidence","certain"}}}});RecoveryImporter i(f.config,f.store,f.logger);require(!i.validate(p).ok,"unsafe package/schema accepted");}
+ else if(name=="import-schema"){
+   Fixture f;RecoveryImporter i(f.config,f.store,f.logger);
+   const auto unsafe=f.package({{"package_id","../unsafe"},{"provenance",QJsonObject{{"method","old_local_backup"},{"confidence","certain"}}}});
+   require(!i.validate(unsafe).ok,"unsafe package/schema accepted");
+
+   const auto wrongType=f.package({{"target",QJsonObject{{"item_key",17}}}});
+   require(!i.validate(wrongType).ok,"numeric item_key accepted despite schema");
+
+   const auto missingTarget=f.package({{"target",QJsonObject{}}});
+   require(!i.validate(missingTarget).ok,"missing target identity accepted");
+
+   const auto originalCanonical=f.store.loadCanonicalItems();
+   require(originalCanonical.size()==1,"fixture canonical state");
+   auto placeholder=originalCanonical.first();placeholder.key="placeholder:PLAUDIT:legacy";placeholder.providerId.clear();
+   require(f.store.saveCanonicalItems(QVector<CanonicalItem>{placeholder}),"placeholder fixture state");
+   const auto placeholderTarget=f.package({{"target",QJsonObject{{"item_key",placeholder.key}}}});
+   require(!i.validate(placeholderTarget).ok,"schema-invalid placeholder item_key accepted");
+
+   require(f.store.saveCanonicalItems(originalCanonical),"restore canonical fixture");
+   const auto canonicalTarget=f.package({{"target",QJsonObject{{"item_key",f.item.itemKey}}}});
+   require(i.validate(canonicalTarget).ok,"schema-valid canonical item_key rejected");
+
+   const auto idOnly=f.package({{"target",QJsonObject{{"youtube_id",f.item.providerId}}}});
+   require(i.validate(idOnly).ok,"schema-valid youtube_id-only target rejected");
+  }
  else if(name=="partial-recovery-status"){Fixture f;f.item.availability="deleted";Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(f.store.reconcile(f.source,s).committed,"deleted reconcile");Representation r;r.state="complete";r.path="Video/test.mp4";require(f.store.updateRepresentation(f.item.itemKey,"video",r),"update");require(f.store.loadCanonicalItems().first().recoveryStatus!="not_required","audio still missing but recovery cleared");}
  else if(name=="nested-redaction"){Fixture f;f.logger.event("INFO","test","redaction",{{"nested",QJsonObject{{"token","do-not-leak"}}}});const auto day=QDir(f.paths.activityLogs()).entryList(QDir::Dirs|QDir::NoDotAndDotDot).last();const auto dir=QDir(f.paths.activityLogs()).filePath(day);const auto file=QDir(dir).entryList(QDir::Files).last();require(!get(QDir(dir).filePath(file)).contains("do-not-leak"),"nested credential leaked");}
  else if(name=="deleted-title"){Fixture f;auto p=f.item;p.title="[Deleted video]";p.availability="deleted";Snapshot s;s.sourceKey=f.source.key;s.items={p};require(f.store.reconcile(f.source,s).committed,"deleted reconcile");require(get(QDir(f.paths.sourceDir(f.source.key)).filePath("missing.csv")).contains("Historical title"),"recovery report lost known title");}
