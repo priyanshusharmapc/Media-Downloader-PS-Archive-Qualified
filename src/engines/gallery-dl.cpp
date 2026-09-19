@@ -549,24 +549,30 @@ void gallery_dl::updateDownLoadCmdOptions( const engines::engine::baseEngine::up
 					   bool s,
 					   const QStringList& extraOpts )
 {
-	auto _not_contains = []( const engines::engine::baseEngine::updateOpts& opts,const char * e ){
+	// Build the same option sequence the base implementation will append and
+	// decide destination ownership from that complete effective command, not
+	// only from Media Downloader's early/default options.
+	QStringList selectedOptions ;
+	if( s ){
+		selectedOptions = opts.uiOptions.isEmpty() ? opts.userOptions : opts.uiOptions ;
+	}else{
+		selectedOptions = opts.userOptions.isEmpty() ? opts.uiOptions : opts.userOptions ;
+	}
 
-		for( const auto& it : util::asConst( opts.ourOptions ) ){
-
-			if( it == e ){
-
-				return false ;
-			}
+	auto hasDestination = []( const QStringList& values ){
+		for( const auto& value : values ){
+			if( value == "-d" || value == "-D" )return true ;
 		}
-
-		return true ;
+		return false ;
 	} ;
 
-	if( _not_contains( opts,"-D" ) && _not_contains( opts,"-d" ) ){
+	if( !hasDestination( opts.ourOptions ) &&
+	    !hasDestination( selectedOptions ) &&
+	    !hasDestination( extraOpts ) ){
 
-		const auto& s = engines::engine::baseEngine::Settings().downloadFolder() ;
+		const auto& folder = engines::engine::baseEngine::Settings().downloadFolder() ;
 
-		opts.ourOptions.prepend( s + "/gallery-dl" ) ;
+		opts.ourOptions.prepend( folder + "/gallery-dl" ) ;
 		opts.ourOptions.prepend( "-d" ) ;
 	}
 
@@ -656,19 +662,15 @@ const QByteArray& gallery_dl::gallery_dlFilter::operator()( Logger::Data& s )
 
 			auto m = util::splitPreserveQuotes( e ) ;
 
-			for( int i = 0 ; i < m.size() ; i++ ){
+			for( int i = 0 ; i + 1 < m.size() ; i++ ){
 
-				if( m[ i ] == "-d" && i + 1 < m.size() ){
+				if( m[ i ] == "-d" || m[ i ] == "-D" ){
 
+					// gallery-dl receives the final assembled command, so later
+					// destination options override earlier/default ones. Retain the
+					// last effective destination for completion-path matching.
 					m_dir = QDir::fromNativeSeparators( m[ i + 1 ] ).toUtf8() ;
-
-					break ;
-
-				}else if( m[ i ] == "-D" && i + 1 < m.size() ){
-
-					m_dir = QDir::fromNativeSeparators( m[ i + 1 ] ).toUtf8() ;
-
-					break ;
+					i++ ;
 				}
 			}
 		}
