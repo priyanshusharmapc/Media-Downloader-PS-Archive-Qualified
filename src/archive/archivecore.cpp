@@ -1242,10 +1242,24 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
         p.providerId=e.value("id").toString();
         if(!p.providerId.isEmpty()&&!detail::videoIdSafe(p.providerId)){malformed=true;continue;}
         if(p.position<1){malformed=true;continue;}
-        p.title=e.value("title").toString();
+
+        const auto rawTitle=e.value("title").toString();
+        auto rawUrl=e.value("webpage_url").toString();
+        if(rawUrl.isEmpty()) rawUrl=e.value("url").toString();
+        const auto availabilityValue=e.value("availability");
+        const auto hasExplicitAvailability=availabilityValue.isString()&&!availabilityValue.toString().trimmed().isEmpty();
+
+        // A provider-less observation must still contain evidence that an
+        // actual unresolved occurrence was observed. A contentless object
+        // cannot authorize removals merely because it occupies an array slot.
+        if(p.providerId.isEmpty()&&rawTitle.isEmpty()&&rawUrl.isEmpty()&&!hasExplicitAvailability){
+            malformed=true;
+            continue;
+        }
+
+        p.title=rawTitle;
         if(p.title.isEmpty()) p.title="[Unavailable item]";
-        p.url=e.value("webpage_url").toString();
-        if(p.url.isEmpty()) p.url=e.value("url").toString();
+        p.url=rawUrl;
         if(!p.providerId.isEmpty()) p.url="https://www.youtube.com/watch?v="+p.providerId;
         p.availability=availabilityFromEntry(e);
         p.itemKey=p.providerId.isEmpty()?placeholderBaseKey(source.key,p.title,p.url):canonicalKey(p.providerId,source.key,p.position,p.title);
