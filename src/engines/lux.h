@@ -75,5 +75,4 @@ public:
 					     const engines::engine::baseEngine::finishedState& ) override ;
 private:
 	const engines::engine& m_engine ;
-	QString m_downloadFolder ;
 };
