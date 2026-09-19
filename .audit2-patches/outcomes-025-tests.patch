@@ -1,0 +1,203 @@
+diff --git a/tests/archive-gui-settings-tests.cpp b/tests/archive-gui-settings-tests.cpp
+index 2b63e9b57119ba08d3517123a05cb57131cae43d..a4e2b59771d7706ba1cd63573598d483d3362014 100644
+--- a/tests/archive-gui-settings-tests.cpp
++++ b/tests/archive-gui-settings-tests.cpp
+@@ -16,6 +16,11 @@
+ #include <QStandardPaths>
+ #include <QTemporaryDir>
+ #include <QTextStream>
++#include <QTimer>
++#include <QElapsedTimer>
++#include <QJsonDocument>
++#include <QMessageBox>
++#include <QThread>
+ 
+ #include <functional>
+ #include <stdexcept>
+@@ -277,6 +282,58 @@ void corruptSettingsArePreserved()
+     require(contents(archive::ui::settingsFile())==broken,"Corrupt settings evidence was discarded");
+ }
+ 
++
++void acceptedRecoveryWithReportWarning()
++{
++    Fixture f;
++    archive::Paths paths(f.root);archive::Store store(paths);QString error;
++    require(store.initialize(&error),error);
++    archive::Source source;source.key="PLAUDIT";source.title="Projection outcome";
++    source.url="https://www.youtube.com/playlist?list=PLAUDIT";
++    archive::PlaylistItem item;item.itemKey="youtube:abc123DEF45";item.providerId="abc123DEF45";
++    item.title="Historical title";item.position=1;item.availability="public";
++    archive::Snapshot snapshot;snapshot.sourceKey=source.key;snapshot.complete=true;snapshot.items={item};
++    require(store.reconcile(source,snapshot).committed,"seed committed source");
++    require(archive::ui::persistRoot(f.root),"select GUI fixture root");
++    const auto package=QDir(paths.importsPending()).filePath("outcome-gui");
++    require(QDir().mkpath(package),"create pending GUI fixture");
++    const QJsonObject manifest{{"schema_version",1},{"package_id","outcome-gui"},
++        {"target",QJsonObject{{"item_key",item.itemKey},{"youtube_id",item.providerId}}},
++        {"metadata",QJsonObject{{"canonical_title","Recovered metadata"}}},
++        {"provenance",QJsonObject{{"method","old_local_backup"},{"confidence","high"},
++            {"source_url","https://www.youtube.com/watch?v=abc123DEF45"}}}};
++    put(QDir(package).filePath("manifest.json"),QJsonDocument(manifest).toJson());
++    // Block only a derived report after the authoritative fixture is healthy.
++    // The UI must still acknowledge acceptance when that later rebuild fails.
++    const auto catalog=QDir(paths.sourceDir(source.key)).filePath("catalog.csv");
++    require(QFile::remove(catalog)&&QDir().mkdir(catalog),"block report destination");
++    QTabWidget host;ArchiveTab tab(host);tab.init_done();
++    QAction* process=nullptr;
++    for(auto action:host.findChildren<QAction*>())
++        if(action->text()=="Process External Imports")process=action;
++    require(process&&process->isEnabled(),"Pending import action unavailable");
++    QTimer dismiss;
++    QObject::connect(&dismiss,&QTimer::timeout,[]{
++        for(auto widget:QApplication::topLevelWidgets())
++            if(auto box=qobject_cast<QMessageBox*>(widget))box->accept();
++    });
++    dismiss.start(10);process->trigger();
++    QElapsedTimer elapsed;elapsed.start();bool finished=false,warned=false,accepted=false;
++    while(elapsed.elapsed()<10000&&!finished){
++        QCoreApplication::processEvents();
++        for(auto label:host.findChildren<QLabel*>()){
++            if(label->text().startsWith("COMPLETED"))finished=true;
++            if(label->text()=="COMPLETED WITH WARNINGS")warned=true;
++            if(label->text().contains("Accepted imports 1"))accepted=true;
++        }
++        if(!finished)QThread::msleep(1);
++    }
++    require(finished,"GUI worker failed to complete");
++    require(!QFileInfo::exists(package)&&QFileInfo(QDir(paths.importsAccepted()).filePath("outcome-gui")).isDir(),
++        "recovery not actually accepted");
++    require(warned&&accepted,"GUI concealed durable acceptance behind a report failure");
++}
++
+ }
+ 
+ int main(int argc,char** argv)
+@@ -305,6 +362,7 @@ int main(int argc,char** argv)
+     run("unusable-settings-no-switch",unusableSettingsDestinationDoesNotSwitch);
+     run("legacy-and-unrelated-settings",validLegacyAndUnrelatedSettingsSurvive);
+     run("corrupt-settings-preserved",corruptSettingsArePreserved);
++    run("accepted-recovery-report-warning",acceptedRecoveryWithReportWarning);
+     qputenv("ARCHIVE_TEST_CONFIG_ROOT",originalConfig);
+     return failures?1:0;
+ }
+diff --git a/tests/archive-hardening-tests.cpp b/tests/archive-hardening-tests.cpp
+index 4589572009950491211734cc62ab9b72d972e2ac..5d7c1e86f191fea05f8f74eb2b5fdc03ebd05b1d 100644
+--- a/tests/archive-hardening-tests.cpp
++++ b/tests/archive-hardening-tests.cpp
+@@ -64,6 +64,45 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
+    require(f.store.reconcile(source,reordered).committed,"reordered unresolved reconciliation failed");const auto after=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty()&&after.size()==2,"reordered unresolved occurrences missing");
+    QSet<QString> beforeKeys,afterKeys;for(const auto& item:before)beforeKeys.insert(item.itemKey);for(const auto& item:after)afterKeys.insert(item.itemKey);require(beforeKeys==afterKeys,"unresolved reorder changed canonical identities");
+   }
++
++ else if(name=="projection-commit-outcome"){
++  Fixture f;const auto catalog=QDir(f.paths.sourceDir(f.source.key)).filePath("catalog.csv");
++  require(QFile::remove(catalog)&&QDir().mkdir(catalog),"block generated catalog path");
++  Snapshot snapshot;snapshot.sourceKey=f.source.key;snapshot.complete=true;snapshot.items={f.item};
++  const auto result=f.store.reconcile(f.source,snapshot,&f.logger);
++  require(result.committed,"MDPS-AUDIT2-025: projection failure hid a durable reconciliation commit");
++  require(!result.projectionsCurrent&&!result.projectionWarning.isEmpty()&&result.error.isEmpty(),"commit and projection errors conflated");
++  require(result.active==1&&result.observed==1,"committed counts lost after projection failure");
++  const auto marker=QDir(f.paths.archiveState()).filePath("projections-dirty.json");
++  require(QFileInfo::exists(marker),"projection failure lost durable rebuild intent");
++  const auto items=get(f.paths.itemsFile()),sources=get(f.paths.sourcesFile());
++  const auto history=get(f.paths.playlistHistoryFile(f.source.key));QString error;
++  require(QDir().rmdir(catalog)&&f.store.initialize(&error),"projection-only restart repair failed: "+error);
++  require(!QFileInfo::exists(marker),"successful rebuild retained dirty marker");
++  require(get(f.paths.itemsFile())==items&&get(f.paths.sourcesFile())==sources&&get(f.paths.playlistHistoryFile(f.source.key))==history,
++      "projection repair replayed canonical mutation");
++  require(f.store.initialize(&error),"repeat projection repair failed");
++ }
++ else if(name=="recovery-commit-outcome"){
++  Fixture f;const auto package=f.package({{"metadata",QJsonObject{{"canonical_title","Recovered metadata"}}}});
++  const auto manifest=get(QDir(package).filePath("manifest.json"));
++  const auto catalog=QDir(f.paths.sourceDir(f.source.key)).filePath("catalog.csv");
++  require(QFile::remove(catalog)&&QDir().mkdir(catalog),"block generated catalog path");
++  RecoveryImporter importer(f.config,f.store,f.logger);QStringList failures,warnings;
++  const auto accepted=importer.ingestPending(&failures,{},&warnings);
++  require(accepted==1,"MDPS-AUDIT2-025: accepted recovery counted as pending after projection failure");
++  require(failures.isEmpty(),"committed recovery reported a retryable admission failure");
++  require(warnings.size()==1&&warnings.first().contains("State committed"),"committed projection warning lost");
++  const auto acceptedDir=QDir(f.paths.importsAccepted()).filePath(QFileInfo(package).fileName());
++  require(!QFileInfo::exists(package)&&QFileInfo(acceptedDir).isDir(),"accepted package moved to wrong state");
++  require(get(QDir(acceptedDir).filePath("manifest.json"))==manifest,"accepted evidence mutated");
++  const auto receipt=get(QDir(acceptedDir).filePath("receipt.json"));
++  const auto items=get(f.paths.itemsFile()),history=get(f.paths.playlistHistoryFile(f.source.key));
++  QString error;require(QDir().rmdir(catalog)&&f.store.initialize(&error),"recovery projection repair failed: "+error);
++  require(importer.ingestPending(&failures)==0&&failures.isEmpty(),"already accepted package was retried");
++  require(get(f.paths.itemsFile())==items&&get(f.paths.playlistHistoryFile(f.source.key))==history&&get(QDir(acceptedDir).filePath("receipt.json"))==receipt,
++      "projection-only retry changed committed recovery evidence");
++ }
+  else if(name=="source-traversal"){Fixture f;Source s=f.source;s.key="..";Snapshot snap;snap.sourceKey=s.key;snap.complete=true;require(!f.store.reconcile(s,snap).committed,"unsafe source key must fail");}
+  else if(name=="state-shape"){Fixture f;put(f.paths.itemsFile(),"{\"unexpected\":true}");QString e;f.store.loadCanonicalItems(&e);require(!e.isEmpty(),"wrong JSON root must be an error");const auto before=get(f.paths.itemsFile());Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(!f.store.reconcile(f.source,s).committed,"corrupt store must block writes");require(get(f.paths.itemsFile())==before,"corrupt state was overwritten");}
+  else if(name=="source-state-corruption"){Fixture f;put(f.paths.sourcesFile(),"not json");Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(!f.store.reconcile(f.source,s).committed,"corrupt sources must block reconciliation");require(get(f.paths.sourcesFile())=="not json","source registry destroyed");}
+diff --git a/tests/archive-integration-tests.py b/tests/archive-integration-tests.py
+index b39d3c82177d8a75e808d8a579820f47f965e85f..aa78872eab8370b7a3e514368c5bdf1284ddf8de 100644
+--- a/tests/archive-integration-tests.py
++++ b/tests/archive-integration-tests.py
+@@ -131,6 +131,65 @@ class ArchiveIntegration(unittest.TestCase):
+         (directory / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+         return directory
+ 
++    def block_catalog(self):
++        """Inject a generated-file failure without touching authoritative state."""
++        catalog = self.root / 'Playlists/PLAUDIT/catalog.csv'
++        catalog.unlink()
++        catalog.mkdir()
++        return catalog
++
++    def durable_bytes(self):
++        paths = [self.root / 'State/ArchiveMode/items.json',
++                 self.root / 'State/ArchiveMode/sources.json',
++                 self.root / 'Playlists/PLAUDIT/items.json',
++                 self.root / 'Playlists/PLAUDIT/history.jsonl']
++        paths += list((self.root / 'State/ArchiveMode/Imports/Accepted').rglob('*'))
++        return {str(p.relative_to(self.root)): p.read_bytes() for p in paths if p.is_file()}
++
++    def test_scan_projection_failure_reports_committed_and_repairs_only_reports(self):
++        self.scan()
++        catalog = self.block_catalog()
++        self.plan['discovery']['entries'][0]['title'] = 'Committed changed title'
++        self.write_plan()
++        result = self.command('scan', SOURCE_URL, expect=4)
++        self.assertIn('committed=true', result.stdout)
++        self.assertIn('projections=dirty', result.stdout)
++        self.assertIn('active=2', result.stdout)
++        self.assertIn('State committed', result.stderr)
++        self.assertEqual(self.first()['title'], 'Committed changed title')
++        marker = self.root / 'State/ArchiveMode/projections-dirty.json'
++        self.assertTrue(marker.exists())
++        committed = self.durable_bytes()
++        catalog.rmdir()
++        self.command('rebuild-projections')
++        self.assertFalse(marker.exists())
++        self.assertIn('Committed changed title', catalog.read_text())
++        self.assertEqual(self.durable_bytes(), committed)
++        self.command('rebuild-projections')
++        self.assertEqual(self.durable_bytes(), committed)
++
++    def test_recovery_projection_failure_counts_accepted_and_never_repromotes(self):
++        self.scan()
++        package = self.make_package()
++        manifest = (package / 'manifest.json').read_bytes()
++        catalog = self.block_catalog()
++        result = self.command('ingest-pending', expect=4)
++        self.assertIn('accepted=1', result.stdout)
++        self.assertIn('warnings=1', result.stdout)
++        self.assertIn('State committed', result.stderr)
++        self.assertNotIn('retryable failure', result.stderr)
++        accepted = self.root / 'State/ArchiveMode/Imports/Accepted/recovery-package'
++        self.assertFalse(package.exists())
++        self.assertEqual((accepted / 'manifest.json').read_bytes(), manifest)
++        self.assertEqual(self.first()['video']['state'], 'complete')
++        committed = self.durable_bytes()
++        media = self.media_hashes()
++        catalog.rmdir()
++        self.command('rebuild-projections')
++        self.assertIn('accepted=0', self.command('ingest-pending').stdout)
++        self.assertEqual(self.durable_bytes(), committed)
++        self.assertEqual(self.media_hashes(), media)
++
+     def test_scan_sync_verify_and_idempotent_rerun(self):
+         self.scan()
+         self.command('sync-item', VIDEO_URL)
