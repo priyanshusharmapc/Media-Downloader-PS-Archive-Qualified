@@ -20,11 +20,11 @@ u_end = utility.index("Q_DECLARE_METATYPE", u_start)
 u_body = utility[u_start:u_end]
 
 assert "util::splitPreserveQuotes( m )" in s_body
-assert "if( args.isEmpty() )" in s_body
-assert s_body.index("if( args.isEmpty() )") < s_body.index("args.at( 0 )")
+assert "if( args.isEmpty() || args.at( 0 ).trimmed().isEmpty() )" in s_body
+assert s_body.index("if( args.isEmpty() || args.at( 0 ).trimmed().isEmpty() )") < s_body.index("auto exe = args.at( 0 )")
 
 assert "util::splitPreserveQuotes( a )" in u_body
-assert "if( args.isEmpty() )" in u_body
-assert u_body.index("if( args.isEmpty() )") < u_body.index("args.takeAt( 0 )")
+assert "if( args.isEmpty() || args.at( 0 ).trimmed().isEmpty() )" in u_body
+assert u_body.index("if( args.isEmpty() || args.at( 0 ).trimmed().isEmpty() )") < u_body.index("args.takeAt( 0 )")
 
 print("Completion command token guard policy: PASS")
