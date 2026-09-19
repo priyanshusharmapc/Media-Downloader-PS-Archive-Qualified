@@ -190,7 +190,8 @@ public:
     bool appendHistory(const QString& sourceKey,const QJsonObject& event,QString* error = nullptr) const;
     bool writeAllProjections(QString* error = nullptr) const;
     bool writeProjections(const QString& sourceKey,QString* error = nullptr) const;
-    bool updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error = nullptr);
+    bool updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error = nullptr,
+                              const QString& metadataPath = {});
     bool updateCanonicalMetadata(const QString& itemKey,const QString& title,const QString& uploader,
                                  const QString& availability,const QString& originalUrl,QString* error = nullptr);
     ReconcileSummary reconcile(Source& source,const Snapshot& snapshot,ActivityLogger* logger = nullptr);
