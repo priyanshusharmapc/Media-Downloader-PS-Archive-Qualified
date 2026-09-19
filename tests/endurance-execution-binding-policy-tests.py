@@ -12,6 +12,9 @@ assert "[Parameter(Mandatory=$true)][string]$ExpectedCiRun" in source
 assert "[string[]]$AllowedOverlayPath" in source
 assert "function Assert-ExecutionPackage" in source
 assert "Execution package differs from sealed base outside declared overlay" in source
+assert "Allowed overlay cannot replace sealed package path" in source
+assert "if($allowed.ContainsKey($relative)){continue}" not in source
+assert "expectedArchiveCliSha256" in source
 assert "archiveCliSha256" in source
 assert "$executionSeal=Assert-ExecutionPackage" in source
 assert "executionSeal=$executionSeal" in source
