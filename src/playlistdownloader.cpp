@@ -167,6 +167,8 @@ playlistdownloader::playlistdownloader( Context& ctx ) :
 	connect( m_ui.pbPLCancel,&QPushButton::clicked,[ this ](){
 
 		m_networkRunning = 0 ;
+		m_pendingRowMaterializations = 0 ;
+		m_autoDownloadAfterMaterialization = false ;
 
 		m_terminator.terminateAll( m_table.get() ) ;
 	} ) ;
@@ -1008,6 +1010,9 @@ void playlistdownloader::getListing( playlistdownloader::listIterator e,
 				    const engines::engine& engine,
 				    bool autoDownload )
 {
+	m_pendingRowMaterializations = 0 ;
+	m_autoDownloadAfterMaterialization = false ;
+
 	this->resizeTable( playlistdownloader::size::large ) ;
 
 	this->showBanner() ;
@@ -1167,7 +1172,14 @@ void playlistdownloader::getList(  const QString& url,
 			}else{
 				if( m_autoDownload ){
 
-					m_parent.download() ;
+					m_parent.m_gettingPlaylist = false ;
+
+					if( m_parent.m_pendingRowMaterializations == 0 ){
+						m_parent.m_ui.pbPLCancel->setEnabled( false ) ;
+						m_parent.download() ;
+					}else{
+						m_parent.m_autoDownloadAfterMaterialization = true ;
+					}
 				}else{
 					m_parent.enableAll() ;
 					m_parent.m_gettingPlaylist = false ;
@@ -1299,6 +1311,10 @@ bool playlistdownloader::parseJson( const engines::engine&,
 
 	auto thumbnailUrl = media.thumbnailUrl() ;
 
+	// The queue may not snapshot rows until every accepted item has reached
+	// networkData(), whether its thumbnail is fetched or synthesized.
+	m_pendingRowMaterializations++ ;
+
 	if( !thumbnailUrl.isEmpty() ){
 
 		auto& network = m_ctx.network() ;
@@ -1343,6 +1359,16 @@ void playlistdownloader::networkData( utility::networkReply m )
 	}
 
 	m_networkRunning-- ;
+
+	if( m_pendingRowMaterializations > 0 ){
+		m_pendingRowMaterializations-- ;
+	}
+
+	if( m_pendingRowMaterializations == 0 && m_autoDownloadAfterMaterialization ){
+		m_autoDownloadAfterMaterialization = false ;
+		m_ui.pbPLCancel->setEnabled( false ) ;
+		this->download() ;
+	}
 }
 
 void playlistdownloader::addTextToUi( const QByteArray& data,int index )
