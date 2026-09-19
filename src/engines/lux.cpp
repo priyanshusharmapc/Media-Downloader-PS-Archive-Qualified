@@ -104,14 +104,14 @@ lux::~lux()
 
 lux::lux( const engines& engines,const engines::engine& engine,QJsonObject& ) :
 	engines::engine::baseEngine( engines.Settings(),engine,engines.processEnvironment() ),
-	m_engine( engine ),
-	m_downloadFolder( engines.Settings().downloadFolder() + "/" )
+	m_engine( engine )
 {
 }
 
 engines::engine::baseEngine::DataFilter lux::Filter( int id )
 {
-	return { util::types::type_identity< lux::lux_dlFilter >(),m_engine,id,m_downloadFolder.toUtf8() } ;
+	const auto folder = this->downloadFolder( this->Settings().downloadFolder() ) + "/" ;
+	return { util::types::type_identity< lux::lux_dlFilter >(),m_engine,id,folder.toUtf8() } ;
 }
 
 void lux::setProxySetting( engines::engine::baseEngine::optionsEnvironment& s,QStringList&,const QString& e )
