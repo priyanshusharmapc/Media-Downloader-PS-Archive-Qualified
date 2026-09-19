@@ -2173,6 +2173,15 @@ QStringList utility::args::parseOptions( const QString& e,const engines::engine&
 		if( m[ 0 ].compare( "default",Qt::CaseInsensitive ) ){
 
 			m.insert( 0,q ) ;
+		}else{
+			// "default" represents absence of a format/engine-specific option,
+			// not a positional backend argument. Consume only the sentinel so
+			// any following ordinary options remain available to the parser.
+			m.removeFirst() ;
+
+			if( m.isEmpty() ){
+				return {} ;
+			}
 		}
 	}
 
