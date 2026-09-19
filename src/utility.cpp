@@ -349,52 +349,47 @@ QString utility::windowsGateWayAddress()
 
 QString utility::windowsGetClipBoardText( const ContextWinId& wId )
 {
-	class String
-	{
-	public:
-		void operator=( const char * s )
-		{
-			m_value = s ;
-		}
-		void operator=( const wchar_t * s )
-		{
-			m_value = QString::fromWCharArray( s ) ;
-		}
-		operator QString()
-		{
-			return m_value ;
-		}
-	private:
-		QString m_value ;
-	} ;
+	QString value ;
 
-	String s ;
+	// Clipboard payload type is defined by the Win32 format, not by the Qt
+	// major version or the build's TCHAR setting. Prefer Unicode and fall back
+	// to the legacy local-8-bit representation only when necessary.
+	UINT format = 0 ;
+	if( IsClipboardFormatAvailable( CF_UNICODETEXT ) ){
 
-	auto format = utility::Qt6Version() ? CF_UNICODETEXT : CF_TEXT ;
+		format = CF_UNICODETEXT ;
+	}else if( IsClipboardFormatAvailable( CF_TEXT ) ){
 
-	if( IsClipboardFormatAvailable( format ) ){
-
-		if( OpenClipboard( wId.value() ) ){
-
-			auto hglb = GetClipboardData( format ) ;
-
-			if( hglb ){
-
-				auto lptstr = static_cast< LPTSTR >( GlobalLock( hglb ) ) ;
-
-				if( lptstr ){
-
-					s = lptstr ;
-
-					GlobalUnlock( hglb ) ;
-				}
-			}
-
-			CloseClipboard() ;
-		}
+		format = CF_TEXT ;
+	}else{
+		return value ;
 	}
 
-	return s ;
+	if( OpenClipboard( wId.value() ) ){
+
+		auto hglb = GetClipboardData( format ) ;
+
+		if( hglb ){
+
+			auto data = GlobalLock( hglb ) ;
+
+			if( data ){
+
+				if( format == CF_UNICODETEXT ){
+
+					value = QString::fromWCharArray( static_cast< const wchar_t * >( data ) ) ;
+				}else{
+					value = QString::fromLocal8Bit( static_cast< const char * >( data ) ) ;
+				}
+
+				GlobalUnlock( hglb ) ;
+			}
+		}
+
+		CloseClipboard() ;
+	}
+
+	return value ;
 }
 
 void utility::windowsSetDarkModeTitleBar( const Context& ctx )
