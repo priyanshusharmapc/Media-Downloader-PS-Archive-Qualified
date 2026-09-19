@@ -76,7 +76,13 @@ MainWindow::MainWindow( QApplication& app,
 
 	connect( this,&MainWindow::processEventSignal,this,&MainWindow::processEventSlot,qe ) ;
 
-	connect( &m_trayIcon,&QSystemTrayIcon::activated,[ this ]( QSystemTrayIcon::ActivationReason ){
+	connect( &m_trayIcon,&QSystemTrayIcon::activated,[ this ]( QSystemTrayIcon::ActivationReason reason ){
+
+		// Context-menu, middle-click and platform-specific activations must not
+		// unexpectedly change main-window visibility.
+		if( reason != QSystemTrayIcon::Trigger ){
+			return ;
+		}
 
 		if( this->isVisible() ){
 
