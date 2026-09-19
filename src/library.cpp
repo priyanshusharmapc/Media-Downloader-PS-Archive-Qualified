@@ -399,6 +399,7 @@ void library::keyPressed( utility::mainWindowKeyCombo m )
 		m_ui.labelLibrarySetNewFileName->setText( a ) ;
 
 		m_ui.pbLibrarySetNewFileName->setObjectName( "DeleteSelectedItems" ) ;
+		this->capturePendingRows( m_table.selectedRows() ) ;
 
 		m_ui.pbLibrarySetNewFileName->setText( tr( "Yes" ) ) ;
 
@@ -536,6 +537,7 @@ void library::cxMenuRequested( QPoint )
 		if( hasMultipleSelections ){
 
 			m_ui.pbLibrarySetNewFileName->setObjectName( "DeleteSelectedItems" ) ;
+			this->capturePendingRows( m_table.selectedRows() ) ;
 
 			auto a = tr( "Are You Sure You Want To Delete Selected Items?" ) ;
 
@@ -557,6 +559,7 @@ void library::cxMenuRequested( QPoint )
 			}
 
 			m_ui.pbLibrarySetNewFileName->setObjectName( "Delete" ) ;
+			this->capturePendingRow( row ) ;
 
 			auto m = m_table.item( row,1 ).text() ;
 
@@ -583,6 +586,7 @@ void library::cxMenuRequested( QPoint )
 		m_ui.labelLibrarySetNewFileName->setText( a ) ;
 
 		m_ui.pbLibrarySetNewFileName->setObjectName( "DeleteAll" ) ;
+		this->capturePendingDirectory() ;
 
 		m_ui.pbLibrarySetNewFileName->setText( tr( "Yes" ) ) ;
 
@@ -611,6 +615,7 @@ void library::cxMenuRequested( QPoint )
 		}
 
 		m_ui.pbLibrarySetNewFileName->setObjectName( "Rename" ) ;
+		this->capturePendingRow( row ) ;
 
 		m_ui.pbLibrarySetNewFileName->setText( tr( "Rename" ) ) ;
 
