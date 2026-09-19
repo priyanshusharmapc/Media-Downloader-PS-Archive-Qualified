@@ -1032,6 +1032,10 @@ void configure::populateOptionsTable( const engines::engine& s,int selectRow )
 
 	m_tableDefaultDownloadOptions.clear() ;
 
+	// Reset engine-specific presentation before applying overrides for the
+	// newly selected engine. Deno must not leak hidden/visible state forward.
+	m_ui.lineEditConfigureTextEncoding->setVisible( true ) ;
+	m_ui.cbDenoEnableAutoDownload->setVisible( false ) ;
 	m_ui.labelConfigureTextEncoding->setText( tr( "Text Encoding" ) ) ;
 
 	m_ui.cbDenoEnableAutoDownload->setChecked( m_settings.denoEnableAutoDownload() ) ;
