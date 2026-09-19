@@ -55,6 +55,12 @@ class engines
 public:
 	static bool filePathIsValid( const QFileInfo& ) ;
 
+	// Rendering helpers are intentionally separate from process arguments and
+	// environment. They scrub credentials only from diagnostics, never from the
+	// values delivered to the child process.
+	static QString redactLogArgument( const QString& ) ;
+	static QString redactLogEnvironment( const QString&,const QString& ) ;
+
 	class file
 	{
 	public:

@@ -105,6 +105,12 @@ public:
 	}
 	void start( const QByteArray& )
 	{
+		for( const auto& arg : m_args.args ){
+			if( arg == TEST_ENGINE_PREFIX"-proxy-security" ){
+				return this->testProxySecurity() ;
+			}
+		}
+
 		Tests tests ;
 
 		QString s ;
@@ -154,6 +160,42 @@ public:
 				return true ;
 			}
 		} ) ;
+	}
+	void testProxySecurity()
+	{
+		const QString secret = "DistinctiveProxySecret077" ;
+		const QString proxy = "http://proxy-user:" + secret + "@proxy.example:8080" ;
+		engines::engine::baseEngine::optionsEnvironment environment ;
+		QStringList arguments ;
+		wget::applyProxySetting( environment,arguments,proxy ) ;
+
+		QString diagnostics ;
+		const auto childEnvironment = environment.update( QProcessEnvironment(),diagnostics ) ;
+		const auto httpProxy = childEnvironment.value( "http_proxy" ) ;
+		const auto httpsProxy = childEnvironment.value( "https_proxy" ) ;
+		const auto renderedPassword = engines::redactLogArgument( "--proxy-password=" + secret ) ;
+
+		bool argvClean = true ;
+		for( const auto& argument : arguments ){
+			if( argument.contains( secret ) || argument.startsWith( "--proxy-password=" ) ){
+				argvClean = false ;
+			}
+		}
+		const bool childReceivesSecret = httpProxy.contains( secret ) && httpsProxy.contains( secret ) ;
+		const bool diagnosticsClean = !diagnostics.contains( secret ) &&
+			diagnostics.contains( "<REDACTED>" ) &&
+			!renderedPassword.contains( secret ) &&
+			renderedPassword.contains( "<REDACTED>" ) ;
+
+		if( argvClean && childReceivesSecret && diagnosticsClean ){
+			std::cout << "proxy-security=PASS" << std::endl ;
+			m_args.app.exit( 0 ) ;
+		}else{
+			std::cerr << "proxy-security=FAIL argvClean=" << argvClean
+				<< " childReceivesSecret=" << childReceivesSecret
+				<< " diagnosticsClean=" << diagnosticsClean << std::endl ;
+			m_args.app.exit( 1 ) ;
+		}
 	}
 private:
 	QList< QByteArray > m_list ;
