@@ -532,6 +532,95 @@ bool freshArchiveRoot(const Paths& paths,QString* error)
     }
     return true;
 }
+
+bool readPlaylistArrayWithMigration(const Paths& paths,const QString& sourceKey,QJsonArray* array,QString* error,bool missingAllowed)
+{
+    const auto path=paths.playlistItemsFile(sourceKey);
+    if(detail::readArray(path,"playlist",array,error,missingAllowed))return true;
+
+    // The only supported legacy shape predates occurrence identity entirely.
+    // Mixed old/new rows are ambiguous corruption, so never guess which rows
+    // should retain which identity.
+    QByteArray bytes;QString legacyError;
+    if(!detail::readBytes(path,&bytes,&legacyError))return false;
+    QJsonParseError pe;const auto doc=QJsonDocument::fromJson(bytes,&pe);
+    if(pe.error!=QJsonParseError::NoError||!doc.isArray())return false;
+    auto legacy=doc.array();
+    if(legacy.isEmpty())return false;
+    for(const auto& value:legacy)
+        if(!value.isObject()||!value.toObject().value("entry_key").toString().isEmpty())return false;
+
+    QHash<QString,int> ordinals;
+    for(int i=0;i<legacy.size();++i){
+        auto row=legacy[i].toObject();
+        const auto itemKey=row.value("item_key").toString();
+        if(itemKey.isEmpty())return false;
+        row["entry_key"]=itemKey+"#"+QString::number(++ordinals[itemKey]);
+        legacy[i]=row;
+    }
+    QString shapeError;
+    if(!detail::arrayShape(legacy,"playlist",&shapeError))return false;
+
+    QByteArray history;
+    const auto historyPath=paths.playlistHistoryFile(sourceKey);
+    if(QFileInfo::exists(historyPath)){
+        if(!detail::readBytes(historyPath,&history,&legacyError)||!detail::historyValid(history,&legacyError)){
+            detail::reject(error,legacyError);return false;
+        }
+    }
+    history+=QJsonDocument(historyEvent("playlist_entry_key_migrated","",{
+        {"source_key",sourceKey},{"rows",legacy.size()},{"method","item_key_ordinal"}})).toJson(QJsonDocument::Compact)+"\n";
+    if(!detail::commitTransaction(paths.root(),{
+        {"Playlists/"+sourceKey+"/items.json",QJsonDocument(legacy).toJson()},
+        {"Playlists/"+sourceKey+"/history.jsonl",history}},&legacyError)){
+        detail::reject(error,legacyError);return false;
+    }
+    *array=legacy;
+    if(error)error->clear();
+    return true;
+}
+
+bool validateStoreGraph(const Paths& paths,const QJsonArray& sources,const QJsonArray& canonical,QString* error)
+{
+    QSet<QString> sourceKeys,canonicalKeys;
+    for(const auto& value:sources)sourceKeys.insert(value.toObject().value("key").toString());
+    for(const auto& value:canonical)canonicalKeys.insert(value.toObject().value("key").toString());
+
+    for(const auto& dir:QDir(paths.playlists()).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
+        if(!detail::sourceKeySafe(dir)||!detail::noLinks(paths.sourceDir(dir)))
+            return detail::reject(error,"Unsafe managed playlist directory: "+dir);
+        const auto metaPath=paths.playlistFile(dir);
+        const auto itemsPath=paths.playlistItemsFile(dir);
+        const auto historyPath=paths.playlistHistoryFile(dir);
+        const bool managed=QFileInfo::exists(metaPath)||QFileInfo::exists(itemsPath)||QFileInfo::exists(historyPath);
+        if(!managed)continue;
+        if(!sourceKeys.contains(dir))
+            return detail::reject(error,"Managed playlist directory has no registered source: "+dir);
+
+        if(QFileInfo::exists(metaPath)){
+            QByteArray metaBytes;
+            if(!detail::readBytes(metaPath,&metaBytes,error))return false;
+            QJsonParseError pe;const auto doc=QJsonDocument::fromJson(metaBytes,&pe);
+            if(pe.error!=QJsonParseError::NoError||!doc.isObject()||doc.object().value("key").toString()!=dir)
+                return detail::reject(error,"Playlist metadata/source identity mismatch: "+dir);
+        }
+
+        if(QFileInfo::exists(itemsPath)){
+            QJsonArray rows;
+            if(!readPlaylistArrayWithMigration(paths,dir,&rows,error,false))return false;
+            for(const auto& row:rows){
+                const auto itemKey=row.toObject().value("item_key").toString();
+                if(!canonicalKeys.contains(itemKey))
+                    return detail::reject(error,"Playlist occurrence references missing canonical item: "+itemKey);
+            }
+        }
+        if(QFileInfo::exists(historyPath)){
+            QByteArray history;
+            if(!detail::readBytes(historyPath,&history,error)||!detail::historyValid(history,error))return false;
+        }
+    }
+    return true;
+}
 }
 
 bool Store::initialize(QString* error,bool recoverStaleRunning)
@@ -549,8 +638,9 @@ bool Store::initialize(QString* error,bool recoverStaleRunning)
         if(!detail::commitTransaction(m_paths.root(),{{"State/ArchiveMode/sources.json","[]\n"},
             {"State/ArchiveMode/items.json","[]\n"},{archiveIdentityRelative,newArchiveIdentity("fresh")}},error))return false;
     }
-    QJsonArray a;
-    if(!detail::readArray(m_paths.sourcesFile(),"source",&a,error)||!detail::readArray(m_paths.itemsFile(),"canonical",&a,error))return false;
+    QJsonArray sourcesArray,canonicalArray;
+    if(!detail::readArray(m_paths.sourcesFile(),"source",&sourcesArray,error)||
+       !detail::readArray(m_paths.itemsFile(),"canonical",&canonicalArray,error))return false;
     if(QFileInfo::exists(identityPath)||!detail::noLinks(identityPath)){
         QByteArray identity;
         if(!detail::readBytes(identityPath,&identity,error)||!detail::transactionPayload(archiveIdentityRelative,identity,error))return false;
@@ -562,14 +652,16 @@ bool Store::initialize(QString* error,bool recoverStaleRunning)
         if(!detail::commitTransaction(m_paths.root(),{{archiveIdentityRelative,newArchiveIdentity("legacy_unversioned")}},error))return false;
     }
 
+    if(!validateStoreGraph(m_paths,sourcesArray,canonicalArray,error))return false;
+
     if(recoverStaleRunning){
         // A persisted "running" state is a lease owned by the process that held
         // the Archive lock. At a fresh operation boundary no such worker can
         // still exist, so retaining "running" would be false state. Preserve
         // paths/origin/verification evidence and append restart provenance.
         bool changed=false;
-        for(int index=0;index<a.size();++index){
-            auto item=a[index].toObject();
+        for(int index=0;index<canonicalArray.size();++index){
+            auto item=canonicalArray[index].toObject();
             for(const auto& kind:QStringList{"video","audio"}){
                 auto rep=item.value(kind).toObject();
                 if(rep.value("state").toString()!="running")continue;
@@ -579,10 +671,10 @@ bool Store::initialize(QString* error,bool recoverStaleRunning)
                 rep["error"]=prior.isEmpty()?recovery:prior+" | "+recovery;
                 item[kind]=rep;changed=true;
             }
-            a[index]=item;
+            canonicalArray[index]=item;
         }
         if(changed&&!detail::commitTransaction(m_paths.root(),
-            {{"State/ArchiveMode/items.json",QJsonDocument(a).toJson()}},error))return false;
+            {{"State/ArchiveMode/items.json",QJsonDocument(canonicalArray).toJson()}},error))return false;
     }
     if(!m_paths.materializeAgentResources(error))return false;
     if(QFileInfo::exists(QDir(m_paths.archiveState()).filePath("projections-dirty.json")))return writeAllProjections(error);
@@ -619,48 +711,8 @@ QVector<PlaylistItem> Store::loadPlaylistItems(const QString& sourceKey,QString*
 {
     if(!detail::sourceKeySafe(sourceKey)){detail::reject(error,"Invalid source key");return {};}
     SyncLock lock(m_paths);if(!lock.tryLock()){detail::reject(error,lock.errorString());return {};}
-    const auto path=m_paths.playlistItemsFile(sourceKey);
     QJsonArray a;QVector<PlaylistItem> out;
-    if(!detail::readArray(path,"playlist",&a,error,true)){
-        // Compatibility is intentionally narrow: the only supported legacy
-        // playlist shape is one where every otherwise-valid row predates
-        // entry_key. Mixed old/new rows or duplicate current identities are
-        // ambiguous corruption and must remain untouched.
-        QByteArray bytes;QString legacyError;
-        if(!detail::readBytes(path,&bytes,&legacyError))return out;
-        QJsonParseError pe;const auto doc=QJsonDocument::fromJson(bytes,&pe);
-        if(pe.error!=QJsonParseError::NoError||!doc.isArray())return out;
-        auto legacy=doc.array();
-        if(legacy.isEmpty())return out;
-        for(const auto& value:legacy){
-            if(!value.isObject()||!value.toObject().value("entry_key").toString().isEmpty())return out;
-        }
-        QHash<QString,int> ordinals;
-        for(int i=0;i<legacy.size();++i){
-            auto row=legacy[i].toObject();
-            const auto itemKey=row.value("item_key").toString();
-            if(itemKey.isEmpty())return out;
-            row["entry_key"]=itemKey+"#"+QString::number(++ordinals[itemKey]);
-            legacy[i]=row;
-        }
-        QString shapeError;
-        if(!detail::arrayShape(legacy,"playlist",&shapeError))return out;
-
-        QByteArray history;
-        const auto historyPath=m_paths.playlistHistoryFile(sourceKey);
-        if(QFileInfo::exists(historyPath)){
-            if(!detail::readBytes(historyPath,&history,&legacyError)||!detail::historyValid(history,&legacyError))return out;
-        }
-        history+=QJsonDocument(historyEvent("playlist_entry_key_migrated","",{
-            {"source_key",sourceKey},{"rows",legacy.size()},{"method","item_key_ordinal"}})).toJson(QJsonDocument::Compact)+"\n";
-        if(!detail::commitTransaction(m_paths.root(),{
-            {"Playlists/"+sourceKey+"/items.json",QJsonDocument(legacy).toJson()},
-            {"Playlists/"+sourceKey+"/history.jsonl",history}},&legacyError)){
-            detail::reject(error,legacyError);return out;
-        }
-        a=legacy;
-        if(error)error->clear();
-    }
+    if(!readPlaylistArrayWithMigration(m_paths,sourceKey,&a,error,true))return out;
     for(const auto& e:a)out.append(playlistItemFromJson(e.toObject()));return out;
 }
 bool Store::savePlaylistItems(const QString& sourceKey,const QVector<PlaylistItem>& items,QString* error) const
