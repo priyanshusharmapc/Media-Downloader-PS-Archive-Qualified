@@ -26,3 +26,11 @@ assert "const auto crow = m_listTargetRow" in setter
 assert "m_table.currentRow()" not in setter
 assert "m_table.url( crow ) != m_listTargetUrl" in setter
 print("batch chooser target policy: PASS")
+
+# Async media-property completion must also revalidate the original row identity
+# before replacing cached formats.
+show=cpp[cpp.index("void batchdownloader::showList"):cpp.index("void batchdownloader::setDownloadingOptions")]
+assert "m_parent.m_table.url( m_row ) != m_url" in show
+assert "m_parent.m_table.replace( array,m_row )" in show
+assert show.index("m_parent.m_table.url( m_row ) != m_url") < show.index("m_parent.m_table.replace( array,m_row )")
+assert "events ev( *this,listType,engine,row,url )" in show
