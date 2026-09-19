@@ -28,6 +28,7 @@
 #include <QSize>
 #include <QHeaderView>
 #include <QMenu>
+#include <QSignalBlocker>
 
 #include "engines.h"
 
@@ -813,6 +814,20 @@ private:
 			bool m_column ;
 		} ;
 
+		QStringList selectedIds ;
+
+		for( int row = 0 ; row < m_table.rowCount() ; ++row ){
+
+			if( this->isSelected( row ) ){
+				selectedIds.append( m_table.item( row,0 )->text() ) ;
+			}
+		}
+
+		// Rebuilding the table is an implementation detail of sorting. Block
+		// transient selection signals so effective download options are not
+		// rewritten while rows temporarily disappear.
+		QSignalBlocker blocker( m_table ) ;
+
 		auto stuff = std::move( m_stuff ) ;
 
 		std::sort( stuff.begin(),stuff.end(),meaw( ascending,column ) ) ;
@@ -824,6 +839,13 @@ private:
 			int row = this->addRow( std::move( it ) ) ;
 
 			this->fromStuff( this->stuffAtLast(),Forwader( row,*this ) ) ;
+
+			if( selectedIds.contains( m_table.item( row,0 )->text() ) ){
+
+				for( int col = 0 ; col < m_table.columnCount() ; ++col ){
+					m_table.item( row,col )->setSelected( true ) ;
+				}
+			}
 		}
 	}
 	template< typename Rows >
