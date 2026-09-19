@@ -12,7 +12,9 @@ body=source[start:end]
 assert "std::array< wchar_t,4096 > value{}" in body
 assert "DWORD bytes = static_cast< DWORD >( sizeof( value ) )" in body
 assert "RegGetValueW" in body and "value.data(),&bytes" in body
+assert "bytes == 0 || bytes > sizeof( value ) || bytes % sizeof( wchar_t ) != 0" in body
 assert "bytes / sizeof( wchar_t )" in body
+assert "chars <= 0 || value[ static_cast< std::size_t >( chars - 1 ) ] != L'\\0'" in body
 assert "QString::fromWCharArray( value.data(),chars )" in body
 assert "subKey.qdata()" not in body
 print("registry byte-count decoding policy: PASS")
