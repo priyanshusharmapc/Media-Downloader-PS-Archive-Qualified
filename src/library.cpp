@@ -329,7 +329,9 @@ void library::deleteEntries( library::iter items )
 {
 	if( items.empty() ){
 
-		return this->enableAll() ;
+		// Successful filesystem mutations invalidate the cached directory
+		// snapshot used by sorting. Re-read it before re-enabling the view.
+		return this->showContents( m_currentPath ) ;
 	}
 
 	auto row = items.next() ;
@@ -387,7 +389,10 @@ void library::renameFile( int row )
 
 	auto& item = m_table.item( row,1 ) ;
 
-	utility::rename( m_ctx,item,m_currentPath,nn,item.text() ) ;
+	if( !utility::rename( m_ctx,item,m_currentPath,nn,item.text() ).isEmpty() ){
+
+		this->showContents( m_currentPath ) ;
+	}
 }
 
 void library::keyPressed( utility::mainWindowKeyCombo m )
