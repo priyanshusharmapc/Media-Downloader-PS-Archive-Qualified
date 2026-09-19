@@ -35,3 +35,12 @@ finished = source[finished_start:finished_end]
 assert 'utility::removeFile( opts.exeBinPath )' not in finished, finished
 assert 'utility::removeFolder( opts.exeBinPath )' not in finished, finished
 print('engine update rollback/staging policy: PASS')
+
+# Staged archive layout is validated before rollback-capable promotion starts.
+output_start = source.index("void networkAccess::extractArchiveOuput")
+output_end = source.index("void networkAccess::postStartDownloading", output_start)
+output = source[output_start:output_end]
+assert "expectedRelative" in output and "stagedExecutable" in output
+assert "QFileInfo( stagedExecutable ).isFile()" in output
+assert "Extracted update is missing the expected executable" in output
+assert output.index("QFileInfo( stagedExecutable ).isFile()") < output.index("promoteUpdateDirectoryContents")
