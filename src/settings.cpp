@@ -1327,27 +1327,29 @@ QString settings::windowsDimensions( const QString& window )
 
 QString settings::localizationLanguage()
 {
-	auto path = this->localizationLanguagePath() ;
+	const auto path = this->localizationLanguagePath() ;
+	const auto available = [ & ]( const QString& language ){
+		return language == "en_US" || QFile::exists( path + "/" + language + ".qm" ) ;
+	} ;
 
-	auto name = QLocale::system().name() ;
-
-	if( name.isEmpty() ){
-
-		return this->getOption( "Language",QString( "en_US" ) ) ;
-
-	}else if( QFile::exists( path + "/" + name + ".qm" ) ){
-
-		return this->getOption( "Language",name ) ;
-	}else{
-		auto m = util::split( name,"_" ).at( 0 ) ;
-
-		if( QFile::exists( path + "/" + m + ".qm" ) ){
-
-			return this->getOption( "Language",m ) ;
-		}else{
-			return this->getOption( "Language",QString( "en_US" ) ) ;
-		}
+	const auto persisted = this->getOption( "Language",QString() ) ;
+	if( !persisted.isEmpty() && available( persisted ) ){
+		return persisted ;
 	}
+
+	auto fallback = QLocale::system().name() ;
+	if( fallback.isEmpty() || !available( fallback ) ){
+		const auto parts = util::split( fallback,"_" ) ;
+		fallback = parts.isEmpty() ? QString() : parts.at( 0 ) ;
+	}
+	if( fallback.isEmpty() || !available( fallback ) ){
+		fallback = "en_US" ;
+	}
+
+	// Keep persisted settings aligned with the language that can actually be
+	// loaded, so Configure never advertises a missing translation as active.
+	m_settings.setValue( "Language",fallback ) ;
+	return fallback ;
 }
 
 bool settings::portableVersion()
