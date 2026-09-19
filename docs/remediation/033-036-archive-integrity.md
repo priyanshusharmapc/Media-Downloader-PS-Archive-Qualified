@@ -90,3 +90,11 @@ The restored toolchain additionally required its own `CMAKE_PREFIX_PATH`, librar
 | process-before-test.log | f4237a4922465dfea615920436083888c7c8599ca1881afcbd82b706330a0bda |
 | combined-ctest.log | a1f21df62a30474c6a00d07fbf1e81300c7064007087d3e9b49e3bd433c103ff |
 | sanitizer-full-ctest.log | 2db918452cad8912cddc2303169ce1cc3a5523f191cf37bf5c622ece82f58dcf |
+
+## GitHub publication and bug-status checkpoint
+
+The source fixes, executable regressions and this documentation are published in PR #203 on branch `fix/audit2-033-history-event-contract` against `audit2-remediation`.
+
+Current remediation state for MDPS-AUDIT2-033 through MDPS-AUDIT2-036 is `PR-OPEN`. Source implementation is complete and the documented local regression suites pass, but the findings are not marked `FIXED` or `INTEGRATED` because exact-head Linux and Windows qualification has not executed. GitHub Actions run 35472112314 was attempted twice; both platform jobs terminated before any workflow step with no assigned runner.
+
+The same status is mirrored in `AUDIT-FIX-LIST.md`, appended to issue #2 without modifying frozen discovery records, and recorded in issue #3 as the living coordination state. Any later status transition must reference the exact qualifying commit and workflow evidence.
