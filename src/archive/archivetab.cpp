@@ -429,14 +429,23 @@ void ArchiveTab::addPlaylist()
     QString error;if(!ensureReady(&error)){QMessageBox::critical(m_page,tr("Archive"),error);return;}
     bool ok=false;const auto url=QInputDialog::getText(m_page,tr("Add Playlist"),tr("YouTube playlist URL:"),QLineEdit::Normal,{},&ok).trimmed();if(!ok||url.isEmpty())return;
     const auto key=archive::sourceKeyFromUrl(url);if(key.isEmpty()){QMessageBox::warning(m_page,tr("Add Playlist"),tr("Enter a valid YouTube playlist URL containing a list ID."));return;}
+    // Persist one provider-canonical URL shape. Equivalent watch/playlist URLs,
+    // extra query parameters and pasted whitespace must not become distinct
+    // durable source strings for the same playlist identity.
+    const auto canonicalUrl=QStringLiteral("https://www.youtube.com/playlist?list=")+key;
     const auto title=QInputDialog::getText(m_page,tr("Add Playlist"),tr("Display name:"),QLineEdit::Normal,key,&ok).trimmed();if(!ok)return;
     if(!archive::ui::rootAvailable(m_root)){refreshAll();return;}
     archive::Paths paths(m_root);archive::SyncLock lock(paths);if(!lock.tryLock()){QMessageBox::warning(m_page,tr("Archive"),lock.errorString());return;}
     archive::Store store(paths);auto sources=store.loadSources(&error);if(!error.isEmpty()){QMessageBox::critical(m_page,tr("Archive"),error);return;}
-    for(const auto& source:sources)if(source.key==key){QMessageBox::information(m_page,tr("Add Playlist"),tr("This playlist is already registered."));return;}
-    archive::Source source;source.key=key;source.url=url;source.title=title.isEmpty()?key:title;source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);sources.append(source);
+    for(const auto& source:sources)if(source.key==key){
+        // Duplicate admission is not a new source. Focus the existing record so
+        // the rejection is actionable rather than silently leaving selection elsewhere.
+        for(int i=0;i<m_sources->count();++i)if(m_sources->item(i)->data(Qt::UserRole).toString()==key){m_sources->setCurrentRow(i);break;}
+        QMessageBox::information(m_page,tr("Add Playlist"),tr("This playlist is already registered."));return;
+    }
+    archive::Source source;source.key=key;source.url=canonicalUrl;source.title=title.isEmpty()?key:title;source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);sources.append(source);
     if(!store.saveSources(sources,&error)){QMessageBox::critical(m_page,tr("Add Playlist"),error);return;}
-    archive::ActivityLogger logger(paths);logger.event("INFO","source","playlist_added",{{"source_key",key},{"url",url},{"title",source.title}});
+    archive::ActivityLogger logger(paths);logger.event("INFO","source","playlist_added",{{"source_key",key},{"url",canonicalUrl},{"title",source.title}});
     lock.unlock();refreshAll();for(int i=0;i<m_sources->count();++i)if(m_sources->item(i)->data(Qt::UserRole).toString()==key){m_sources->setCurrentRow(i);break;}
 }
 void ArchiveTab::removePlaylist()
