@@ -202,7 +202,7 @@ void tabManager::mainThreadClipboardHandler()
 
 		auto m = e->text() ;
 
-		if( m.startsWith( "http" ) || m.startsWith( "yt-dlp " ) ){
+		if( utility::isHttpUrl( m ) || m.startsWith( "yt-dlp " ) ){
 
 			m_batchdownloader.clipboardData( m,true ) ;
 		}
@@ -252,7 +252,7 @@ void tabManager::bgThreadClipboardHandler()
 		{
 			if( m_timer.notTimedOut() ){
 
-				if( e.startsWith( "http" ) || e.startsWith( "yt-dlp " ) ){
+				if( utility::isHttpUrl( e ) || e.startsWith( "yt-dlp " ) ){
 
 					m_parent.m_batchdownloader.clipboardData( e,true ) ;
 				}
