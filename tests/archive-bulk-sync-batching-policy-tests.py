@@ -24,3 +24,9 @@ update=src[src.index("bool Store::updateRepresentation"):src.index("bool Store::
 assert "m_representationBatchActive" in update
 assert "m_representationBatchItems=std::move(items)" in update
 print("Bulk sync batching policy: PASS")
+
+# A batch is canonical-item scoped. Duplicate input rows must not redownload or
+# rewrite the same canonical item twice in one session.
+assert "QSet<QString> processedKeys" in sync_items
+assert "processedKeys.contains(item.key)" in sync_items
+assert "processedKeys.insert(item.key)" in sync_items
