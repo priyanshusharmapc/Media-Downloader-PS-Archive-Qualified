@@ -12,4 +12,6 @@
 - `scripts/archive-endurance.ps1`: identity-bound endurance runner.
 - `.github/workflows/archive-qt6.yml`: maintained build, test, sanitizer, package and evidence workflow.
 
-The publication copy excludes internal historical qualification logs and generated IDE metadata. The qualified implementation source remains bound to commit `4c72054465697b899ede0555e48aff8a7c91c225`.
+The publication copy excludes internal historical qualification logs and generated IDE metadata. Historical qualification identity for commit `4c72054465697b899ede0555e48aff8a7c91c225` is preserved under `history/` and is not current-candidate evidence.
+
+Current candidate identity is generated from the executing workflow and durable qualification evidence is published according to `EVIDENCE_POLICY.md`.
