@@ -1254,7 +1254,11 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
     const bool transient=isTransientText(stderrText);
     bool truncated=false;
     for(const auto& key:QStringList{"playlist_count","n_entries"}){const auto v=root.value(key);if(v.isDouble()&&v.toDouble()>entries.size())truncated=true;}
-    const bool reportedError=stderrText.contains(QRegularExpression("(?im)^\\s*(?:ERROR|WARNING):"));
+    // A generic yt-dlp WARNING is diagnostic, not proof that playlist
+    // enumeration is incomplete. Structural damage, truncation, transient
+    // failures, explicit ERROR lines and a nonzero exit remain conservative
+    // removal-confidence gates.
+    const bool reportedError=stderrText.contains(QRegularExpression("(?im)^\\s*ERROR:"));
     s.complete=!transient && !malformed && !truncated && !reportedError && exitCode==0;
     if(malformed||truncated||reportedError)s.error="Incomplete or suspect discovery output; removal inference disabled";
     if(transient) s.error="Transient discovery failure detected; removal inference disabled";
