@@ -339,7 +339,10 @@ int tableWidget::nextAvailableEntryToDownload( int row ) const
 {
 	for( ; row < m_table.rowCount() ; row++ ){
 
-		if( !this->runningOrFinishedWithSuccess( row ) ){
+		// Recursive workers may claim only entries that have never been
+		// dispatched in this queue run. Cancelled/error terminal rows stay
+		// terminal until an explicit user retry resets their state.
+		if( reportFinished::finishedStatus::notStarted( this->runningState( row ) ) ){
 
 			return row ;
 		}
