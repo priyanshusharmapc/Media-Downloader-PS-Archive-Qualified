@@ -1836,9 +1836,12 @@ void playlistdownloader::stdOut::parseYtDlpData( Logger::Data& data )
 
 				break ;
 			}else{
-				utility::MediaEntry media( {},m_engine,line.mid( position,m ) ) ;
+				// indexOf() returns an absolute marker offset. mid() needs a
+				// length relative to the current cursor, and the next cursor is
+				// the absolute marker end.
+				utility::MediaEntry media( {},m_engine,line.mid( position,m - position ) ) ;
 
-				position = position + m + jsonMarker.size() ;
+				position = m + jsonMarker.size() ;
 
 				if( media.valid() ){
 
