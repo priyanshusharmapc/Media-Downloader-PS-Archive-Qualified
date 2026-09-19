@@ -591,7 +591,8 @@ void settings::setMainWindowDimensions( QWidget * s )
 
 			s->setGeometry( { x,y,w,h } ) ;
 
-			s->setFixedSize( s->size() ) ;
+			// Restored geometry is only a starting rectangle. Do not convert it
+		// into equal minimum/maximum bounds; the main window must remain resizable.
 		}
 	}
 }
