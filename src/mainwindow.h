@@ -68,10 +68,10 @@ private:
 	static void signalHandler( int ) ;
 	static bool setUpSignal( int ) ;
 	template< typename Int,typename ... INTS >
-	static void setUpSignal( Int sig,INTS ... sigs )
+	static bool setUpSignal( Int sig,INTS ... sigs )
 	{
-		MainWindow::setUpSignal( sig ) ;
-		MainWindow::setUpSignal( sigs ... ) ;
+		const auto current = MainWindow::setUpSignal( static_cast< int >( sig ) ) ;
+		return MainWindow::setUpSignal( sigs ... ) && current ;
 	}
 	static void setUpSignals( MainWindow * ) ;
 
