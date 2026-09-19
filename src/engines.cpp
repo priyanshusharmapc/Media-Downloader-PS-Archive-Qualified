@@ -818,36 +818,53 @@ void engines::removeEngine( const QString& ee,int id )
 
 	if( engine ){
 
-		utility::removeFile( m_enginePaths.enginePath( e ) ) ;
+		// Copy every value needed after erasing the owning backend entry.
+		// result_ref only carries a raw pointer and becomes invalid immediately
+		// after removeEngineFromList().
+		const auto name = engine->name() ;
+		const auto archiveContainsFolder = engine->archiveContainsFolder() ;
+		const auto exe = QDir::fromNativeSeparators( engine->exePath().realExe() ) ;
+		const auto binPath = QDir::fromNativeSeparators( m_enginePaths.binPath() ) ;
+		const auto definitionPath = m_enginePaths.enginePath( e ) ;
 
-		if( engine->archiveContainsFolder() ){
+		// The persisted definition is the authoritative plugin-registration
+		// record. If it cannot be removed, keep the in-memory backend and its
+		// defaults untouched so the UI never claims a removal that will be
+		// reversed at the next startup.
+		const auto definitionError = utility::removeFile( definitionPath ) ;
+		if( !definitionError.isEmpty() ){
 
-			QFileInfo m( m_enginePaths.binPath( engine->name() ) ) ;
+			m_logger.add( QObject::tr( "Failed To Remove Plugin Definition: %1: %2" ).arg( definitionPath,definitionError ),id ) ;
+			return ;
+		}
 
-			if( m.exists() && m.isDir() ){
+		// Payload cleanup happens only after durable unregistration. A cleanup
+		// failure leaves an orphaned payload rather than a plugin that can
+		// silently reappear. Report every such failure for explicit maintenance.
+		if( archiveContainsFolder ){
 
-				utility::removeFolder( m.filePath() ) ;
+			QFileInfo folder( m_enginePaths.binPath( name ) ) ;
+
+			if( folder.exists() && folder.isDir() ){
+
+				const auto removeError = utility::removeFolder( folder.filePath() ) ;
+				if( !removeError.isEmpty() ){
+					m_logger.add( QObject::tr( "Plugin payload cleanup failed: %1: %2" ).arg( folder.filePath(),removeError ),id ) ;
+				}
 			}
-		}else{
-			const auto exe = QDir::fromNativeSeparators( engine->exePath().realExe() ) ;
-			const auto binPath = QDir::fromNativeSeparators( m_enginePaths.binPath() ) ;
+		}else if( engines::executableOwnedByBinRoot( exe,binPath ) ){
 
-			// Destructive cleanup is permitted only for an executable whose
-			// canonical path is a true child of the canonical application bin
-			// directory. A sibling such as "bin-tools" is never application-owned.
-			if( engines::executableOwnedByBinRoot( exe,binPath ) ){
-
-				engine->removeFiles( { exe },binPath ) ;
+			const auto status = engine->removeFiles( { exe },binPath ) ;
+			for( const auto& entry : status ){
+				m_logger.add( QObject::tr( "Plugin payload cleanup failed: %1: %2" ).arg( entry.src(),entry.err() ),id ) ;
 			}
 		}
 
-		this->removeEngineFromList( engine->name(),id ) ;
+		this->removeEngineFromList( name,id ) ;
 
 		if( m_backends.size() > 0 ){
 
-			const auto& name = engine->name() ;
-
-			auto _reset_default = [ & ]( const QString& name,settings::tabName n ){
+			auto _reset_default = [ & ]( settings::tabName n ){
 
 				if( name == m_settings.defaultEngine( n,this->defaultEngineName() ) ){
 
@@ -855,10 +872,10 @@ void engines::removeEngine( const QString& ee,int id )
 				}
 			} ;
 
-			_reset_default( name,settings::tabName::basic ) ;
-			_reset_default( name,settings::tabName::batch ) ;
-			_reset_default( name,settings::tabName::playlist ) ;
-		}		
+			_reset_default( settings::tabName::basic ) ;
+			_reset_default( settings::tabName::batch ) ;
+			_reset_default( settings::tabName::playlist ) ;
+		}
 	}
 }
 
