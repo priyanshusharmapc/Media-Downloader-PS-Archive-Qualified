@@ -1977,7 +1977,14 @@ void batchdownloader::tableItemDoubleClicked( QTableWidgetItem& item )
 
 	if( !m.isEmpty() ){
 
-		auto crow = m_table.currentRow() ;
+		const auto crow = m_listTargetRow ;
+
+		// Never retarget a chooser to the table's current selection. If the
+		// original row disappeared or now represents another URL, do nothing.
+		if( crow < 0 || crow >= m_table.rowCount() || m_table.url( crow ) != m_listTargetUrl ){
+
+			return ;
+		}
 
 		if( m_listType == batchdownloader::listType::SUBTITLES ){
 
@@ -2023,7 +2030,12 @@ void batchdownloader::batchDownloaderSet()
 
 		this->saveComments( arr,e ) ;
 	}else{
-		auto crow = m_table.currentRow() ;
+		const auto crow = m_listTargetRow ;
+
+		if( crow < 0 || crow >= m_table.rowCount() || m_table.url( crow ) != m_listTargetUrl ){
+
+			return ;
+		}
 
 		if( m_listType == batchdownloader::listType::SUBTITLES ){
 
@@ -2465,6 +2477,17 @@ void batchdownloader::showList( batchdownloader::listType listType,
 				int row )
 {
 	QStringList args ;
+
+	// The chooser is an operation on the row it was opened for. Main-table
+	// selection may change while the chooser remains visible, so retain both
+	// the row and its URL identity and fail closed if that row is later replaced.
+	if( listType == batchdownloader::listType::COMMENTS ){
+		m_listTargetRow = -1 ;
+		m_listTargetUrl.clear() ;
+	}else{
+		m_listTargetRow = row ;
+		m_listTargetUrl = row >= 0 && row < m_table.rowCount() ? m_table.url( row ) : QString() ;
+	}
 
 	auto& table = m_tableWidgetBDList.get() ;
 
