@@ -584,7 +584,17 @@ bool validateStoreGraph(const Paths& paths,const QJsonArray& sources,const QJson
 {
     QSet<QString> sourceKeys,canonicalKeys;
     for(const auto& value:sources)sourceKeys.insert(value.toObject().value("key").toString());
-    for(const auto& value:canonical)canonicalKeys.insert(value.toObject().value("key").toString());
+    for(const auto& value:canonical){
+        const auto object=value.toObject();
+        canonicalKeys.insert(object.value("key").toString());
+        const auto metadataPath=object.value("metadata_path").toString();
+        if(metadataPath.isEmpty())continue;
+        if(!detail::relativeSafe(metadataPath)||!metadataPath.startsWith("Metadata/"))
+            return detail::reject(error,"Canonical item has unsafe metadata path: "+metadataPath);
+        const auto absolute=paths.absoluteFromRelative(metadataPath);
+        if(absolute.isEmpty()||!detail::noLinks(absolute)||!QFileInfo(absolute).isDir())
+            return detail::reject(error,"Canonical item metadata directory is missing or linked: "+metadataPath);
+    }
 
     for(const auto& dir:QDir(paths.playlists()).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
         if(!detail::sourceKeySafe(dir)||!detail::noLinks(paths.sourceDir(dir)))
