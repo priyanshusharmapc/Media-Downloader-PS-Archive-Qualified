@@ -106,6 +106,11 @@ void logWindow::Show( bool s )
 {
 	m_showDownloadHistory = s ;
 
+	// This widget instance is reused across ordinary logs and Download History.
+	// Recompute mode-specific visibility on every show so a prior ordinary-log
+	// view cannot leave the history control permanently hidden.
+	m_ui->cbEnableDownloadHistory->setVisible( m_showDownloadHistory ) ;
+
 	if( m_showDownloadHistory ){
 
 		m_ui->pbShowAll->setText( tr( "Clear" ) ) ;
@@ -114,7 +119,6 @@ void logWindow::Show( bool s )
 	}else{
 		m_ui->pbShowAll->setText( tr( "Show All" ) ) ;
 
-		m_ui->cbEnableDownloadHistory->setVisible( false ) ;
 	}
 
 	auto w = m_settings.windowsDimensions( "LogWindow" ) ;
