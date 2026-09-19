@@ -472,13 +472,17 @@ QColor themes::getColor( const QString& e,const QJsonObject& obj ) const
 
 void themes::updateThemes()
 {
-	auto s = QDir( m_themePath ).entryList( QDir::Filter::Files ) ;
+	// Only JSON files can be loaded by themeFullPath()/set(). Do not advertise
+	// unrelated editor backups, images or notes as selectable themes.
+	auto s = QDir( m_themePath ).entryList( { "*.json" },QDir::Filter::Files ) ;
 
 	s.removeOne( m_defaultDarkTheme + ".json" ) ;
 
 	for( auto& it : s ){
 
-		it.replace( ".json","" ) ;
+		// The name filter guarantees a terminal suffix, so remove only that
+		// suffix instead of replacing arbitrary ".json" text in the basename.
+		it.chop( 5 ) ;
 
 		m_strings.emplace_back( it,it ) ;
 	}
