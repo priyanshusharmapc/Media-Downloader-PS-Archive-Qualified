@@ -48,6 +48,7 @@
 #include <QNetworkProxyFactory>
 #include <QDir>
 #include <QUrl>
+#include <QSaveFile>
 
 #include <cstring>
 
@@ -774,33 +775,21 @@ QString engines::addEngine( const QByteArray& data,const QString& extensionFileN
 		if( !name.isEmpty() ){
 
 			auto e = m_enginePaths.enginePath( extensionFileName ) ;
+			QSaveFile f( e ) ;
 
-			QFile f( e ) ;
+			if( f.open( QIODevice::WriteOnly ) ){
 
-			if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
+				if( f.write( data ) == data.size() && f.commit() ){
 
-				f.write( data ) ;
+					if( this->addEngine( extensionFileName,id ) ){
 
-				f.flush() ;
-
-				f.close() ;
-
-				for( int i = 0 ; i < 5 ; i++ ){
-
-					if( QFile::exists( e ) ){
-
-						break ;
-					}else{
-						utility::waitForOneSecond() ;
+						return name ;
 					}
-				}
 
-				if( this->addEngine( extensionFileName,id ) ){
-
-					return name ;
-				}else{
 					return {} ;
 				}
+
+				f.cancelWriting() ;
 			}
 		}
 	}
