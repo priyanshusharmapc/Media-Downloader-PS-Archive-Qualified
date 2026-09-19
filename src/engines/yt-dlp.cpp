@@ -1792,9 +1792,8 @@ const QByteArray& yt_dlp::yt_dlplFilter::parseOutput( const Logger::Data::QByteA
 
 			return m_tmp ;
 		}
-		if( !m_mergeSeen && e.contains( " Merging formats into \"" ) ){
+		if( e.contains( " Merging formats into \"" ) ){
 
-			m_mergeSeen = true ;
 
 			auto m = e.mid( e.indexOf( '"' ) + 1 ) ;
 			auto s = m.lastIndexOf( '"' ) ;
