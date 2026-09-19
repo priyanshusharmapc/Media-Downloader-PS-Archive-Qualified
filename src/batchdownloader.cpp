@@ -1323,7 +1323,7 @@ void batchdownloader::showComments( const QByteArray& e )
 
 		if( f.isEmpty() ){
 
-			m_commentsFileName = hh + "/MediaDowloaderComments.json" ;
+			m_commentsFileName = hh + "/MediaDownloaderComments.json" ;
 		}else{
 			this->normalizeFilePath( f ) ;
 
