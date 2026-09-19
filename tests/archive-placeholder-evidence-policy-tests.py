@@ -10,13 +10,15 @@ start=source.index("PlaylistDiscovery::parse")
 end=source.index("MediaVerifier::MediaVerifier",start)
 body=source[start:end]
 
-assert "hasExplicitAvailability" in body
-assert "p.providerId.isEmpty()&&rawTitle.isEmpty()&&rawUrl.isEmpty()&&!hasExplicitAvailability" in body
+assert "observedAvailability=availabilityFromEntry(e)" in body
+assert "p.providerId.isEmpty()&&rawUrl.isEmpty()&&!isUnavailable(observedAvailability)" in body
 assert "malformed=true;" in body
 assert 'p.title="[Unavailable item]"' in body
 assert "p.availability=availabilityFromEntry(e)" in body
 
-guard=body.index("p.providerId.isEmpty()&&rawTitle.isEmpty()&&rawUrl.isEmpty()&&!hasExplicitAvailability")
+guard=body.index("p.providerId.isEmpty()&&rawUrl.isEmpty()&&!isUnavailable(observedAvailability)")
 synth=body.index('p.title="[Unavailable item]"')
 assert guard < synth
 print("Discovery placeholder minimum-evidence policy: PASS")
+
+assert "p.availability=observedAvailability" in body
