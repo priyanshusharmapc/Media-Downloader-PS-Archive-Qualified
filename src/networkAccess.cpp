@@ -34,6 +34,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QUrl>
+#include <QUuid>
 
 #include <chrono>
 
@@ -48,6 +49,148 @@ static QString _sslLibraryVersionString()
 	return {} ;
 }
 #endif
+
+namespace
+{
+bool updatePathExists( const QString& path )
+{
+    const QFileInfo info( path ) ;
+    return info.exists() || info.isSymLink() ;
+}
+
+QString removeUpdatePath( const QString& path )
+{
+    if( !updatePathExists( path ) )return {} ;
+    const QFileInfo info( path ) ;
+    return info.isDir() && !info.isSymLink() ? utility::removeFolder( path ) : utility::removeFile( path ) ;
+}
+
+QString uniqueUpdateSibling( const QString& path,const QString& tag )
+{
+    return path + "." + tag + "-" + QUuid::createUuid().toString( QUuid::WithoutBraces ) ;
+}
+
+QString restoreUpdateBackup( const QString& backup,const QString& destination )
+{
+    if( backup.isEmpty() || !updatePathExists( backup ) )return {} ;
+    const auto cleanup = removeUpdatePath( destination ) ;
+    if( !cleanup.isEmpty() )return QObject::tr( "Failed to remove incomplete update at %1: %2" ).arg( destination,cleanup ) ;
+    const auto restore = utility::rename( backup,destination ) ;
+    if( !restore.isEmpty() )return QObject::tr( "Failed to restore previous engine at %1: %2" ).arg( destination,restore ) ;
+    return {} ;
+}
+
+// Promote one already-validated staged path. The live destination is moved to
+// a sibling backup only at the final commit boundary. If promotion fails, the
+// previous payload is restored before the attempt is reported as failed.
+QString promoteUpdatePath( const QString& staged,const QString& destination,QString* cleanupWarning = nullptr )
+{
+    if( cleanupWarning )cleanupWarning->clear() ;
+    if( !updatePathExists( staged ) )return QObject::tr( "Staged engine payload is missing: %1" ).arg( staged ) ;
+
+    QString backup ;
+    if( updatePathExists( destination ) ){
+        backup = uniqueUpdateSibling( destination,"mdps-update-backup" ) ;
+        const auto save = utility::rename( destination,backup ) ;
+        if( !save.isEmpty() )return QObject::tr( "Failed to preserve previous engine before update: %1" ).arg( save ) ;
+    }
+
+    const auto promote = utility::rename( staged,destination ) ;
+    if( !promote.isEmpty() ){
+        const auto rollback = restoreUpdateBackup( backup,destination ) ;
+        return rollback.isEmpty()
+            ? QObject::tr( "Failed to promote staged engine: %1" ).arg( promote )
+            : QObject::tr( "Failed to promote staged engine: %1; rollback also failed: %2" ).arg( promote,rollback ) ;
+    }
+
+    if( !backup.isEmpty() ){
+        const auto cleanup = removeUpdatePath( backup ) ;
+        if( cleanupWarning && !cleanup.isEmpty() )*cleanupWarning = QObject::tr( "Updated engine is active but old backup cleanup failed: %1" ).arg( cleanup ) ;
+    }
+    return {} ;
+}
+
+struct UpdateMove
+{
+    QString destination ;
+    QString backup ;
+    bool promoted = false ;
+};
+
+// Archive extraction completes in a private directory first. Top-level entries
+// are then committed as one rollback-capable batch. Existing payloads remain in
+// backup until every staged entry has been promoted successfully.
+QString promoteUpdateDirectoryContents( const QString& stageRoot,const QString& liveRoot,QString* cleanupWarning = nullptr )
+{
+    if( cleanupWarning )cleanupWarning->clear() ;
+    QDir stage( stageRoot ) ;
+    if( !stage.exists() )return QObject::tr( "Update staging directory is missing: %1" ).arg( stageRoot ) ;
+
+    const auto entries = stage.entryInfoList( QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,QDir::Name ) ;
+    if( entries.isEmpty() )return QObject::tr( "Extracted update contains no payload" ) ;
+
+    const auto backupRoot = QDir( liveRoot ).filePath( ".mdps-update-backup-" + QUuid::createUuid().toString( QUuid::WithoutBraces ) ) ;
+    QVector< UpdateMove > moves ;
+    QString failure ;
+
+    for( const auto& entry : entries ){
+        const auto source = entry.filePath() ;
+        const auto destination = QDir( liveRoot ).filePath( entry.fileName() ) ;
+        UpdateMove move ; move.destination = destination ;
+
+        if( updatePathExists( destination ) ){
+            if( !QDir().mkpath( backupRoot ) ){
+                failure = QObject::tr( "Unable to create update rollback directory: %1" ).arg( backupRoot ) ;
+                moves.append( move ) ;
+                break ;
+            }
+            move.backup = QDir( backupRoot ).filePath( entry.fileName() ) ;
+            const auto save = utility::rename( destination,move.backup ) ;
+            if( !save.isEmpty() ){
+                failure = QObject::tr( "Failed to preserve existing engine entry %1: %2" ).arg( destination,save ) ;
+                moves.append( move ) ;
+                break ;
+            }
+        }
+
+        const auto promote = utility::rename( source,destination ) ;
+        if( !promote.isEmpty() ){
+            failure = QObject::tr( "Failed to promote extracted engine entry %1: %2" ).arg( destination,promote ) ;
+            moves.append( move ) ;
+            break ;
+        }
+        move.promoted = true ;
+        moves.append( move ) ;
+    }
+
+    if( !failure.isEmpty() ){
+        QStringList rollbackErrors ;
+        for( auto it = moves.crbegin(); it != moves.crend(); ++it ){
+            if( it->promoted ){
+                const auto remove = removeUpdatePath( it->destination ) ;
+                if( !remove.isEmpty() )rollbackErrors << remove ;
+            }
+            if( !it->backup.isEmpty() && updatePathExists( it->backup ) ){
+                const auto restore = utility::rename( it->backup,it->destination ) ;
+                if( !restore.isEmpty() )rollbackErrors << restore ;
+            }
+        }
+        removeUpdatePath( backupRoot ) ;
+        if( !rollbackErrors.isEmpty() )failure += QObject::tr( "; rollback errors: %1" ).arg( rollbackErrors.join( "; " ) ) ;
+        return failure ;
+    }
+
+    const auto backupCleanup = removeUpdatePath( backupRoot ) ;
+    const auto stageCleanup = removeUpdatePath( stageRoot ) ;
+    if( cleanupWarning ){
+        QStringList warnings ;
+        if( !backupCleanup.isEmpty() )warnings << backupCleanup ;
+        if( !stageCleanup.isEmpty() )warnings << stageCleanup ;
+        *cleanupWarning = warnings.join( "; " ) ;
+    }
+    return {} ;
+}
+}
 
 networkAccess::networkAccess( const Context& ctx ) :
 	m_ctx( ctx ),
@@ -693,98 +836,83 @@ void networkAccess::finished( networkAccess::Opts opts ) const
 
 			this->post( engine.name(),mm,opts.id ) ;
 
-			QFileInfo ff( opts.exeBinPath ) ;
+            QString cleanupWarning ;
+            const auto m = promoteUpdatePath( opts.file.src(),opts.exeBinPath,&cleanupWarning ) ;
 
-			if( ff.isDir() ){
+            if( m.isEmpty() ){
 
-				auto m = utility::removeFolder( opts.exeBinPath ) ;
+                // Promotion is the commit point. A failure restores the prior
+                // destination before this update attempt is reported as bad.
+                utility::setPermissions( opts.exeBinPath ) ;
 
-				if( !m.isEmpty() ){
+                engine.updateCmdPath( m_ctx.logger(),opts.exeBinPath ) ;
 
-					this->failedToRemove( engine.name(),opts.exeBinPath,m,opts.id ) ;
-				}
-			}else{
-				auto m = utility::removeFile( opts.exeBinPath ) ;
+                if( !cleanupWarning.isEmpty() )this->post( engine.name(),cleanupWarning,opts.id ) ;
 
-				if( !m.isEmpty() ){
+                this->printVersion( opts.move(),true ) ;
+            }else{
+                this->failedToRename( engine.name(),opts.file.src(),opts.exeBinPath,m,opts.id ) ;
 
-					this->failedToRemove( engine.name(),opts.exeBinPath,m,opts.id ) ;
-				}
-			}
-
-			auto m = opts.file.rename( opts.exeBinPath ) ;
-
-			if( m.isEmpty() ){
-
-				// rename() has already moved the inode. Apply executable
-				// permissions to the installed destination, not the vanished
-				// temporary pathname retained by networkAccess::File.
-				utility::setPermissions( opts.exeBinPath ) ;
-
-				engine.updateCmdPath( m_ctx.logger(),opts.exeBinPath ) ;
-
-				this->printVersion( opts.move(),true ) ;
-			}else{
-				this->failedToRename( engine.name(),opts.file.src(),opts.exeBinPath,m,opts.id ) ;
-
-				engine.setBroken() ;
-				this->printVersion( opts.move(),true ) ;
-			}
+                engine.setBroken() ;
+                this->printVersion( opts.move(),true ) ;
+            }
 		}
 	}
 }
 
 void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
-					 const utils::qprocess::outPut& s ) const
+                                     const utils::qprocess::outPut& result ) const
 {
-	const auto& engine = opts.engine() ;
+    const auto& engine = opts.engine() ;
 
-	if( s.success() ){
+    if( !result.success() ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->failedToExtract( opts.exeArgs,result,opts.id ) ;
+        engine.setBroken() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 
-		auto err = utility::removeFile( opts.filePath ) ;
+    if( engine.archiveContainsFolder() ){
+        // Normalize a versioned top-level folder entirely inside staging. The
+        // previously working engine is still untouched at this point.
+        auto rename = engine.renameArchiveFolder( opts.filePath,opts.updateStagePath ) ;
+        if( !rename.success() ){
+            removeUpdatePath( opts.updateStagePath ) ;
+            this->failedToRename( engine.name(),rename.src(),rename.dst(),rename.err(),opts.id ) ;
+            engine.setBroken() ;
+            this->printVersion( opts.move(),true ) ;
+            return ;
+        }
+    }
 
-		if( !err.isEmpty() ){
+    QString cleanupWarning ;
+    const auto promotion = promoteUpdateDirectoryContents( opts.updateStagePath,opts.tempPath,&cleanupWarning ) ;
+    if( !promotion.isEmpty() ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->failedToRename( engine.name(),opts.updateStagePath,opts.tempPath,promotion,opts.id ) ;
+        engine.setBroken() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 
-			this->failedToRemove( engine.name(),opts.filePath,err,opts.id ) ;
+    if( !cleanupWarning.isEmpty() )this->post( engine.name(),cleanupWarning,opts.id ) ;
 
-			engine.setBroken() ;
-			this->printVersion( opts.move(),true ) ;
+    if( engine.archiveContainsFolder() ){
+        auto exe = engine.updateCmdPath( m_ctx.logger(),opts.tempPath ) ;
+        QFile file( exe ) ;
+        file.setPermissions( file.permissions() | QFileDevice::ExeOwner ) ;
+    }else{
+        QFile file( opts.exeBinPath ) ;
+        file.setPermissions( file.permissions() | QFileDevice::ExeOwner ) ;
+    }
 
-			return ;
-		}
+    // The downloaded archive is no longer required after a fully successful
+    // promotion. Cleanup failure is diagnostic and does not undo a good engine.
+    const auto cleanup = utility::removeFile( opts.filePath ) ;
+    if( !cleanup.isEmpty() )this->failedToRemove( engine.name(),opts.filePath,cleanup,opts.id ) ;
 
-		if( engine.archiveContainsFolder() ){
-
-			auto m = engine.renameArchiveFolder( opts.filePath,opts.tempPath ) ;
-
-			if( m.success() ){
-
-				auto exe = engine.updateCmdPath( m_ctx.logger(),opts.tempPath ) ;
-
-				QFile f( exe ) ;
-
-				f.setPermissions( f.permissions() | QFileDevice::ExeOwner ) ;
-			}else{
-				this->failedToRename( engine.name(),m.src(),m.dst(),m.err(),opts.id ) ;
-
-				engine.setBroken() ;
-				this->printVersion( opts.move(),true ) ;
-
-				return ;
-			}
-		}else{
-			QFile f( opts.exeBinPath ) ;
-
-			f.setPermissions( f.permissions() | QFileDevice::ExeOwner ) ;
-		}
-
-		this->printVersion( opts.move(),true ) ;
-	}else{		
-		this->failedToExtract( opts.exeArgs,s,opts.id ) ;
-
-		engine.setBroken() ;
-		this->printVersion( opts.move(),true ) ;
-	}
+    this->printVersion( opts.move(),true ) ;
 }
 
 void networkAccess::postStartDownloading( const QString& engineName,int id ) const
@@ -830,32 +958,22 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 
 	this->post( engine.name(),mm,opts.id ) ;
 
-	if( engine.archiveContainsFolder() ){
-
-		auto m = engine.deleteEngineBinFolder( opts.tempPath ) ;
-
-		if( !m.isEmpty() ){
-
-			m = QObject::tr( "Trouble Ahead, Failed To Delete Folder: %1" ).arg( m ) ;
-
-			this->post( engine.name(),m,opts.id ) ;
-		}
-	}else{
-		auto m = engine.removeFiles( { opts.exeBinPath },QFileInfo( opts.exeBinPath ).absolutePath() ) ;
-
-		if( m.size() ){
-
-			this->failedToRemove( engine.name(),m,opts.id ) ;
-		}
-	}
-
+    // Materialize the complete archive away from the live engine tree. No
+    // existing executable or folder is removed before extraction succeeds.
+    opts.updateStagePath = QDir( opts.tempPath ).filePath( ".mdps-update-stage-" + QUuid::createUuid().toString( QUuid::WithoutBraces ) ) ;
+    if( !QDir().mkpath( opts.updateStagePath ) ){
+        this->post( engine.name(),QObject::tr( "Failed to create engine update staging directory: %1" ).arg( opts.updateStagePath ),opts.id ) ;
+        engine.setBroken() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 	QStringList extractorArgs ;
 	QString extractorExe ;
 
 	if( utility::platformIsWindows() ){
 
 		extractorExe = m_ctx.Engines().findExecutable( "bsdtar.exe" ) ;
-		extractorArgs = QStringList{ "-x","-f",opts.filePath,"-C",opts.tempPath } ;
+		extractorArgs = QStringList{ "-x","-f",opts.filePath,"-C",opts.updateStagePath } ;
 	}else{
 		extractorExe = m_ctx.Engines().findExecutable( "bsdtar" ) ;
 
@@ -865,10 +983,10 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 
 			if( !extractorExe.isEmpty() ){
 
-				extractorArgs = QStringList{ opts.filePath,"-d",opts.tempPath } ;
+				extractorArgs = QStringList{ opts.filePath,"-d",opts.updateStagePath } ;
 			}
 		}else{
-			extractorArgs = QStringList{ "-x","-f",opts.filePath,"-C",opts.tempPath } ;
+			extractorArgs = QStringList{ "-x","-f",opts.filePath,"-C",opts.updateStagePath } ;
 		}
 	}
 
@@ -888,6 +1006,7 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 
 		this->post( engine.name(),m + ": " + mm,opts.id ) ;
 
+        removeUpdatePath( opts.updateStagePath ) ;
 		engine.setBroken() ;
 		this->printVersion( opts.move(),true ) ;
 	}else{
