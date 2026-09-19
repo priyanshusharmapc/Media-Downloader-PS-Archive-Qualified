@@ -392,7 +392,9 @@ void ArchiveTab::refreshActivity()
     // prefix of the newest file. Reverse only once for chronological display.
     for(const auto& day:days){
         QDir dd(d.filePath(day));
-        const auto files=dd.entryList(QDir::Files,QDir::Time);
+        // Session filenames embed creation time (session-yyyyMMdd-HHmmsszzz-pid).
+        // Use that durable chronology instead of mutable filesystem mtimes.
+        const auto files=dd.entryList(QDir::Files,QDir::Name|QDir::Reversed);
         for(const auto& f:files){
             const auto fileLines=readText(dd.filePath(f)).split('\n');
             for(int i=fileLines.size()-1;i>=0&&lines.size()<200;--i){
