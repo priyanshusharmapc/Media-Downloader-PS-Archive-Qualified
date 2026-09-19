@@ -1321,6 +1321,57 @@ ProcessResult MediaExecutor::run(const QString& program,const QStringList& args,
     return r;
 }
 
+bool MediaExecutor::mediaBindingValid(const QString& relativePath,const QString& providerId,const QString& kind) const
+{
+    if(!detail::videoIdSafe(providerId)||!m_store.paths().isSafeRelative(relativePath))return false;
+    const auto key=detail::digest(relativePath.toUtf8());
+    const auto bindingPath=QDir(m_store.paths().archiveState()).filePath("MediaBindings/"+key+".json");
+    if(!QFileInfo::exists(bindingPath)||!detail::noLinks(bindingPath))return false;
+    QByteArray bytes;QString error;
+    if(!detail::readBytes(bindingPath,&bytes,&error))return false;
+    const auto doc=QJsonDocument::fromJson(bytes);
+    if(!doc.isObject())return false;
+    const auto o=doc.object();
+    if(o.value("schema_version").toInt()!=1||
+       o.value("provider").toString()!="youtube"||
+       o.value("provider_id").toString()!=providerId||
+       o.value("kind").toString()!=kind||
+       o.value("path").toString()!=relativePath)return false;
+    const auto absolute=m_store.paths().absoluteFromRelative(relativePath);
+    const auto expected=o.value("sha256").toString();
+    return !absolute.isEmpty()&&!expected.isEmpty()&&detail::fileDigest(absolute,&error)==expected;
+}
+
+bool MediaExecutor::writeMediaBinding(const QString& relativePath,const CanonicalItem& item,const QString& kind,QString* error) const
+{
+    if(!detail::videoIdSafe(item.providerId)||!m_store.paths().isSafeRelative(relativePath))
+        return detail::reject(error,"Cannot bind unsafe media identity");
+    const auto absolute=m_store.paths().absoluteFromRelative(relativePath);
+    const auto hash=detail::fileDigest(absolute,error);if(hash.isEmpty())return false;
+    const QJsonObject binding{{"schema_version",1},{"provider","youtube"},{"provider_id",item.providerId},
+        {"item_key",item.key},{"kind",kind},{"path",relativePath},{"sha256",hash},{"bound_at",nowIso()}};
+    const auto key=detail::digest(relativePath.toUtf8());
+    const auto target=QDir(m_store.paths().archiveState()).filePath("MediaBindings/"+key+".json");
+    return atomicWrite(target,QJsonDocument(binding).toJson(QJsonDocument::Indented),error);
+}
+
+QString MediaExecutor::findAttemptById(const QString& relativeDir,const QString& id,const QString& attempt,const QStringList& extensions) const
+{
+    if(!detail::videoIdSafe(id)||attempt.isEmpty())return {};
+    QDirIterator it(QDir(m_config.archiveRoot).filePath(relativeDir),QDir::Files,QDirIterator::Subdirectories);
+    while(it.hasNext()){
+        const auto p=it.next();const QFileInfo fi(p);
+        if(!fi.fileName().contains("["+id+"]")||!fi.fileName().contains("["+attempt+"]"))continue;
+        if(!extensions.isEmpty()&&!extensions.contains(fi.suffix().toLower()))continue;
+        const auto rel=m_store.paths().relativeToRoot(p);
+        // The unique attempt marker establishes which completed child invocation
+        // produced this path. Content verification belongs to the caller so that
+        // valid-but-noncanonical media can still reach the normalization path.
+        if(m_store.paths().isSafeRelative(rel))return rel;
+    }
+    return {};
+}
+
 QString MediaExecutor::findExistingById(const QString& relativeDir,const QString& id,const QStringList& extensions) const
 {
     if(!detail::videoIdSafe(id))return {};
