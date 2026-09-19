@@ -1,0 +1,76 @@
+name: Audit2 verified patch transport
+
+on:
+  push:
+    branches: ['work/audit2-transfer-20260919']
+    paths: ['.audit2-patches/request.json']
+
+permissions:
+  contents: write
+
+jobs:
+  transfer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply source patch and verify exact local tree and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re, subprocess
+          source = pathlib.Path.cwd()
+          def git(*args, cwd=source, data=None):
+              return subprocess.check_output(['git', *args], cwd=cwd, input=data, text=True).strip()
+          assert os.environ['GITHUB_REPOSITORY'] == 'priyanshusharmapc/Media-Downloader-PS-Archive-Qualified'
+          assert os.environ['GITHUB_REPOSITORY_ID'] == '1371730232'
+          request = json.loads(pathlib.Path('.audit2-patches/request.json').read_text())
+          assert request['repository_id'] == 1371730232
+          for key in ('base', 'head', 'tree'):
+              assert re.fullmatch('[0-9a-f]{40}', request[key]), key
+          assert re.fullmatch('fix/audit2-[a-z0-9-]+', request['branch'])
+          assert re.fullmatch('[a-z0-9.-]+[.]patch', request['patch'])
+          assert re.fullmatch('[0-9a-f]{64}', request['sha256'])
+          patch = source / '.audit2-patches' / request['patch']
+          assert hashlib.sha256(patch.read_bytes()).hexdigest() == request['sha256']
+          git('fetch', 'origin', 'audit2-remediation')
+          assert git('rev-parse', 'FETCH_HEAD') == request['base'], 'Integration advanced; rebase locally'
+          git('merge-base', '--is-ancestor', 'b53457008af9af7716e4745bdd2812458e95766f', request['base'])
+          work = pathlib.Path('/tmp/verified-patch-work')
+          git('worktree', 'add', '--detach', str(work), request['base'])
+          git('apply', '--check', '--index', str(patch), cwd=work)
+          git('apply', '--index', str(patch), cwd=work)
+          assert git('write-tree', cwd=work) == request['tree'], 'Source tree mismatch'
+          # Import the exact credential-free local commit object. Neither a
+          # patch mismatch nor a different author/message can pass the digest.
+          head = git('hash-object', '-t', 'commit', '-w', '--stdin', data=request['commit_text'])
+          assert head == request['head'], 'Commit identity mismatch'
+          assert git('rev-parse', head + '^{tree}') == request['tree']
+          assert git('rev-parse', head + '^') == request['base']
+          git('merge-base', '--is-ancestor', request['base'], head)
+          # Stage objects on a separate branch. Only the authenticated
+          # connector advances the real fix branch and requests product CI.
+          staging = 'work/audit2-objects-' + head[:12]
+          git('push', 'origin', head + ':refs/heads/' + staging)
+          git('update-ref', 'refs/heads/' + staging, head)
+          out = pathlib.Path('/tmp/patch-result'); out.mkdir()
+          (out / 'identity.json').write_text(json.dumps(request, indent=2))
+          git('bundle', 'create', str(out / 'repository.bundle'), '--all')
+          with (out / 'SHA256SUMS').open('w') as sums:
+              for path in sorted(out.iterdir()):
+                  if path.name != 'SHA256SUMS':
+                      sums.write(hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n')
+          print('Verified source tree:', request['tree'])
+          print('Verified local commit:', head)
+          print('Object staging branch:', staging)
+          print('No main, baseline, integration, or fix ref was modified.')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: audit2-patch-state-${{ github.run_id }}
+          path: /tmp/patch-result
+          retention-days: 7
+          if-no-files-found: error
