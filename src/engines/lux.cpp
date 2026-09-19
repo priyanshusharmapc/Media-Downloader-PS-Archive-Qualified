@@ -18,6 +18,7 @@
  */
 
 #include "lux.h"
+#include "json_media_size.hpp"
 #include "../utility.h"
 #include "../utils/threads.hpp"
 
@@ -165,7 +166,7 @@ std::vector<engines::engine::baseEngine::mediaInfo> lux::mediaProperties( Logger
 			}
 
 			auto id        = obj.value( "id" ).toString() ;
-			auto sizeRaw   = obj.value( "size" ).toInt() ;
+			const qint64 sizeRaw = engineJson::nonNegativeByteCount( obj.value( "size" ) ) ;
 			auto size      = locale.formattedDataSize( sizeRaw ) ;
 			auto notes     = m.join( " " ) ;
 			auto extension = obj.value( "ext" ).toString() ;

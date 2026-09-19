@@ -18,6 +18,7 @@
  */
 
 #include "you-get.h"
+#include "json_media_size.hpp"
 #include "../settings.h"
 #include "../util.hpp"
 #include "../utility.h"
@@ -114,7 +115,7 @@ std::vector<engines::engine::baseEngine::mediaInfo> you_get::mediaProperties( Lo
 			auto a  = oo.value( "itag" ).toString() ;
 			auto b  = oo.value( "container" ).toString() ;
 			auto c  = oo.value( "quality" ).toString().replace( " ","\n" ) ;
-			auto d  = oo.value( "size" ).toInt() ;
+			const qint64 d = engineJson::nonNegativeByteCount( oo.value( "size" ) ) ;
 			auto e  = locale.formattedDataSize( d ) ;
 			auto f  = QString::number( d ) ;
 			auto g = "type: " + oo.value( "type" ).toString() ;
