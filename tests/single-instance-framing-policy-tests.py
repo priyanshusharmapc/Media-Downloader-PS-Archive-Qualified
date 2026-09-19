@@ -16,7 +16,7 @@ assert "m_mainApp->hasEvent( s->readAll() )" not in body
 print("Single-instance stream framing policy: PASS")
 
 # Stream framing is bounded as well as complete.
-assert "const qsizetype maxEventBytes = 1024 * 1024" in body
+assert "const qint64 maxEventBytes = 1024 * 1024" in body
 assert "data->size() + chunk.size() > maxEventBytes" in body
 assert "s->abort()" in body
 assert "if( !*overflow && !data->isEmpty() )" in body
