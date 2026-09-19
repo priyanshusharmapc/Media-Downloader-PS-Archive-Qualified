@@ -708,7 +708,10 @@ void networkAccess::finished( networkAccess::Opts opts ) const
 
 			if( m.isEmpty() ){
 
-				utility::setPermissions( opts.file.src() ) ;
+				// rename() has already moved the inode. Apply executable
+				// permissions to the installed destination, not the vanished
+				// temporary pathname retained by networkAccess::File.
+				utility::setPermissions( opts.exeBinPath ) ;
 
 				engine.updateCmdPath( m_ctx.logger(),opts.exeBinPath ) ;
 
