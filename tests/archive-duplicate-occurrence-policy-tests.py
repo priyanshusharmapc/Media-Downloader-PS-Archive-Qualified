@@ -16,7 +16,11 @@ assert "positionMatches.size()==1" in body
 assert "positionMatches.isEmpty()&&candidates.size()==1" in body
 assert "p.entryKey=prior[occurrencePrior].entryKey" in body
 assert "matchedPrior.insert(occurrencePrior)" in body
+assert "QSet<QString> knownEntryKeys" in body
+assert "knownEntryKeys.insert(prior[i].entryKey)" in body
 assert 'p.entryKey=p.itemKey+"#"+QString::number(++nextOccurrence[p.itemKey])' in body
+assert "while(knownEntryKeys.contains(p.entryKey))" in body
+assert "knownEntryKeys.insert(p.entryKey)" in body
 assert "observedOccurrences[p.itemKey]" not in body
 
 print("Duplicate occurrence conservative matching policy: PASS")
