@@ -18,14 +18,16 @@ body=source[start:end]
 # 181: display translation is not the filter identity.
 assert "m_filter->currentData().toString()" in body
 assert "m_filter->currentText()" not in body
+assert 'knownFilters={"all","protected","needs_sync","missing","unavailable","removed","failed","interrupted"}' in body
+assert 'if(!knownFilters.contains(filter))filter="all"' in body
 
 # Item-level durable-state filters.
 assert 'filter=="protected"' in body and 'status=="Protected"' in body
 assert 'filter=="needs_sync"' in body and 'status=="Needs Sync"' in body
-assert 'filter=="missing"' in body and 'status=="Missing"' in body
+assert 'filter=="missing"' in body and 'c.video.state=="missing"' in body and 'c.audio.state=="missing"' in body and 'status=="Missing"' in body
 assert 'filter=="unavailable"' in body and 'p.availability!="public"' in body
 assert 'filter=="removed"' in body and 'p.membership=="removed"' in body
-assert 'filter=="failed"' in body and 'status=="Failed"' in body
-assert 'filter=="interrupted"' in body and 'status=="Interrupted"' in body
+assert 'filter=="failed"' in body and 'status=="Failed"' in body and 'c.recoveryStatus=="failed"' in body
+assert 'filter=="interrupted"' in body and 'status=="Interrupted"' in body and 'c.recoveryStatus=="interrupted"' in body
 
 print("Archive stable filter identity/state policy: PASS")
