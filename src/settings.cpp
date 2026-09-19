@@ -1225,7 +1225,7 @@ void settings::runCommandOnSuccessfulDownload( const QString& s,
 
 		// Legacy/manual settings may contain only whitespace. Validate the
 		// tokenized command, not the raw QString, before indexing element 0.
-		if( args.isEmpty() ){
+		if( args.isEmpty() || args.at( 0 ).trimmed().isEmpty() ){
 			return ;
 		}
 
