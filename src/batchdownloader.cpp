@@ -674,9 +674,13 @@ void batchdownloader::retranslateUi()
 
 void batchdownloader::tabEntered()
 {
-	auto m = m_ui.cbEngineTypeBD->currentText() ;
-	auto s = m_settings.lastUsedOption( m,settings::tabName::batch ) ;
-	m_ui.lineEditBDUrlOptions->setText( s ) ;
+	if( !m_ui.lineEditBDUrlOptions->isModified() ){
+
+		auto m = m_ui.cbEngineTypeBD->currentText() ;
+		auto s = m_settings.lastUsedOption( m,settings::tabName::batch ) ;
+		m_ui.lineEditBDUrlOptions->setText( s ) ;
+	}
+
 	m_ui.lineEditBDUrl->setFocus() ;
 }
 
