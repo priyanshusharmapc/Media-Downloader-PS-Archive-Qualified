@@ -479,9 +479,10 @@ void ArchiveTab::processImports()
         postOperationProgress(tr("Recovery imports"),tr("Validating and ingesting Pending recovery packages"),0,0,0);
         archive::Paths paths(m_root);archive::Store store(paths);archive::ActivityLogger logger(paths);
         archive::RecoveryImporter importer(runtimeConfig(),store,logger);
-        QStringList failures;
-        const auto accepted=importer.ingestPending(&failures,[this]{return m_stopRequested.load();});
+        QStringList failures,warnings;
+        const auto accepted=importer.ingestPending(&failures,[this]{return m_stopRequested.load();},&warnings);
         const QJsonObject result{{"accepted",accepted},{"failure_count",failures.size()},
+                                 {"warning_count",warnings.size()},{"warnings",QJsonArray::fromStringList(warnings)},
                                  {"stopped",m_stopRequested.load()},{"failures",QJsonArray::fromStringList(failures)}};
         return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
     });
@@ -505,7 +506,7 @@ QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool do
     archive::Paths paths(m_root);archive::Store store(paths);archive::ActivityLogger logger(paths);
     archive::SyncLock lock(paths);
     if(!lock.tryLock())return "ERROR:"+lock.errorString();
-    QJsonObject result;int totalObserved=0,totalFailures=0,totalDownloaded=0;QStringList failures;
+    QJsonObject result;int totalObserved=0,totalFailures=0,totalDownloaded=0;QStringList failures,warnings;
     logger.event("INFO","application",doDownloads?"sync_session_started":"scan_session_started",{{"source_count",sources.size()}});
     int sourceIndex=0;
     for(auto& source:sources){
@@ -514,6 +515,7 @@ QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool do
         archive::PlaylistDiscovery discovery(runtimeConfig(),logger);auto snapshot=discovery.discover(source);
         postOperationProgress(tr("Reconcile"),tr("Reconciling %1 observed item(s) for %2").arg(snapshot.items.size()).arg(sourceName),sourceIndex-1,sources.size(),totalFailures);
         auto sum=store.reconcile(source,snapshot,&logger);if(!sum.committed){failures<<source.key+": "+sum.error;++totalFailures;postOperationProgress(tr("Reconcile failed"),sum.error,sourceIndex,sources.size(),totalFailures);continue;}
+        if(!sum.projectionWarning.isEmpty())warnings<<source.key+": "+sum.projectionWarning;
         totalObserved+=sum.observed;if(!snapshot.complete){++totalFailures;failures<<source.key+": "+snapshot.error;postOperationProgress(tr("Discovery incomplete"),snapshot.error,sourceIndex,sources.size(),totalFailures);continue;}
         if(!doDownloads){postOperationProgress(tr("Source complete"),tr("%1 scanned successfully").arg(sourceName),sourceIndex,sources.size(),totalFailures);continue;}
 
@@ -527,31 +529,89 @@ QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool do
             postOperationProgress(tr("Media sync + verify + commit"),tr("Processed %1/%2 for %3").arg(itemIndex).arg(eligible).arg(sourceName),itemIndex,eligible,totalFailures);
         }
         postOperationProgress(tr("Projection"),tr("Regenerating reports for %1").arg(sourceName),sourceIndex-1,sources.size(),totalFailures);
-        QString projectionError;if(!store.writeAllProjections(&projectionError)){++totalFailures;failures<<projectionError;}
+        QString projectionError;if(!store.writeAllProjections(&projectionError))
+            warnings<<source.key+": State committed, projection rebuild required: "+projectionError;
         postOperationProgress(tr("Source complete"),tr("Completed %1").arg(sourceName),sourceIndex,sources.size(),totalFailures);
     }
     postOperationProgress(tr("Finalizing"),tr("Writing final session result"),sources.size(),sources.size(),totalFailures);
-    lock.unlock();result["observed"]=totalObserved;result["completed_items"]=totalDownloaded;result["failure_count"]=totalFailures;result["stopped"]=m_stopRequested.load();result["failures"]=QJsonArray::fromStringList(failures);logger.event(totalFailures?"WARNING":"INFO","application",doDownloads?"sync_session_completed":"scan_session_completed",result);return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
+    lock.unlock();warnings.removeDuplicates();
+    result["observed"]=totalObserved;result["completed_items"]=totalDownloaded;
+    result["failure_count"]=totalFailures;result["stopped"]=m_stopRequested.load();
+    result["failures"]=QJsonArray::fromStringList(failures);
+    result["warning_count"]=warnings.size();result["warnings"]=QJsonArray::fromStringList(warnings);
+    logger.event(totalFailures||!warnings.isEmpty()?"WARNING":"INFO","application",doDownloads?"sync_session_completed":"scan_session_completed",result);
+    return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
 }
 
 void ArchiveTab::runAsync(const QString& operationName,const std::function<QString()>& fn)
 {
-    if(m_busy)return;m_operationName->setText(operationName);m_operationStage->setText(tr("Starting"));m_operationDetail->setText(tr("Preparing Archive Mode operation"));m_operationFailures->setText(tr("Failures: 0"));m_operationProgress->setRange(0,0);m_operationProgress->setFormat(tr("Working…"));setBusy(true,operationName);m_watcher=new QFutureWatcher<QString>(this);
+    if(m_busy)return;
+    m_operationName->setText(operationName);
+    m_operationStage->setText(tr("Starting"));
+    m_operationDetail->setText(tr("Preparing Archive Mode operation"));
+    m_operationFailures->setText(tr("Failures: 0"));
+    m_operationProgress->setRange(0,0);
+    m_operationProgress->setFormat(tr("Working…"));
+    setBusy(true,operationName);
+    m_watcher=new QFutureWatcher<QString>(this);
     QObject::connect(m_watcher,&QFutureWatcher<QString>::finished,this,[this,operationName]{
-        const auto result=m_watcher->result();m_watcher->deleteLater();m_watcher=nullptr;setBusy(false);
-        bool stopped=false;int failures=0;QString detail;
-        if(result.startsWith("ERROR:")){failures=1;detail=result.mid(6);m_statusLabel->setText(result);QMessageBox::warning(m_page,tr("Archive Operation"),detail);}
-        else {
-            const auto report=QJsonDocument::fromJson(result.toUtf8()).object();failures=report.value("failure_count").toInt();stopped=report.value("stopped").toBool();QStringList parts;
-            if(report.contains("observed"))parts<<tr("Observed %1").arg(report.value("observed").toInt());if(report.contains("completed_items"))parts<<tr("Completed media %1").arg(report.value("completed_items").toInt());if(report.contains("accepted"))parts<<tr("Accepted imports %1").arg(report.value("accepted").toInt());detail=parts.isEmpty()?tr("Operation finished"):parts.join(tr(" | "));
-            if(stopped)m_statusLabel->setText(tr("Stopped safely after the current item. Remaining work is not complete."));
-            else if(failures>0){m_statusLabel->setText(tr("Finished with %1 failure(s). Review Activity and retry.").arg(failures));QMessageBox box(QMessageBox::Warning,tr("Archive Operation"),m_statusLabel->text(),QMessageBox::Ok,m_page);box.setDetailedText(result);box.exec();}
-            else m_statusLabel->setText(operationName+tr(" completed successfully"));
+        // Retrieve the worker's outcome before releasing its watcher. Rendering
+        // stays on the owning UI thread, independently of filesystem refresh.
+        const auto result=m_watcher->result();
+        m_watcher->deleteLater();m_watcher=nullptr;setBusy(false);
+        bool stopped=false;
+        int failures=0,warnings=0;
+        QString detail;
+        if(result.startsWith("ERROR:")){
+            failures=1;detail=result.mid(6);
+            m_statusLabel->setText(result);
+            QMessageBox::warning(m_page,tr("Archive Operation"),detail);
+        }else{
+            const auto report=QJsonDocument::fromJson(result.toUtf8()).object();
+            failures=report.value("failure_count").toInt();
+            warnings=report.value("warning_count").toInt();
+            stopped=report.value("stopped").toBool();
+            QStringList parts;
+            if(report.contains("observed"))parts<<tr("Observed %1").arg(report.value("observed").toInt());
+            if(report.contains("completed_items"))parts<<tr("Completed media %1").arg(report.value("completed_items").toInt());
+            if(report.contains("accepted"))parts<<tr("Accepted imports %1").arg(report.value("accepted").toInt());
+            detail=parts.isEmpty()?tr("Operation finished"):parts.join(tr(" | "));
+            if(stopped){
+                m_statusLabel->setText(tr("Stopped safely after the current item. Remaining work is not complete."));
+            }else if(failures>0){
+                m_statusLabel->setText(tr("Finished with %1 failure(s). Review Activity and retry.").arg(failures));
+                QMessageBox box(QMessageBox::Warning,tr("Archive Operation"),m_statusLabel->text(),QMessageBox::Ok,m_page);
+                box.setDetailedText(result);box.exec();
+            }else if(warnings>0){
+                // Durable work succeeded. Never tell the user to retry an
+                // accepted import just because a generated report is blocked.
+                m_statusLabel->setText(tr("State committed with %1 report warning(s). Repair projections; do not resubmit accepted packages.").arg(warnings));
+                QMessageBox box(QMessageBox::Warning,tr("Archive Operation"),m_statusLabel->text(),QMessageBox::Ok,m_page);
+                box.setDetailedText(result);box.exec();
+            }else{
+                m_statusLabel->setText(operationName+tr(" completed successfully"));
+            }
+            if(warnings>0)detail+=tr(" | Report warnings %1; committed work is preserved").arg(warnings);
         }
-        m_operationName->setText(operationName);m_operationStage->setText(result.startsWith("ERROR:")?tr("ERROR"):(stopped?tr("STOPPED"):failures>0?tr("COMPLETED WITH FAILURES"):tr("COMPLETED")));m_operationDetail->setText(detail);m_operationFailures->setText(tr("Failures: %1").arg(failures));m_operationProgress->setRange(0,1);m_operationProgress->setValue(1);m_operationProgress->setFormat(stopped?tr("Stopped"):failures>0?tr("Finished with failures"):tr("Complete"));
+        // Post-commit report warnings are not admission failures. Preserve the
+        // accepted counts and this outcome even when health refresh later
+        // reports that the dirty projection still cannot be rebuilt.
+        m_operationName->setText(operationName);
+        m_operationStage->setText(result.startsWith("ERROR:")?tr("ERROR"):
+            stopped?tr("STOPPED"):failures>0?tr("COMPLETED WITH FAILURES"):
+            warnings>0?tr("COMPLETED WITH WARNINGS"):tr("COMPLETED"));
+        m_operationDetail->setText(detail);
+        m_operationFailures->setText(tr("Failures: %1 | Warnings: %2").arg(failures).arg(warnings));
+        m_operationProgress->setRange(0,1);m_operationProgress->setValue(1);
+        m_operationProgress->setFormat(stopped?tr("Stopped"):failures>0?tr("Finished with failures"):
+            warnings>0?tr("Finished with warnings"):tr("Complete"));
         refreshAll();
     });
-    m_watcher->setFuture(QtConcurrent::run([fn]{try{return fn();}catch(const std::exception& e){return QString("ERROR:")+QString::fromUtf8(e.what());}catch(...){return QString("ERROR:Unexpected archive worker exception");}}));
+    m_watcher->setFuture(QtConcurrent::run([fn]{
+        try{return fn();}
+        catch(const std::exception& e){return QString("ERROR:")+QString::fromUtf8(e.what());}
+        catch(...){return QString("ERROR:Unexpected archive worker exception");}
+    }));
 }
 
 void ArchiveTab::openPath(const QString& path){if(!path.isEmpty())QDesktopServices::openUrl(QUrl::fromLocalFile(path));}

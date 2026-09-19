@@ -86,3 +86,9 @@ membership handling for suspect responses.
 ## Archive Root selection
 
 [Archive Root configuration and recovery](ARCHIVE_ROOT_CONFIGURATION.md) documents explicit opt-in, offline-root behavior, transactional selection, and settings compatibility for audit findings 001 and 032.
+
+## Committed work and report warnings
+
+[Transaction outcomes and projection repair](remediation/025.md) documents
+accurate accepted counts, separate post-commit warnings, CLI exit codes, and
+non-destructive report-only recovery.

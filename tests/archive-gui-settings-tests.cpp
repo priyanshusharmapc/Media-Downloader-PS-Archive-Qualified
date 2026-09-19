@@ -16,6 +16,11 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTextStream>
+#include <QTimer>
+#include <QElapsedTimer>
+#include <QJsonDocument>
+#include <QMessageBox>
+#include <QThread>
 
 #include <functional>
 #include <stdexcept>
@@ -277,6 +282,58 @@ void corruptSettingsArePreserved()
     require(contents(archive::ui::settingsFile())==broken,"Corrupt settings evidence was discarded");
 }
 
+
+void acceptedRecoveryWithReportWarning()
+{
+    Fixture f;
+    archive::Paths paths(f.root);archive::Store store(paths);QString error;
+    require(store.initialize(&error),error);
+    archive::Source source;source.key="PLAUDIT";source.title="Projection outcome";
+    source.url="https://www.youtube.com/playlist?list=PLAUDIT";
+    archive::PlaylistItem item;item.itemKey="youtube:abc123DEF45";item.providerId="abc123DEF45";
+    item.title="Historical title";item.position=1;item.availability="public";
+    archive::Snapshot snapshot;snapshot.sourceKey=source.key;snapshot.complete=true;snapshot.items={item};
+    require(store.reconcile(source,snapshot).committed,"seed committed source");
+    require(archive::ui::persistRoot(f.root),"select GUI fixture root");
+    const auto package=QDir(paths.importsPending()).filePath("outcome-gui");
+    require(QDir().mkpath(package),"create pending GUI fixture");
+    const QJsonObject manifest{{"schema_version",1},{"package_id","outcome-gui"},
+        {"target",QJsonObject{{"item_key",item.itemKey},{"youtube_id",item.providerId}}},
+        {"metadata",QJsonObject{{"canonical_title","Recovered metadata"}}},
+        {"provenance",QJsonObject{{"method","old_local_backup"},{"confidence","high"},
+            {"source_url","https://www.youtube.com/watch?v=abc123DEF45"}}}};
+    put(QDir(package).filePath("manifest.json"),QJsonDocument(manifest).toJson());
+    // Block only a derived report after the authoritative fixture is healthy.
+    // The UI must still acknowledge acceptance when that later rebuild fails.
+    const auto catalog=QDir(paths.sourceDir(source.key)).filePath("catalog.csv");
+    require(QFile::remove(catalog)&&QDir().mkdir(catalog),"block report destination");
+    QTabWidget host;ArchiveTab tab(host);tab.init_done();
+    QAction* process=nullptr;
+    for(auto action:host.findChildren<QAction*>())
+        if(action->text()=="Process External Imports")process=action;
+    require(process&&process->isEnabled(),"Pending import action unavailable");
+    QTimer dismiss;
+    QObject::connect(&dismiss,&QTimer::timeout,[]{
+        for(auto widget:QApplication::topLevelWidgets())
+            if(auto box=qobject_cast<QMessageBox*>(widget))box->accept();
+    });
+    dismiss.start(10);process->trigger();
+    QElapsedTimer elapsed;elapsed.start();bool finished=false,warned=false,accepted=false;
+    while(elapsed.elapsed()<10000&&!finished){
+        QCoreApplication::processEvents();
+        for(auto label:host.findChildren<QLabel*>()){
+            if(label->text().startsWith("COMPLETED"))finished=true;
+            if(label->text()=="COMPLETED WITH WARNINGS")warned=true;
+            if(label->text().contains("Accepted imports 1"))accepted=true;
+        }
+        if(!finished)QThread::msleep(1);
+    }
+    require(finished,"GUI worker failed to complete");
+    require(!QFileInfo::exists(package)&&QFileInfo(QDir(paths.importsAccepted()).filePath("outcome-gui")).isDir(),
+        "recovery not actually accepted");
+    require(warned&&accepted,"GUI concealed durable acceptance behind a report failure");
+}
+
 }
 
 int main(int argc,char** argv)
@@ -305,6 +362,7 @@ int main(int argc,char** argv)
     run("unusable-settings-no-switch",unusableSettingsDestinationDoesNotSwitch);
     run("legacy-and-unrelated-settings",validLegacyAndUnrelatedSettingsSurvive);
     run("corrupt-settings-preserved",corruptSettingsArePreserved);
+    run("accepted-recovery-report-warning",acceptedRecoveryWithReportWarning);
     qputenv("ARCHIVE_TEST_CONFIG_ROOT",originalConfig);
     return failures?1:0;
 }
