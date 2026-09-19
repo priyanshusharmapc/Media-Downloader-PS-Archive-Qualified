@@ -17,3 +17,10 @@ assert "if( m_logger.clearDownloadHistory() )" in wbody
 assert "m_ui->plainTextEdit->clear()" in wbody
 assert "QMessageBox::warning" in wbody
 print("history deletion truthfulness policy: PASS")
+
+# Clear must participate in the same serialization boundary as history IO.
+logger=(root/"src/logger.cpp").read_text(encoding="utf-8")
+clear=logger[logger.index("bool Logger::clearDownloadHistory()"):logger.index("void Logger::reTranslateLogWindow()")]
+assert "utility::archiveData::guardHistoryFile()" in clear
+assert "utility::archiveData::unGuardHistoryFile()" in clear
+assert clear.index("guardHistoryFile()") < clear.index("QFile::remove") < clear.index("unGuardHistoryFile()")
