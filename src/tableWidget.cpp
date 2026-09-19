@@ -592,9 +592,9 @@ bool tableWidget::containsHiddenRows()
 	return false ;
 }
 
-bool tableWidget::allFinishedWithSuccess()
+bool tableWidget::allFinishedWithSuccess( int firstRow )
 {
-	for( int i = 0 ; i < m_table.rowCount() ; i++ ){
+	for( int i = firstRow ; i < m_table.rowCount() ; i++ ){
 
 		if( !reportFinished::finishedStatus::finishedWithSuccess( this->runningState( i ) ) ){
 
@@ -602,7 +602,7 @@ bool tableWidget::allFinishedWithSuccess()
 		}
 	}
 
-	return true ;
+	return m_table.rowCount() > firstRow ;
 }
 
 int tableWidget::finishWithSuccess()
