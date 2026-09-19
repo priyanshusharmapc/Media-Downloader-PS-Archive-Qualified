@@ -1339,6 +1339,7 @@ QMenu * configure::removeExtenion()
 		ac->setEnabled( false ) ;
 
 		m_ctx.TabManager().setDefaultEngines() ;
+		this->updateExtensionsRemoveList() ;
 	} ) ;
 
 	return m ;
@@ -1359,6 +1360,10 @@ void configure::addEngine( const QByteArray& d,const QString& n )
 
 		return ;
 	}
+
+	// Engine inventory changed successfully; rebuild the removal menu now so
+	// the newly installed plugin is removable without restarting Configure.
+	this->updateExtensionsRemoveList() ;
 
 	m_ctx.TabManager().basicDownloader().setAsActive() ;
 
