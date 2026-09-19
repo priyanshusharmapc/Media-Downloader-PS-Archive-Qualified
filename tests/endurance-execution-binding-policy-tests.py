@@ -19,3 +19,9 @@ assert "archiveCliSha256" in source
 assert "$executionSeal=Assert-ExecutionPackage" in source
 assert "executionSeal=$executionSeal" in source
 print("Endurance execution provenance policy: PASS")
+
+assert "[string[]]$AllowedOverlaySha256" in source
+assert "Allowed overlay is missing expected SHA-256" in source
+assert "overlay-hash-mismatch:$relative" in source
+assert "overlaySha256=$overlayHashes" in source
+assert "$AllowedOverlayPath $AllowedOverlaySha256" in source
