@@ -38,3 +38,9 @@ assert "const auto engineDefaultsSaved = m_downloadEngineDefaultOptions.save()" 
 assert "if( !m_presetOptions.save() )" in configure
 assert configure.count("QMessageBox::warning") >= 2
 print("atomic user configuration persistence policy: PASS")
+
+# A failed save must not leave the in-memory/UI model ahead of durable state.
+assert "const auto previous = m_array" in playlist
+assert "m_array = previous" in playlist
+assert "this->setVisible( true )" in playlist
+assert "visible subscription list were restored" in playlist
