@@ -28,6 +28,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QFile>
+#include <QSaveFile>
 
 batchdownloader::batchdownloader( const Context& ctx ) :
 	m_ctx( ctx ),
@@ -1749,11 +1750,22 @@ bool batchdownloader::saveSubtitles( const QString& url,const QString& ext,const
 
 			auto s = utility::networkReply( m_ctx,reply ).data() ;
 
-			QFile f( e ) ;
+			// utility::networkReply logs transport failures. Do not touch the
+			// user's chosen path unless a successful request produced bytes.
+			if( !reply.success() || s.isEmpty() ){
 
-			if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
+				return ;
+			}
 
-				f.write( s ) ;
+			QSaveFile f( e ) ;
+
+			if( f.open( QIODevice::WriteOnly ) ){
+
+				if( f.write( s ) != s.size() || !f.commit() ){
+
+					auto x = QObject::tr( "Failed To Save Subtitle To: %1" ).arg( e ) ;
+					m_ctx.logger().add( x,utility::loggerID() ) ;
+				}
 			}else{
 				auto x = QObject::tr( "Failed To Open Path For Writing: %1" ).arg( e ) ;
 				m_ctx.logger().add( x,utility::loggerID() ) ;
