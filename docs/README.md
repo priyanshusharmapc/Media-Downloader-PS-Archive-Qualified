@@ -92,3 +92,10 @@ membership handling for suspect responses.
 [Transaction outcomes and projection repair](remediation/025.md) documents
 accurate accepted counts, separate post-commit warnings, CLI exit codes, and
 non-destructive report-only recovery.
+
+
+## Qualified runtime tool boundary
+
+[Sealed runtime tool resolution](remediation/005.md) documents the default
+package-only resolver and the explicit, non-qualified development opt-in for
+system `PATH` tools.
