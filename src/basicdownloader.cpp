@@ -511,8 +511,12 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 	{
 	public:
 		events( basicdownloader& p,int id,bool l,const engines::engine& engine ) :
-			m_parent( p ),m_engine( engine ),m_id( id ),m_getList( l )
+			m_parent( p ),m_engine( engine ),m_id( id ),m_getList( l ),
+			m_downloadFolder( p.m_settings.downloadFolder() )
 		{
+			if( !m_getList && m_parent.m_hiddenTable.rowCount() > 0 ){
+				m_parent.m_hiddenTable.setDownloadFolder( 0,m_downloadFolder ) ;
+			}
 		}
 		void done( engines::ProcessExitState m,const std::vector< QByteArray >& fileNames )
 		{
@@ -602,7 +606,7 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 		}
 		QString downloadFolder()
 		{
-			return m_parent.m_settings.downloadFolder() ;
+			return m_downloadFolder ;
 		}
 		events move()
 		{
@@ -614,6 +618,7 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 		int m_id ;
 		bool m_getList ;
 		QByteArray m_listData ;
+		QString m_downloadFolder ;
 	} ;
 
 	events ev( *this,eng.id,getList,eng.engine ) ;
