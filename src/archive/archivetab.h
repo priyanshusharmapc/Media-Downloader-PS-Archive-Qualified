@@ -81,6 +81,7 @@ private:
     void runSources(const QVector<archive::Source>& sources,bool doDownloads,const QString& operationName);
     void runAsync(const QString& operationName,const std::function<QString()>& fn);
     QString operationScanOrSync(QVector<archive::Source> sources,bool doDownloads);
+    QString operationRetryFailed(const archive::Source& source);
 
     QTabWidget& m_hostTabs;
     QWidget* m_page=nullptr;
