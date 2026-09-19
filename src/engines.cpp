@@ -2893,63 +2893,55 @@ QNetworkProxy engines::proxySettings::toQNetworkProxy( const QString& u ) const
 {
 	QNetworkProxy proxy ;
 
-	if( u.isEmpty() ){
+	if( u.trimmed().isEmpty() ){
 
 		proxy.setType( QNetworkProxy::NoProxy ) ;
-
-		return proxy ;
-	}else{
-		auto url = u ;
-
-		if( url.startsWith( "socks5" ) ){
-
-			proxy.setType( QNetworkProxy::Socks5Proxy ) ;
-		}else{
-			proxy.setType( QNetworkProxy::HttpProxy ) ;
-		}
-
-		auto e = url.indexOf( "://" ) ;
-
-		if( e != -1 ){
-
-			url = url.mid( e + 3 ) ;
-		}
-
-		e = url.indexOf( '@' ) ;
-
-		if( e != -1 ){
-
-			auto credentials = url.mid( 0,e ) ;
-
-			auto ee = credentials.indexOf( ':' ) ;
-
-			if( ee != -1 ){
-
-				proxy.setUser( credentials.mid( 0,ee ) ) ;
-				proxy.setPassword( credentials.mid( ee + 1 ) ) ;
-			}
-
-			url = url.mid( e + 1 ) ;
-		}
-
-		e = url.indexOf( ':' ) ;
-
-		if( e != -1 ){
-
-			proxy.setPort( url.mid( e + 1 ).replace( "/","" ).toInt() ) ;
-
-			url = url.mid( 0,e ) ;
-		}
-
-		proxy.setHostName( url ) ;
-
-		if( proxy.hostName().isEmpty() ){
-
-			proxy.setType( QNetworkProxy::NoProxy ) ;
-		}
-
 		return proxy ;
 	}
+
+	const auto input = u.contains( "://" ) ? u : "http://" + u ;
+	const QUrl url( input,QUrl::StrictMode ) ;
+
+	if( !url.isValid() || url.host().isEmpty() ){
+
+		proxy.setType( QNetworkProxy::NoProxy ) ;
+		return proxy ;
+	}
+
+	const auto scheme = url.scheme().toLower() ;
+
+	if( scheme == "socks5" ){
+
+		proxy.setType( QNetworkProxy::Socks5Proxy ) ;
+
+	}else if( scheme == "http" || scheme == "https" ){
+
+		proxy.setType( QNetworkProxy::HttpProxy ) ;
+
+	}else{
+		proxy.setType( QNetworkProxy::NoProxy ) ;
+		return proxy ;
+	}
+
+	const auto port = url.port( -1 ) ;
+
+	if( port > 65535 ){
+
+		proxy.setType( QNetworkProxy::NoProxy ) ;
+		return proxy ;
+	}
+
+	proxy.setHostName( url.host() ) ;
+
+	if( port > 0 ){
+
+		proxy.setPort( static_cast< quint16 >( port ) ) ;
+	}
+
+	proxy.setUser( url.userName( QUrl::FullyDecoded ) ) ;
+	proxy.setPassword( url.password( QUrl::FullyDecoded ) ) ;
+
+	return proxy ;
 }
 
 void engines::proxySettings::setApplicationProxy( const QString& e ) const
@@ -2989,7 +2981,19 @@ QString engines::proxySettings::toString( const QNetworkProxy& e ) const
 
 		if( !e.hostName().isEmpty() ){
 
-			host = e.hostName() + ":" + QString::number( e.port() ) ;
+			auto hostName = e.hostName() ;
+
+			if( hostName.contains( ':' ) && !hostName.startsWith( '[' ) ){
+
+				hostName = "[" + hostName + "]" ;
+			}
+
+			host = hostName ;
+
+			if( e.port() > 0 ){
+
+				host += ":" + QString::number( e.port() ) ;
+			}
 		}
 
 		return type + credentials + host ;
