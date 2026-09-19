@@ -33,6 +33,7 @@
 #include <QJsonArray>
 #include <QDir>
 #include <QDateTime>
+#include <QUrl>
 
 #include <chrono>
 
@@ -118,14 +119,21 @@ void networkAccess::updateMediaDownloader( networkAccess::Status status,const QJ
 		}
 		bool operator()( const QJsonObject& obj )
 		{
-			auto url = obj.value( "browser_download_url" ).toString() ;
+			const auto url = obj.value( "browser_download_url" ).toString() ;
+			const QUrl parsed( url ) ;
+			const auto expectedPrefix = QString(
+				"/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified/releases/download/" ) ;
 
-			if( url.contains( "media-downloader-git" ) ){
-
-				return url.contains( m_name + ".git.zip" ) ;
-			}else{
-				return url.contains( m_name ) && url.endsWith( ".zip" ) ;
+			// Asset identity is part of the update trust boundary. A release JSON
+			// object may name arbitrary URLs, so reject anything outside this
+			// repository before a byte is staged or extracted.
+			if( parsed.scheme().compare( "https",Qt::CaseInsensitive ) != 0 ||
+			    parsed.host().compare( "github.com",Qt::CaseInsensitive ) != 0 ||
+			    !parsed.path().startsWith( expectedPrefix ) ){
+				return false ;
 			}
+
+			return url.contains( m_name ) && url.endsWith( ".zip",Qt::CaseInsensitive ) ;
 		}
 	private:
 		QString m_name ;
