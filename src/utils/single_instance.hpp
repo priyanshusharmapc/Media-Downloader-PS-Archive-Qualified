@@ -193,7 +193,7 @@ namespace utils
 					auto s = m_localServer.nextPendingConnection() ;
 					auto data = std::make_shared< QByteArray >() ;
 					auto overflow = std::make_shared< bool >( false ) ;
-					const qsizetype maxEventBytes = 1024 * 1024 ;
+					const qint64 maxEventBytes = 1024 * 1024 ;
 
 					// QLocalSocket is a byte stream. readyRead is not a message
 					// boundary, so accumulate every fragment and deliver the event
