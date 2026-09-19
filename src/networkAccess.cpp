@@ -601,11 +601,13 @@ void networkAccess::download( networkAccess::Opts opts ) const
 	}else{
 		auto m = QObject::tr( "Failed To Open Path For Writing: %1" ).arg( opts.filePath ) ;
 
-		this->post( engine.name(),m,opts.id ) ;
+		// A file-open failure belongs to this engine attempt, not to the
+		// startup scan as a whole. Feed it through the same failed-download
+		// path as transport errors so versionInfo advances to the next engine.
+		opts.reportFailed() ;
+		opts.networkError.add( m,"Err: " + utility::errorMessage() ) ;
 
-		opts.reportDone() ;
-
-		m_ctx.TabManager().enableAll() ;
+		this->finished( opts.move() ) ;
 	}
 }
 
