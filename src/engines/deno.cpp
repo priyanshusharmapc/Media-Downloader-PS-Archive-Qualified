@@ -44,6 +44,7 @@ utility::addJsonCmd::entry::args deno::entryCmd( const QString& e )
 
 		data.emplace_back( "x86","deno.exe" ) ;
 		data.emplace_back( "amd64","deno.exe" ) ;
+		data.emplace_back( "aarch64","deno.exe" ) ;
 	}else{
 		data.emplace_back( "x86","deno" ) ;
 		data.emplace_back( "aarch64","deno" ) ;
@@ -139,6 +140,10 @@ QString deno::urlFileName( const QString& )
 		if( cpu.x86_64() ){
 
 			return "deno-x86_64-pc-windows-msvc.zip" ;
+
+		}else if( cpu.aarch64() ){
+
+			return "deno-aarch64-pc-windows-msvc.zip" ;
 		}
 
 	}else if( utility::platformIsLinux() || utility::platformisFlatPak() ){
