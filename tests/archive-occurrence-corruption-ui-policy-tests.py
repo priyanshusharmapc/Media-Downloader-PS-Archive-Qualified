@@ -27,3 +27,17 @@ assert "Archive state error:" in details
 assert 'object.value("entry_key").toString()' in details
 
 print("Archive occurrence/corrupt-state UI policy: PASS")
+
+# 022: selected occurrence identity and canonical identity must remain coupled.
+assert "p.itemKey!=key" in details
+assert "entryKey.isEmpty()" in details and "key.isEmpty()" in details
+assert "Archive selection identity mismatch" in details
+
+# 023: corrupt durable state disables Archive mutations and clears stale detail
+# panes until a later successful load proves state readable again.
+assert "bool m_stateReadable=true" in hdr
+action=cpp[cpp.index("void ArchiveTab::updateActionState()"):cpp.index("void ArchiveTab::setBusy")]
+assert "m_stateReadable" in action
+assert "m_stateReadable=false" in table
+assert "m_stateReadable=true" in table
+assert "m_sourceDetails->clear()" in table
