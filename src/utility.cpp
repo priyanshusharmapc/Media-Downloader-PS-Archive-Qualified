@@ -529,12 +529,24 @@ std::vector< utility::PlayerOpts > _getMediaPlayers( REGSAM wow )
 
 			if( st == ERROR_SUCCESS ){
 
+				// RegGetValueW reports a byte count. Reject impossible or partial
+				// wchar_t payloads before converting so a malformed registry value
+				// can never make the decoder read past the initialized data.
+				if( bytes == 0 || bytes > sizeof( value ) || bytes % sizeof( wchar_t ) != 0 ){
+
+					return {} ;
+				}
+
 				auto chars = static_cast< qsizetype >( bytes / sizeof( wchar_t ) ) ;
 
-				if( chars > 0 && value[ static_cast< std::size_t >( chars - 1 ) ] == L'\0' ){
+				// REG_SZ is a string contract. Require the terminator and exclude it
+				// from the explicit QString length rather than accepting truncation.
+				if( chars <= 0 || value[ static_cast< std::size_t >( chars - 1 ) ] != L'\0' ){
 
-					chars-- ;
+					return {} ;
 				}
+
+				chars-- ;
 
 				return QString::fromWCharArray( value.data(),chars ) ;
 			}else{
