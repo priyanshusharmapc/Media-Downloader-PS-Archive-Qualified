@@ -1,4 +1,4 @@
-"""Regression policy for MDPS-AUDIT2-175 custom plugin install rollback."""
+"""Regression policy for MDPS-AUDIT2-175 custom plugin admission without persistence."""
 from __future__ import annotations
 import argparse
 from pathlib import Path
@@ -10,14 +10,18 @@ start=source.index("QString engines::addEngine( const QByteArray& data")
 end=source.index("void engines::removeEngine",start)
 body=source[start:end]
 
-assert "QFileInfo::exists( path )" in body
-assert "Plugin definition already exists" in body
-assert "QSaveFile file( path )" in body
+assert "auto candidate =" in body
+assert "candidate->exePath().isEmpty()" in body
+assert "Rejected engine definition before persistence" in body
+assert body.index("candidate->exePath().isEmpty()") < body.index("QSaveFile file( path )")
 assert "file.write( data ) != data.size()" in body
 assert "!file.commit()" in body
-assert "if( this->addEngine( extensionFileName,id ) )" in body
-assert "utility::removeFile( path )" in body
-assert body.index("utility::removeFile( path )") > body.index("if( this->addEngine( extensionFileName,id ) )")
+assert "engineAdd( extensionFileName,candidate.move(),id )" in body
+
+# The shared installation function is also the automatic definition refresh
+# path. A plugin fix must not make all same-name refreshes impossible.
+assert "Plugin definition already exists" not in body
+assert "QFileInfo::exists( path )" not in body
 assert "QIODevice::WriteOnly | QIODevice::Truncate" not in body
 
-print("Custom plugin install rollback policy: PASS")
+print("Custom plugin pre-admission preservation policy: PASS")
