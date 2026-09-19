@@ -767,51 +767,63 @@ QString engines::addEngine( const QByteArray& data,const QString& extensionFileN
 	util::Json json( data ) ;
 
 	if( json ){
-
 		auto object = json.toObject() ;
 		auto name = object.value( "Name" ).toString() ;
 
 		if( !name.isEmpty() ){
+			// Validate exactly the engine object that would be loaded after
+			// publication. Derived yt-dlp definitions are overlays on top of
+			// yt-dlp.json, so compose those in memory before touching disk.
+			QJsonObject candidateObject = object ;
+			auto composeDerived = [ this,&object ]( engines::converter converter )->QJsonObject {
+				const auto basePath = m_enginePaths.enginePath( "yt-dlp.json" ) ;
+				util::Json base( engines::file( basePath,m_logger ).readAll() ) ;
+				if( !base ){
+					return {} ;
+				}
+				return converter( base.toObject(),object ) ;
+			} ;
 
-			const auto path = m_enginePaths.enginePath( extensionFileName ) ;
+			if( extensionFileName == "yt-dlp-nightly.json" ){
+				candidateObject = composeDerived( yt_dlp::cmdNightly ) ;
+			}else if( extensionFileName == "yt-dlp-ffmpeg.json" ){
+				candidateObject = composeDerived( yt_dlp::cmdFfmpeg ) ;
+			}else if( extensionFileName == "yt-dlp-aria2c.json" ){
+				candidateObject = composeDerived( yt_dlp::cmdAria2C ) ;
+			}
 
-			// A failed custom install must never truncate a previously working
-			// definition with the same filename. Replacement needs an explicit
-			// remove/update workflow with its own rollback semantics.
-			if( QFileInfo::exists( path ) ){
+			auto candidate = candidateObject.isEmpty()
+				? engines::EnginesList::engine{}
+				: this->getEngineByPath1( candidateObject ) ;
 
-				m_logger.add( QObject::tr( "Plugin definition already exists: %1" ).arg( path ),id ) ;
+			if( !candidate.valid() || candidate->exePath().isEmpty() ){
+				m_logger.add( QObject::tr( "Rejected engine definition before persistence: %1" ).arg( extensionFileName ),id ) ;
 				return {} ;
 			}
 
-			// Publish atomically so startup can never observe a partial JSON file.
+			const auto path = m_enginePaths.enginePath( extensionFileName ) ;
 			QSaveFile file( path ) ;
 			if( !file.open( QIODevice::WriteOnly ) ){
-
 				m_logger.add( QObject::tr( "Failed To Save Plugin Definition: %1" ).arg( file.errorString() ),id ) ;
 				return {} ;
 			}
 
 			if( file.write( data ) != data.size() || !file.commit() ){
-
+				file.cancelWriting() ;
 				m_logger.add( QObject::tr( "Failed To Save Plugin Definition: %1" ).arg( file.errorString() ),id ) ;
 				return {} ;
 			}
 
-			if( this->addEngine( extensionFileName,id ) ){
-
+			// Admission cannot now discover a different definition because it
+			// consumes the exact in-memory candidate validated above.
+			if( this->engineAdd( extensionFileName,candidate.move(),id ) ){
+				m_backends.sort() ;
 				return name ;
 			}
 
-			// Admission failed after publication. This file did not exist before
-			// the attempt, so removing it is a rollback rather than destructive
-			// replacement of user state.
-			const auto rollbackError = utility::removeFile( path ) ;
-			if( !rollbackError.isEmpty() ){
-
-				m_logger.add( QObject::tr( "Failed To Roll Back Rejected Plugin Definition: %1: %2" ).arg( path,rollbackError ),id ) ;
-			}
-
+			// engineAdd has no remaining expected failure after the checks above,
+			// but keep the failure visible rather than pretending installation.
+			m_logger.add( QObject::tr( "Failed To Admit Validated Plugin Definition: %1" ).arg( extensionFileName ),id ) ;
 			return {} ;
 		}
 	}
