@@ -23,3 +23,6 @@ assert "m_detailsTabs->setTabText" in body
 assert "m_hostTabs.setTabText" in body
 
 print("Archive runtime retranslation policy: PASS")
+
+# State-dependent health strings must be regenerated under the new translator.
+assert "refreshSystemHealth();" in body
