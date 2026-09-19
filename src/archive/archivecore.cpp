@@ -1739,11 +1739,24 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* 
     for(auto it=inputHashes.begin();it!=inputHashes.end();++it)if(detail::fileDigest(it.key(),error)!=it.value())return detail::reject(error,"Submitted media changed during normalization");
     const auto manifestHash=detail::digest(manifestBytes);
     if(detail::fileDigest(QDir(absolute).filePath("manifest.json"),error)!=manifestHash)return detail::reject(error,"Submitted manifest changed during normalization");
-    // Bind every included package file, not just the manifest. Evidence remains inspectable in Accepted.
-    QJsonObject evidenceHashes;QDirIterator files(absolute,QDir::Files|QDir::Hidden,QDirIterator::Subdirectories);
-    while(files.hasNext()){const auto file=files.next();const auto rel=QDir(absolute).relativeFilePath(file);if(rel=="receipt.json")continue;
-        if(!detail::relativeSafe(rel)||!detail::noLinks(file))return detail::reject(error,"Unsafe file in recovery package");
-        const auto hash=detail::fileDigest(file,error);if(hash.isEmpty())return false;evidenceHashes[rel]=hash;
+
+    // Normalization can be long-running. Re-prove the exact submitted tree at
+    // the commit boundary so a linked/special descendant introduced after the
+    // first validation cannot ride into Accepted evidence.
+    const auto finalSnapshot=validateSnapshot(absolute,manifestBytes);
+    if(!finalSnapshot.ok)return detail::reject(error,"Recovery package changed during normalization: "+finalSnapshot.errors.join("; "));
+
+    // Bind every included regular file, while also rejecting linked or special
+    // descendants in the exact tree that is about to be accepted.
+    QJsonObject evidenceHashes;
+    QDirIterator evidence(absolute,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,QDirIterator::Subdirectories);
+    while(evidence.hasNext()){
+        const auto path=evidence.next();const auto info=evidence.fileInfo();const auto rel=QDir(absolute).relativeFilePath(path);
+        if(!detail::relativeSafe(rel)||!detail::noLinks(path)||info.isSymLink())return detail::reject(error,"Unsafe entry in recovery package: "+rel);
+        if(info.isDir())continue;
+        if(!info.isFile())return detail::reject(error,"Special entry in recovery package: "+rel);
+        if(rel=="receipt.json")continue;
+        const auto hash=detail::fileDigest(path,error);if(hash.isEmpty())return false;evidenceHashes[rel]=hash;
     }
     const QJsonObject receipt{{"schema_version",1},{"package_id",vr.packageId},{"item_key",vr.itemKey},{"result","accepted"},{"accepted_at",nowIso()},{"manifest_sha256",manifestHash},{"file_sha256",evidenceHashes},{"promoted_paths",promoted},{"transaction_id",transactionId}};
     QMap<QString,QByteArray> writes={{"State/ArchiveMode/items.json",QJsonDocument(canonical).toJson()},
