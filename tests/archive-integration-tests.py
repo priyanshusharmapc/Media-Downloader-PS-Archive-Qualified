@@ -478,6 +478,41 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertTrue(all(x['membership'] == 'active' for x in rows))
         self.assertEqual(len(self.canonical()), 1)
 
+    def test_playlist_occurrence_identity_corruption_fails_closed_and_legacy_migrates(self):
+        entry = self.plan['discovery']['entries'][0]
+        self.plan['discovery']['entries'] = [entry, dict(entry, playlist_index=2)]
+        self.write_plan(); self.scan()
+        path = self.root / 'Playlists/PLAUDIT/items.json'
+        history = self.root / 'Playlists/PLAUDIT/history.jsonl'
+
+        rows = json.loads(path.read_text())
+        rows[1]['entry_key'] = rows[0]['entry_key']
+        corrupt = json.dumps(rows)
+        path.write_text(corrupt)
+        result = self.command('scan', SOURCE_URL, expect=1)
+        self.assertIn('duplicate occurrence identity', result.stderr)
+        self.assertEqual(path.read_text(), corrupt)
+
+        # A specifically supported legacy archive has no occurrence IDs at all.
+        # It is migrated deterministically and journaled before reconciliation.
+        rows = json.loads(corrupt)
+        for row in rows:
+            row.pop('entry_key', None)
+        path.write_text(json.dumps(rows))
+        self.scan()
+        migrated = json.loads(path.read_text())
+        self.assertEqual([row['entry_key'] for row in migrated],
+                         ['youtube:' + VIDEO_ID + '#1', 'youtube:' + VIDEO_ID + '#2'])
+        self.assertIn('playlist_entry_key_migrated', history.read_text())
+
+        # Partial legacy/current mixtures are ambiguous and remain fail-closed.
+        mixed = migrated
+        mixed[0].pop('entry_key')
+        mixed_bytes = json.dumps(mixed)
+        path.write_text(mixed_bytes)
+        self.command('scan', SOURCE_URL, expect=1)
+        self.assertEqual(path.read_text(), mixed_bytes)
+
     def test_resource_upgrade_preserves_prior_contract(self):
         self.scan()
         contract = self.root / 'ARCHIVE_AGENT.md'
