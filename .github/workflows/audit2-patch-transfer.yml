@@ -31,25 +31,31 @@ jobs:
           assert request['repository_id'] == 1371730232
           for key in ('base', 'head', 'tree'):
               assert re.fullmatch('[0-9a-f]{40}', request[key]), key
+          parents = request.get('parents', [request['base']])
+          assert 1 <= len(parents) <= 2 and len(set(parents)) == len(parents)
+          assert all(re.fullmatch('[0-9a-f]{40}', parent) for parent in parents)
+          assert request['base'] in parents, 'The current integration head must be an immediate parent'
           assert re.fullmatch('fix/audit2-[a-z0-9-]+', request['branch'])
           assert re.fullmatch('[a-z0-9.-]+[.]patch', request['patch'])
           assert re.fullmatch('[0-9a-f]{64}', request['sha256'])
           patch = source / '.audit2-patches' / request['patch']
           assert hashlib.sha256(patch.read_bytes()).hexdigest() == request['sha256']
           git('fetch', 'origin', 'audit2-remediation')
-          assert git('rev-parse', 'FETCH_HEAD') == request['base'], 'Integration advanced; rebase locally'
+          assert git('rev-parse', 'FETCH_HEAD') == request['base'], 'Integration advanced; reconcile locally'
           git('merge-base', '--is-ancestor', 'b53457008af9af7716e4745bdd2812458e95766f', request['base'])
+          for parent in parents:
+              git('cat-file', '-e', parent + '^{commit}')
           work = pathlib.Path('/tmp/verified-patch-work')
           git('worktree', 'add', '--detach', str(work), request['base'])
           git('apply', '--check', '--index', str(patch), cwd=work)
           git('apply', '--index', str(patch), cwd=work)
           assert git('write-tree', cwd=work) == request['tree'], 'Source tree mismatch'
-          # Import the exact credential-free local commit object. Neither a
-          # patch mismatch nor a different author/message can pass the digest.
+          # Import the exact credential-free local commit object. Both regular
+          # fixes and semantic merge commits must preserve every stated parent.
           head = git('hash-object', '-t', 'commit', '-w', '--stdin', data=request['commit_text'])
           assert head == request['head'], 'Commit identity mismatch'
           assert git('rev-parse', head + '^{tree}') == request['tree']
-          assert git('rev-parse', head + '^') == request['base']
+          assert git('show', '-s', '--format=%P', head).split() == parents
           git('merge-base', '--is-ancestor', request['base'], head)
           # Stage objects on a separate branch. Only the authenticated
           # connector advances the real fix branch and requests product CI.
