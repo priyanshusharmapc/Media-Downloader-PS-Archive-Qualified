@@ -355,6 +355,36 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertFalse((self.root / 'State/video-archive.txt').exists())
         self.assertFalse((self.root / 'State/audio-archive.txt').exists())
 
+    def test_submitted_receipt_is_reserved_and_rejection_preserves_every_byte(self):
+        self.scan()
+        directory = self.make_package(name='reserved-receipt')
+        submitted_receipt = b'operator supplied historical receipt\\n'
+        (directory / 'receipt.json').write_bytes(submitted_receipt)
+        before = {str(p.relative_to(directory)): p.read_bytes()
+                  for p in directory.rglob('*') if p.is_file()}
+        canonical_before = (self.root / 'State/ArchiveMode/items.json').read_bytes()
+
+        result = self.command('ingest-pending', expect=1)
+        self.assertIn('receipt.json is reserved', result.stderr)
+        self.assertFalse(directory.exists())
+
+        rejected_root = self.root / 'State/ArchiveMode/Imports/Rejected'
+        moved = [p for p in rejected_root.iterdir()
+                 if p.is_dir() and p.name.startswith('reserved-receipt-')]
+        self.assertEqual(len(moved), 1)
+        after = {str(p.relative_to(moved[0])): p.read_bytes()
+                 for p in moved[0].rglob('*') if p.is_file()}
+        self.assertEqual(after, before)
+        self.assertEqual((moved[0] / 'receipt.json').read_bytes(), submitted_receipt)
+
+        receipt_path = Path(str(moved[0]) + '.receipt.json')
+        self.assertTrue(receipt_path.is_file())
+        generated = json.loads(receipt_path.read_text())
+        self.assertEqual(generated['result'], 'rejected')
+        self.assertIn('receipt.json is reserved', generated['reason'])
+        self.assertEqual((self.root / 'State/ArchiveMode/items.json').read_bytes(),
+                         canonical_before)
+
     def test_failed_second_representation_is_atomic_and_retryable(self):
         self.scan()
         directory = self.make_package(bad_audio=True)
