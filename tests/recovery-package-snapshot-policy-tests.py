@@ -28,3 +28,12 @@ assert "const auto manifestHash=detail::digest(manifestBytes)" in ingest
 assert 'fileDigest(QDir(absolute).filePath("manifest.json"),error)!=manifestHash' in ingest
 
 print("Recovery Package immutable snapshot confinement policy: PASS")
+
+# The package tree is revalidated after normalization and immediately before
+# receipt/Accepted publication, using the same exact manifest bytes.
+assert ingest.count("validateSnapshot(absolute,manifestBytes)") >= 2
+assert "Recovery package changed during normalization" in ingest
+assert "QDir::AllEntries" in ingest and "QDir::System" in ingest
+assert "evidence.fileInfo()" in ingest
+assert "info.isSymLink()" in ingest
+assert "if(!info.isFile())" in ingest
