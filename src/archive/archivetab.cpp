@@ -163,12 +163,12 @@ void ArchiveTab::buildUi()
     m_activity=new QPlainTextEdit(m_page); m_activity->setReadOnly(true); m_activity->setMaximumBlockCount(1000); m_activity->setMaximumHeight(180); m_activity->hide(); rootLayout->addWidget(m_activity);
 
     auto* menu=new QMenu(m_more);
-    auto* openRoot=menu->addAction(tr("Open Archive Folder")); auto* openPlaylist=menu->addAction(tr("Open Playlist Folder"));
+    auto* openRoot=menu->addAction(tr("Open Archive Folder")); m_openPlaylistAction=menu->addAction(tr("Open Playlist Folder"));
     menu->addSeparator(); auto* openCatalog=menu->addAction(tr("Open Catalog")); auto* openMissing=menu->addAction(tr("Open Missing Report"));
     menu->addSeparator(); auto* imports=menu->addAction(tr("Process External Imports")); auto* openLogs=menu->addAction(tr("Open Logs"));
     m_more->setMenu(menu);
     QObject::connect(openRoot,&QAction::triggered,[this]{openPath(m_root);});
-    QObject::connect(openPlaylist,&QAction::triggered,this,&ArchiveTab::openSelectedPlaylistFolder);
+    QObject::connect(m_openPlaylistAction,&QAction::triggered,this,&ArchiveTab::openSelectedPlaylistFolder);
     QObject::connect(openCatalog,&QAction::triggered,[this]{openProjection("catalog.csv");});
     QObject::connect(openMissing,&QAction::triggered,[this]{openProjection("missing.csv");});
     QObject::connect(imports,&QAction::triggered,this,&ArchiveTab::processImports);
@@ -186,7 +186,7 @@ void ArchiveTab::wireUi()
     QObject::connect(m_syncAll,&QPushButton::clicked,this,&ArchiveTab::syncAll);
     QObject::connect(m_retry,&QPushButton::clicked,this,&ArchiveTab::retryFailed);
     QObject::connect(m_stop,&QPushButton::clicked,this,&ArchiveTab::stopAfterCurrent);
-    QObject::connect(m_sources,&QListWidget::currentRowChanged,[this]{refreshTable();refreshDetails();});
+    QObject::connect(m_sources,&QListWidget::currentRowChanged,[this]{updateActionState();refreshTable();refreshDetails();});
     QObject::connect(m_table,&QTableWidget::itemSelectionChanged,this,&ArchiveTab::refreshDetails);
     QObject::connect(m_search,&QLineEdit::textChanged,this,&ArchiveTab::refreshTable);
     QObject::connect(m_filter,QOverload<int>::of(&QComboBox::currentIndexChanged),[this](int){refreshTable();});
@@ -327,7 +327,7 @@ void ArchiveTab::refreshSources()
     if(!m_ready||!archive::ui::rootAvailable(m_root))return;
     const auto current=selectedSourceKey(); archive::Store store{archive::Paths(m_root)}; const auto sources=store.loadSources(); m_sources->blockSignals(true);m_sources->clear();int selected=-1;
     for(int i=0;i<sources.size();++i){auto* item=new QListWidgetItem(sources[i].title.isEmpty()?sources[i].key:sources[i].title,m_sources);item->setData(Qt::UserRole,sources[i].key);item->setToolTip(sources[i].url);if(sources[i].key==current)selected=i;}
-    if(selected<0&&m_sources->count()>0)selected=0;if(selected>=0)m_sources->setCurrentRow(selected);m_sources->blockSignals(false);
+    if(selected<0&&m_sources->count()>0)selected=0;if(selected>=0)m_sources->setCurrentRow(selected);m_sources->blockSignals(false);updateActionState();
 }
 
 archive::Source ArchiveTab::selectedSource() const
@@ -381,8 +381,19 @@ void ArchiveTab::updateActionState()
     // re-enable archive mutations after a drive has disappeared. Browse stays
     // available for recovery when idle, including a fresh installation.
     const bool ready=m_controlsEnabled&&!m_busy&&m_ready&&archive::ui::rootAvailable(m_root);
-    const QList<QWidget*> controls={m_add,m_remove,m_scan,m_syncSelected,m_syncAll,m_retry,m_more,m_sources,m_search,m_filter};
-    for(auto* widget:controls)widget->setEnabled(ready);
+    const bool sourceSelected=ready&&!selectedSourceKey().isEmpty();
+
+    // Global controls depend only on Archive readiness. Source-scoped controls
+    // additionally require a stable source selection so normal clicks cannot
+    // silently fall through handlers that have no target.
+    const QList<QWidget*> globalControls={m_add,m_syncAll,m_more,m_sources,m_search,m_filter};
+    for(auto* widget:globalControls)widget->setEnabled(ready);
+
+    const QList<QWidget*> sourceControls={m_remove,m_scan,m_syncSelected,m_retry};
+    for(auto* widget:sourceControls)widget->setEnabled(sourceSelected);
+
+    if(m_openPlaylistAction)m_openPlaylistAction->setEnabled(sourceSelected);
+
     m_browse->setEnabled(m_controlsEnabled&&!m_busy);
     m_stop->setEnabled(m_busy);
 }
