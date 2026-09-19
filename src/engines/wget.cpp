@@ -517,6 +517,24 @@ wget::wgetFilter::~wgetFilter()
 {
 }
 
+static QByteArray wgetReportedFileName( QByteArray value )
+{
+	value = value.trimmed() ;
+
+	if( value.size() >= 2 && value.startsWith( "'" ) && value.endsWith( "'" ) ){
+		return value.mid( 1,value.size() - 2 ) ;
+	}
+
+	const QByteArray left = "‘" ;
+	const QByteArray right = "’" ;
+	if( value.size() >= left.size() + right.size() &&
+	    value.startsWith( left ) && value.endsWith( right ) ){
+		return value.mid( left.size(),value.size() - left.size() - right.size() ) ;
+	}
+
+	return value ;
+}
+
 const QByteArray& wget::wgetFilter::processWget1( const QByteArray& line,Logger::Data& e )
 {
 	if( m_title.isEmpty() || m_length.isEmpty() ){
@@ -529,11 +547,7 @@ const QByteArray& wget::wgetFilter::processWget1( const QByteArray& line,Logger:
 
 				if( it.startsWith( "Saving to: " ) ){
 
-					m_title = it.mid( 11 ) ;
-					m_title.replace( "‘","" ) ;
-					m_title.replace( "’","" ) ;
-					m_title.replace( "'","" ) ;
-					m_title.replace( "'","" ) ;
+					m_title = wgetReportedFileName( it.mid( 11 ) ) ;
 
 					break ;
 				}
@@ -710,12 +724,7 @@ void wget::wgetFilter::setwget2Title( const QByteArray& line,const QByteArray& m
 
 			if( m != -1 ){
 
-				auto s = it.mid( 7 ) ;
-
-				s.replace( "‘","" ) ;
-				s.replace( "’","" ) ;
-				s.replace( "'","" ) ;
-				s.replace( "'","" ) ;
+				auto s = wgetReportedFileName( it.mid( 7 ) ) ;
 
 				if( m_title != s ){
 
