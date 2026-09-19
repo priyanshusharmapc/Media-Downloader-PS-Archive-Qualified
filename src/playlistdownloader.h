@@ -202,11 +202,14 @@ private:
 		} ;
 		utility::vector< subscription::entry > entries() ;
 	private:
+		bool load() ;
 		bool save() ;
 		QString m_path ;
 		tableMiniWidget< int,2 >& m_table ;
 		QWidget& m_ui ;
 		QJsonArray m_array ;
+		bool m_loaded = false ;
+		bool m_storeValid = true ;
 	};
 
 	class banner
