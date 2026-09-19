@@ -196,7 +196,8 @@ namespace utils
 					#if QT_VERSION >= QT_VERSION_CHECK( 5,15,0 )
 						Q_UNUSED( timeOut )
 					#else
-						m_timer.start( timeOut ) ;
+						m_timeOut = timeOut ;
+						m_timer.start( m_timeOut ) ;
 					#endif
 				}
 				QNetworkReply * networkReply()
@@ -207,13 +208,15 @@ namespace utils
 				{
 					return &m_timer ;
 				}
-				void stopTimer()
+				void refreshTimer()
 				{
-					if( m_stopTimer ){
-
-						m_timer.stop() ;
-						m_stopTimer = false ;
-					}
+					#if QT_VERSION < QT_VERSION_CHECK( 5,15,0 )
+						// The fallback timer is an inactivity timeout. Every transfer
+						// progress event renews it until finished()/abort wins firstSeen().
+						if( m_timeOut > 0 ){
+							m_timer.start( m_timeOut ) ;
+						}
+					#endif
 				}
 				void progress( qint64 r,qint64 t )
 				{
@@ -228,7 +231,7 @@ namespace utils
 				}
 			private:
 				bool m_firstSeen = true ;
-				bool m_stopTimer = true ;
+				int m_timeOut = 0 ;
 				QTimer m_timer ;
 				Reply m_reply ;
 				Progress m_progress ;
@@ -244,7 +247,7 @@ namespace utils
 
 				QObject::connect( s,&QNetworkReply::downloadProgress,[ &h = *hdl,function = std::move( function ) ]( qint64 r,qint64 t ){
 
-					h.stopTimer() ;
+					h.refreshTimer() ;
 
 					function( h,r,t ) ;
 				} ) ;
