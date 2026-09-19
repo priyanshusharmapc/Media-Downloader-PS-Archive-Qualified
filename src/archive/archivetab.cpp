@@ -264,6 +264,11 @@ void ArchiveTab::retranslateUi()
 
     const int tabIndex=m_hostTabs.indexOf(m_page);
     if(tabIndex>=0)m_hostTabs.setTabText(tabIndex,tr("Archive"));
+
+    // Dynamic health text is also translated presentation state. Recompute it
+    // under the newly installed translator instead of leaving old-language
+    // status values beside freshly translated static labels.
+    refreshSystemHealth();
 }
 void ArchiveTab::tabEntered(){refreshAll();}
 void ArchiveTab::tabExited(){}
