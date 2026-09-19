@@ -44,6 +44,66 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
  }
 #endif
  if(name=="discovery-shape"){Source s;auto r=PlaylistDiscovery::parse(s,"{}","",0);require(!r.complete,"non-playlist JSON must not be complete");}
+
+ else if(name=="discovery-root-identity"){
+  Fixture f;const QJsonArray noEntries;
+  QVector<QJsonObject> suspect{{{"entries",noEntries}},{{"id",""},{"entries",noEntries}},
+   {{"id",1},{"entries",noEntries}},{{"id",QJsonValue::Null},{"entries",noEntries}},
+   {{"id","PLWRONG"},{"entries",noEntries}}};
+  for(const auto& object:suspect){
+   const auto snapshot=PlaylistDiscovery::parse(f.source,QJsonDocument(object).toJson(),{},0);
+   require(!snapshot.complete,"unbound provider output authorized removals");
+   require(!snapshot.error.isEmpty(),"unbound identity lacked diagnostic");
+   require(f.store.reconcile(f.source,snapshot).committed,"partial observation preservation failed");
+   const auto rows=f.store.loadPlaylistItems(f.source.key);
+   require(rows.size()==1&&rows.first().membership=="active","unbound output removed historical occurrence");
+  }
+  const QJsonArray unboundEntries{QJsonObject{{"id","xyz987QWE65"},{"title","Wrong source"}}};
+  for(auto object:QVector<QJsonObject>{{{"entries",unboundEntries}},{{"id","PLWRONG"},{"entries",unboundEntries}}}){
+   const auto snapshot=PlaylistDiscovery::parse(f.source,QJsonDocument(object).toJson(),{},0);
+   require(!snapshot.complete&&snapshot.items.isEmpty(),"unbound entries were attributed to the requested source");
+   require(f.store.reconcile(f.source,snapshot).committed,"refused observations could not preserve history");
+   require(f.store.loadPlaylistItems(f.source.key).size()==1,"wrong-source membership was inserted");
+  }
+  const auto valid=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",noEntries}}).toJson(),{},0);
+  require(valid.complete,"exact provider identity rejected a complete empty snapshot");
+  require(f.store.reconcile(f.source,valid).committed,"valid complete snapshot not committed");
+  require(f.store.loadPlaylistItems(f.source.key).first().membership=="removed","legitimate removal inference was disabled");
+ }
+ else if(name=="discovery-explicit-index"){
+  Fixture f;
+  const QVector<QJsonValue> bad{QString("1"),QJsonValue::Null,true,QJsonObject{{"index",1}},
+      QJsonArray{1},0,-1,1.5,2147483648.0};
+  for(const auto& index:bad){
+   const QJsonObject entry{{"id","xyz987QWE65"},{"title","Observed"},{"playlist_index",index}};
+   const auto snapshot=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{entry}}}).toJson(),{},0);
+   require(!snapshot.complete,"malformed explicit position was coerced into complete discovery");
+   require(f.store.reconcile(f.source,snapshot).committed,"partial malformed-index observation failed");
+   const auto rows=f.store.loadPlaylistItems(f.source.key);
+   bool kept=false;for(const auto& row:rows)if(row.itemKey==f.item.itemKey)kept=row.membership=="active";
+   require(kept,"malformed explicit position authorized removal");
+  }
+ }
+ else if(name=="discovery-position-uniqueness"){
+  Fixture f;
+  const QJsonObject first{{"id","xyz987QWE65"},{"title","One"},{"playlist_index",1}};
+  const QJsonObject second{{"id","AAA111bbb22"},{"title","Two"},{"playlist_index",1}};
+  const auto duplicate=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{first,second}}}).toJson(),{},0);
+  require(!duplicate.complete,"duplicate explicit positions authorized removals");
+  require(f.store.reconcile(f.source,duplicate).committed,"partial duplicate observation failed");
+  bool kept=false;for(const auto& row:f.store.loadPlaylistItems(f.source.key))if(row.itemKey==f.item.itemKey)kept=row.membership=="active";
+  require(kept,"contradictory positions removed history");
+  auto absentFirst=first,absentSecond=second;absentFirst.remove("playlist_index");absentSecond.remove("playlist_index");
+  const auto ordered=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{absentFirst,absentSecond}}}).toJson(),{},0);
+  require(ordered.complete&&ordered.items.size()==2,"supported absent-index fallback rejected");
+  require(ordered.items[0].position==1&&ordered.items[1].position==2,"array-order fallback not deterministic");
+  auto mixedFirst=first;mixedFirst["playlist_index"]=2;
+  const auto mixed=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{mixedFirst,absentSecond}}}).toJson(),{},0);
+  require(!mixed.complete,"explicit and inferred position conflict authorized removals");
+  auto repeated=absentFirst;
+  const auto repeat=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{repeated,repeated}}}).toJson(),{},0);
+  require(repeat.complete&&repeat.items.size()==2,"legitimate repeated video occurrences disabled");
+ }
  else if(name=="discovery-null"){Source s;auto r=PlaylistDiscovery::parse(s,R"({"entries":[null]})","",0);require(!r.complete,"null entries must prevent removal inference");}
  else if(name=="discovery-count"){Source s;auto r=PlaylistDiscovery::parse(s,R"({"entries":[],"playlist_count":3})","",0);require(!r.complete,"truncated playlist must be partial");}
  else if(name=="discovery-error"){Source s;auto r=PlaylistDiscovery::parse(s,R"({"entries":[]})","ERROR: failed to fetch page",0);require(!r.complete,"ignore-errors cannot authorize removals");}
