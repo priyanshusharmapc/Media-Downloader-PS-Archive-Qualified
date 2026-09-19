@@ -311,12 +311,14 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
    const auto missingTarget=f.package({{"target",QJsonObject{}}});
    require(!i.validate(missingTarget).ok,"missing target identity accepted");
 
-   auto placeholder=f.item;placeholder.key="placeholder:PLAUDIT:legacy";placeholder.providerId.clear();
-   require(f.store.saveCanonicalItems({placeholder}),"placeholder fixture state");
+   const auto originalCanonical=f.store.loadCanonicalItems();
+   require(originalCanonical.size()==1,"fixture canonical state");
+   auto placeholder=originalCanonical.first();placeholder.key="placeholder:PLAUDIT:legacy";placeholder.providerId.clear();
+   require(f.store.saveCanonicalItems(QVector<CanonicalItem>{placeholder}),"placeholder fixture state");
    const auto placeholderTarget=f.package({{"target",QJsonObject{{"item_key",placeholder.key}}}});
    require(!i.validate(placeholderTarget).ok,"schema-invalid placeholder item_key accepted");
 
-   require(f.store.saveCanonicalItems({f.item}),"restore canonical fixture");
+   require(f.store.saveCanonicalItems(originalCanonical),"restore canonical fixture");
    const auto canonicalTarget=f.package({{"target",QJsonObject{{"item_key",f.item.itemKey}}}});
    require(i.validate(canonicalTarget).ok,"schema-valid canonical item_key rejected");
 
