@@ -54,6 +54,7 @@ class engines
 {
 public:
 	static bool filePathIsValid( const QFileInfo& ) ;
+	static bool executableOwnedByBinRoot( const QString& executable,const QString& binRoot ) ;
 
 	class file
 	{
