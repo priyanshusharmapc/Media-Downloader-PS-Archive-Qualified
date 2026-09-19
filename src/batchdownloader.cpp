@@ -1883,36 +1883,40 @@ void batchdownloader::parseDataFromObject( Items& items,const QJsonObject& obj,c
 
 void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 {
-	engines::file::readAll( e,m_ctx.logger(),[ this,deleteFile,e ]( bool,QByteArray list ){
+	engines::file::readAll( e,m_ctx.logger(),[ this,deleteFile,e ]( bool readOk,QByteArray list ){
 
-		if( deleteFile ){
+		if( !readOk || list.isEmpty() ){
 
-			QFile::remove( e ) ;
+			return ;
 		}
 
-		if( !list.isEmpty() ){
+		Items items ;
 
-			Items items ;
+		if( list.startsWith( '[' ) || list.startsWith( '{' ) ){
 
-			if( list.startsWith( '[' ) || list.startsWith( '{' ) ){
+			this->parseDataFromFile( items,list ) ;
+		}else{
+			list.replace( "\r","" ) ;
 
-				this->parseDataFromFile( items,list ) ;
-			}else{
-				list.replace( "\r","" ) ;
+			for( const auto& it : util::split( list,'\n',true ) ){
 
-				for( const auto& it : util::split( list,'\n',true ) ){
+				if( it.startsWith( "http" ) ){
 
-					if( it.startsWith( "http" ) ){
-
-						items.add( it ) ;
-					}
+					items.add( it ) ;
 				}
 			}
+		}
 
-			if( items.size() ){
+		if( items.size() ){
 
-				m_ui.tabWidget->setCurrentIndex( 1 ) ;
-				this->parseItems( items.move(),{ false,false } ) ;
+			m_ui.tabWidget->setCurrentIndex( 1 ) ;
+			this->parseItems( items.move(),{ false,false } ) ;
+
+			// Preserve the only recovery artifact until its contents were
+			// successfully read, parsed and handed to the restore path.
+			if( deleteFile && !QFile::remove( e ) ){
+
+				m_ctx.logger().add( "Failed to remove restored autosave: " + e,utility::loggerID() ) ;
 			}
 		}
 	} ) ;
