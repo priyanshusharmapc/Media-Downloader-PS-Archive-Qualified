@@ -59,7 +59,11 @@ public:
 			title( obj.value( "title" ).toString() ),
 			engineName( obj.value( "engineName" ).toString() ),
 			downloadOptions( obj.value( "downloadOptions" ).toString() ),
-			downloadExtraOptions( obj.value( "downloadExtraOptions" ).toString() )
+			downloadExtraOptions( obj.value( "downloadExtraOptions" ).toString() ),
+			subtitle( obj.value( "subtitle" ).toString() ),
+			timeInterval( obj.value( "timeInterval" ).toString() ),
+			chapters( obj.value( "chapters" ).toString() ),
+			splitByChapters( obj.value( "splitByChapters" ).toBool() )
 		{
 			auto m = obj.value( "duration" ).toString() ;
 
@@ -105,6 +109,10 @@ public:
 		QString engineName ;
 		QString downloadOptions ;
 		QString downloadExtraOptions ;
+		QString subtitle ;
+		QString timeInterval ;
+		QString chapters ;
+		bool splitByChapters = false ;
 	} ;
 	Items() = default ;
 	Items( const Items::entry& s )
