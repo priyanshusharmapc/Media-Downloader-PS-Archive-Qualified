@@ -2010,6 +2010,14 @@ void batchdownloader::batchDownloaderSet()
 
 			auto row = m_tableWidgetBDList.currentRow() ;
 
+			// Zero-result subtitle discovery and an unselected populated list
+			// both report currentRow() == -1. Keep Set a no-op until both
+			// the subtitle occurrence and owning batch row are valid.
+			if( row < 0 || row >= m_tableWidgetBDList.rowCount() || crow < 0 || crow >= m_table.rowCount() ){
+
+				return ;
+			}
+
 			auto m = m_tableWidgetBDList.item( row,0 ).text() ;
 
 			auto obj = m_tableWidgetBDList.stuffAt( row ) ;
