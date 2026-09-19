@@ -696,7 +696,10 @@ QString settings::downloadFolder( const QString& defaultPath,settings::sLogger& 
 		m.replace( mm,defaultPath ) ;
 	}
 
-	if( QFile::exists( m ) ){
+	// A download root must be a directory, not merely an existing filesystem
+	// object. Accepting a regular file defers the error into unrelated download
+	// and metadata paths and makes the persisted setting look valid.
+	if( QFileInfo( m ).isDir() ){
 
 		return m ;
 	}else{
