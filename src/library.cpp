@@ -49,34 +49,50 @@ library::library( const Context& ctx ) :
 	connect( m_ui.pbLibraryCancelRename,&QPushButton::clicked,[ this ](){
 
 		this->setRenameUiVisible( false ) ;
+		this->clearPendingAction() ;
 	} ) ;
 
 	connect( m_ui.pbLibrarySetNewFileName,&QPushButton::clicked,[ this ](){
 
 		this->setRenameUiVisible( false ) ;
 
-		auto m = m_ui.pbLibrarySetNewFileName->objectName() ;
+		const auto action = m_ui.pbLibrarySetNewFileName->objectName() ;
+		const auto rows = this->pendingRows() ;
+		const auto expectedCount = m_pendingActionNames.size() ;
+		const auto directoryMatches = !m_pendingActionDirectory.isEmpty() &&
+			QDir::cleanPath( m_pendingActionDirectory ) == QDir::cleanPath( m_currentPath ) ;
 
-		if( m == "Rename" ){
+		// Confirmation is valid only for the exact view and item identities that
+		// were displayed when the action was opened. Selection/current-row drift
+		// can never redirect a destructive operation to another Library entry.
+		if( action == "Rename" ){
 
-			this->renameFile( m_table.currentRow() ) ;
+			if( directoryMatches && expectedCount == 1 && rows.size() == 1 ){
+				this->renameFile( rows.front() ) ;
+			}
 
-		}else if( m == "Delete" ){
+		}else if( action == "Delete" ){
 
-			this->deleteEntry( m_table.currentRow() ) ;
+			if( directoryMatches && expectedCount == 1 && rows.size() == 1 ){
+				this->deleteEntry( rows.front() ) ;
+			}
 
-		}else if( m == "DeleteAll" ){
+		}else if( action == "DeleteAll" ){
 
-			this->deleteAll() ;
+			if( directoryMatches ){
+				this->deleteAll() ;
+			}
 
-		}else if( m == "DeleteSelectedItems" ){
+		}else if( action == "DeleteSelectedItems" ){
 
-			this->disableAll() ;
-
-			m_ui.pbLibraryCancel->setEnabled( true ) ;
-
-			this->deleteEntries( m_table.selectedRows() ) ;
+			if( directoryMatches && expectedCount > 0 && rows.size() == static_cast< size_t >( expectedCount ) ){
+				this->disableAll() ;
+				m_ui.pbLibraryCancel->setEnabled( true ) ;
+				this->deleteEntries( rows ) ;
+			}
 		}
+
+		this->clearPendingAction() ;
 	} ) ;
 
 	connect( this,&library::addEntrySignal,this,&library::addEntrySlot,Qt::QueuedConnection ) ;
@@ -216,6 +232,62 @@ void library::tabExited()
 
 void library::textAlignmentChanged( Qt::LayoutDirection )
 {
+}
+
+void library::capturePendingRows( const std::vector< int >& rows )
+{
+	m_pendingActionDirectory = m_currentPath ;
+	m_pendingActionNames.clear() ;
+
+	for( const auto row : rows ){
+		if( row >= 0 && row < m_table.rowCount() ){
+			m_pendingActionNames.append( m_table.item( row,1 ).text() ) ;
+		}
+	}
+}
+
+void library::capturePendingRow( int row )
+{
+	this->capturePendingRows( { row } ) ;
+}
+
+void library::capturePendingDirectory()
+{
+	m_pendingActionDirectory = m_currentPath ;
+	m_pendingActionNames.clear() ;
+}
+
+std::vector< int > library::pendingRows()
+{
+	std::vector< int > rows ;
+
+	if( m_pendingActionDirectory.isEmpty() ||
+		QDir::cleanPath( m_pendingActionDirectory ) != QDir::cleanPath( m_currentPath ) ){
+		return rows ;
+	}
+
+	for( const auto& name : m_pendingActionNames ){
+		bool found = false ;
+		for( int row = 0 ; row < m_table.rowCount() ; row++ ){
+			if( m_table.item( row,1 ).text() == name ){
+				rows.emplace_back( row ) ;
+				found = true ;
+				break ;
+			}
+		}
+		if( !found ){
+			rows.clear() ;
+			return rows ;
+		}
+	}
+
+	return rows ;
+}
+
+void library::clearPendingAction()
+{
+	m_pendingActionDirectory.clear() ;
+	m_pendingActionNames.clear() ;
 }
 
 bool library::hasMultipleSelections()
