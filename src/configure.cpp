@@ -519,8 +519,10 @@ configure::configure( const Context& ctx ) :
 
 		if( index != -1 ){
 
-			auto m = m_ui.cbConfigureEngines->itemText( index ) ;
+			auto m = m_ui.cbConfigureEnginesUrlManager->itemText( index ) ;
 
+			// URL-manager state belongs to the control that emitted this index.
+			// The general engine combo may have a different order or contents.
 			this->setEngineOptions( m,engineOptions::url ) ;
 		}
 	} ) ;
