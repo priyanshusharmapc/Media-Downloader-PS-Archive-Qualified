@@ -119,6 +119,9 @@ inline bool arrayShape(const QJsonArray& array,const QString& kind,QString* erro
             const QString id=o.value("provider_id").toString();
             if((!id.isEmpty()&&!videoIdSafe(id))||(!key.startsWith("placeholder:")&&key!="youtube:"+id))return reject(error,"Invalid canonical identity: "+key);
             if(kind=="canonical"){
+                const auto metadataPath=o.value("metadata_path").toString();
+                if(!metadataPath.isEmpty()&&(!relativeSafe(metadataPath)||!metadataPath.startsWith("Metadata/")))
+                    return reject(error,"Invalid canonical metadata path");
                 for(const auto& kindName:QStringList{"video","audio"}){
                     if(!o.value(kindName).isObject())return reject(error,"Missing representation: "+kindName);
                     const auto r=o.value(kindName).toObject();const auto path=r.value("path").toString();
