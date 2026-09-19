@@ -775,6 +775,14 @@ QString engines::addEngine( const QByteArray& data,const QString& extensionFileN
 		if( !name.isEmpty() ){
 
 			auto e = m_enginePaths.enginePath( extensionFileName ) ;
+			QByteArray previous ;
+			const bool hadPrevious = QFileInfo::exists( e ) ;
+			if( hadPrevious ){
+				QFile old( e ) ;
+				if( !old.open( QIODevice::ReadOnly ) )return {} ;
+				previous = old.readAll() ;
+			}
+
 			QSaveFile f( e ) ;
 
 			if( f.open( QIODevice::WriteOnly ) ){
@@ -784,6 +792,21 @@ QString engines::addEngine( const QByteArray& data,const QString& extensionFileN
 					if( this->addEngine( extensionFileName,id ) ){
 
 						return name ;
+					}
+
+					// Publication and runtime admission are one operation. If the
+					// engine cannot be admitted, restore the last known-good bytes
+					// rather than leaving a rejected definition as durable state.
+					if( hadPrevious ){
+						QSaveFile restore( e ) ;
+						if( restore.open( QIODevice::WriteOnly ) ){
+							if( restore.write( previous ) != previous.size() || !restore.commit() ){
+								restore.cancelWriting() ;
+								m_logger.add( QObject::tr( "Failed to restore previous plugin definition" ),id ) ;
+							}
+						}
+					}else{
+						QFile::remove( e ) ;
 					}
 
 					return {} ;
