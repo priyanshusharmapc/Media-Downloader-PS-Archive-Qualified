@@ -33,6 +33,9 @@
 class tabManager ;
 
 #include <QObject>
+#include <QPointer>
+
+#include <memory>
 
 class library : public QObject
 {
@@ -104,6 +107,7 @@ private:
 	const Context& m_ctx ;
 	settings& m_settings ;
 	std::atomic_bool m_continue ;
+	std::shared_ptr< std::atomic_bool > m_scanContinue ;
 	Ui::MainWindow& m_ui ;
 	tableMiniWidget< directoryEntries::ICON,2 > m_table ;
 	QString m_downloadFolder ;
