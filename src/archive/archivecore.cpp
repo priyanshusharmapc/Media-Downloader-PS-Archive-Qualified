@@ -689,6 +689,7 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
         const bool unresolved=p.providerId.isEmpty();
         const auto expectedKey=unresolved?placeholderBaseKey(source.key,p.title,p.url):canonicalKey(p.providerId,source.key,p.position,p.title);
         if(p.itemKey.isEmpty()) p.itemKey=expectedKey;
+        int promotedPrior=-1;
         if(unresolved){
             if(!p.itemKey.startsWith("placeholder:"+source.key+":")){summary.error="Invalid unresolved placeholder identity";return summary;}
             const auto fingerprint=placeholderFingerprint(source.key,p.title,p.url);
@@ -711,7 +712,34 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             }
         }else{
             if(p.itemKey!=expectedKey){summary.error="Canonical identity mismatch";return summary;}
-            p.entryKey=p.itemKey+"#"+QString::number(++observedOccurrences[p.itemKey]);
+
+            // A resolved observation may be the same historical occurrence that
+            // was previously visible only as a placeholder. Promote only when
+            // the mapping is conservative and unambiguous. Prefer a unique
+            // position match; otherwise accept a single unmatched fingerprint
+            // candidate. Never merge into an already-existing resolved
+            // canonical identity because doing so could conflate two histories.
+            if(!canonicalIndex.contains(expectedKey)){
+                const auto fingerprint=placeholderFingerprint(source.key,p.title,p.url);
+                QVector<int> candidates;
+                for(const auto candidate:priorPlaceholders.value(fingerprint))
+                    if(!matchedPrior.contains(candidate)) candidates.append(candidate);
+                QVector<int> positionMatches;
+                for(const auto candidate:candidates)
+                    if(prior[candidate].position==p.position || prior[candidate].lastPosition==p.position)
+                        positionMatches.append(candidate);
+                if(positionMatches.size()==1) promotedPrior=positionMatches.front();
+                else if(positionMatches.isEmpty() && candidates.size()==1) promotedPrior=candidates.front();
+            }
+
+            if(promotedPrior>=0){
+                matchedPrior.insert(promotedPrior);
+                // entryKey is occurrence identity. Keeping it stable prevents
+                // the promotion from appearing as a removal plus a new row.
+                p.entryKey=prior[promotedPrior].entryKey;
+            }else{
+                p.entryKey=p.itemKey+"#"+QString::number(++observedOccurrences[p.itemKey]);
+            }
         }
         observedKeys.insert(p.entryKey);
         const bool hadPrior=priorIndex.contains(p.entryKey);
@@ -730,6 +758,26 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             record(historyEvent("observation_changed",p.itemKey,{{"entry_key",p.entryKey},{"position",p.position},{"title",p.title},{"availability",p.availability},{"previous_position",previous.position},{"previous_title",previous.title},{"previous_availability",previous.availability}}));
 
         int ci=canonicalIndex.value(p.itemKey,-1);
+        if(promotedPrior>=0){
+            const auto oldKey=prior[promotedPrior].itemKey;
+            const int oldCi=canonicalIndex.value(oldKey,-1);
+            if(oldCi<0){summary.error="Placeholder promotion lost canonical history";return summary;}
+            if(canonicalIndex.contains(p.itemKey)){summary.error="Placeholder promotion target already exists";return summary;}
+
+            // Move the canonical record rather than constructing a new one so
+            // representation paths, recovery status, tags and first-seen
+            // evidence remain attached to the occurrence across identity
+            // resolution.
+            auto& promoted=canonical[oldCi];
+            promoted.key=p.itemKey;
+            promoted.providerId=p.providerId;
+            canonicalIndex.remove(oldKey);
+            canonicalIndex[p.itemKey]=oldCi;
+            ci=oldCi;
+            record(historyEvent("identity_promoted",p.itemKey,{
+                {"from_item_key",oldKey},{"to_item_key",p.itemKey},
+                {"entry_key",p.entryKey},{"position",p.position}}));
+        }
         if(ci<0){
             CanonicalItem c;
             c.key=p.itemKey; c.providerId=p.providerId; c.title=p.title; c.originalUrl=p.url;
