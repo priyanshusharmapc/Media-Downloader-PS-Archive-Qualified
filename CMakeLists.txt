@@ -167,19 +167,18 @@ endif()
 include(CTest)
 
 if(BUILD_TESTING)
+    # Policy regressions are intentionally named *-policy-tests.py. Discovering
+    # them at configure time keeps each remediation self-contained and avoids
+    # unrelated fixes conflicting merely because they register another test.
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    add_test(
-        NAME release-identity-policy
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/release-identity-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
-    set_tests_properties(release-identity-policy PROPERTIES TIMEOUT 30)
-endif()
-
-if(BUILD_TESTING)
-    find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    add_test(
-        NAME package-identity-policy
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/package-identity-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
-    set_tests_properties(package-identity-policy PROPERTIES TIMEOUT 30)
+    file(GLOB POLICY_TEST_SCRIPTS "${CMAKE_SOURCE_DIR}/tests/*-policy-tests.py")
+    foreach(POLICY_TEST_SCRIPT ${POLICY_TEST_SCRIPTS})
+        get_filename_component(POLICY_TEST_FILE ${POLICY_TEST_SCRIPT} NAME_WE)
+        string(REGEX REPLACE "-tests$" "" POLICY_TEST_NAME "${POLICY_TEST_FILE}")
+        add_test(NAME ${POLICY_TEST_NAME}
+            COMMAND ${Python3_EXECUTABLE} ${POLICY_TEST_SCRIPT} --source-root ${CMAKE_SOURCE_DIR})
+        set_tests_properties(${POLICY_TEST_NAME} PROPERTIES TIMEOUT 30)
+    endforeach()
 endif()
 
 add_executable(archive-cli
@@ -559,8 +558,6 @@ if(BUILD_TESTING)
         target_link_libraries(archive-fake-tool Qt5::Core)
     endif()
     find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
-    add_test(NAME windows-clipboard-format-policy COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/windows-clipboard-format-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
-    set_tests_properties(windows-clipboard-format-policy PROPERTIES TIMEOUT 30)
     add_test(NAME archive-integration COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/archive-integration-tests.py --cli $<TARGET_FILE:archive-cli> --fake-tool $<TARGET_FILE:archive-fake-tool>)
     set_tests_properties(archive-integration PROPERTIES TIMEOUT 180)
     if(WIN32)
