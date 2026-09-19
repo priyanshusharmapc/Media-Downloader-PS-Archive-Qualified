@@ -45,6 +45,11 @@ MainWindow::MainWindow( QApplication& app,
 	m_showTrayIcon( s.showTrayIcon() ),
 	m_shortcut( this )
 {
+	// Tray residency is an application policy, not only a close-event detail.
+	// Keep Qt from implicitly quitting when the last visible window closes while
+	// tray mode is enabled; real exits still flow through quitApp().
+	m_qApp.setQuitOnLastWindowClosed( !m_showTrayIcon ) ;
+
 	m_logger.setContext( m_tabManager.ctx() ) ;
 
 	MainWindow::setUpSignals( this ) ;
@@ -126,6 +131,7 @@ MainWindow::MainWindow( QApplication& app,
 void MainWindow::showTrayIcon( bool e )
 {
 	m_showTrayIcon = e ;
+	m_qApp.setQuitOnLastWindowClosed( !e ) ;
 
 	if( e ){
 
