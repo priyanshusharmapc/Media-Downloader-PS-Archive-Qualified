@@ -447,7 +447,7 @@ jobs:
 
           gh release create "$tag"             --target "$GITHUB_SHA"             --title "Qualification evidence $GITHUB_SHA"             --notes-file docs/qualification/EVIDENCE_POLICY.md
 
-          # No --clobber: an existing asset is an integrity conflict, not a file
-          # to replace. Commit-specific release assets are append-once.
+          # Existing assets are integrity identities, not files to replace.
+          # Commit-specific release assets are append-once.
           gh release upload "$tag" "$bundle" "$manifest"
 
