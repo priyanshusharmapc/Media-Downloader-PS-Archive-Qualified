@@ -513,6 +513,56 @@ class ArchiveIntegration(unittest.TestCase):
         self.command('scan', SOURCE_URL, expect=1)
         self.assertEqual(path.read_text(), mixed_bytes)
 
+    def test_cross_file_graph_integrity_fails_closed_and_accepts_valid_relationships(self):
+        self.scan()
+        state = self.root / 'State/ArchiveMode'
+        canonical_path = state / 'items.json'
+        sources_path = state / 'sources.json'
+        playlist_path = self.root / 'Playlists/PLAUDIT/items.json'
+
+        canonical_bytes = canonical_path.read_bytes()
+        canonical = json.loads(canonical_bytes)
+        canonical_path.write_text(json.dumps(canonical[1:]))
+        corrupt_bytes = canonical_path.read_bytes()
+        result = self.command('ingest-pending', expect=1)
+        self.assertIn('missing canonical item', result.stderr)
+        self.assertEqual(canonical_path.read_bytes(), corrupt_bytes)
+
+        # Restoring the authoritative canonical record restores graph validity.
+        canonical_path.write_bytes(canonical_bytes)
+        self.command('ingest-pending')
+
+        # A registered source that has never been scanned is legitimate and
+        # therefore does not require a playlist directory yet.
+        sources = json.loads(sources_path.read_text())
+        sources.append({'key': 'UNSCANNED', 'url': 'https://example.invalid/list',
+                        'title': 'Not scanned yet'})
+        sources_path.write_text(json.dumps(sources))
+        self.command('ingest-pending')
+        self.assertFalse((self.root / 'Playlists/UNSCANNED').exists())
+
+        # The same canonical item may legitimately be referenced by more than
+        # one registered playlist.
+        sources.append({'key': 'SECOND', 'url': 'https://example.invalid/second',
+                        'title': 'Second playlist'})
+        sources_path.write_text(json.dumps(sources))
+        second = self.root / 'Playlists/SECOND'
+        second.mkdir()
+        rows = json.loads(playlist_path.read_text())
+        second_rows = [dict(rows[0], entry_key=rows[0]['item_key'] + '#second')]
+        (second / 'items.json').write_text(json.dumps(second_rows))
+        (second / 'playlist.json').write_text(json.dumps(sources[-1]))
+        self.command('ingest-pending')
+
+        # Managed playlist state with no registered source is corruption.
+        orphan = self.root / 'Playlists/ORPHAN'
+        orphan.mkdir()
+        (orphan / 'items.json').write_text(json.dumps(second_rows))
+        orphan_bytes = (orphan / 'items.json').read_bytes()
+        result = self.command('ingest-pending', expect=1)
+        self.assertIn('no registered source', result.stderr)
+        self.assertEqual((orphan / 'items.json').read_bytes(), orphan_bytes)
+
     def test_resource_upgrade_preserves_prior_contract(self):
         self.scan()
         contract = self.root / 'ARCHIVE_AGENT.md'
