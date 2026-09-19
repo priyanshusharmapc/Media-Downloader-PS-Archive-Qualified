@@ -131,6 +131,65 @@ class ArchiveIntegration(unittest.TestCase):
         (directory / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
         return directory
 
+    def block_catalog(self):
+        """Inject a generated-file failure without touching authoritative state."""
+        catalog = self.root / 'Playlists/PLAUDIT/catalog.csv'
+        catalog.unlink()
+        catalog.mkdir()
+        return catalog
+
+    def durable_bytes(self):
+        paths = [self.root / 'State/ArchiveMode/items.json',
+                 self.root / 'State/ArchiveMode/sources.json',
+                 self.root / 'Playlists/PLAUDIT/items.json',
+                 self.root / 'Playlists/PLAUDIT/history.jsonl']
+        paths += list((self.root / 'State/ArchiveMode/Imports/Accepted').rglob('*'))
+        return {str(p.relative_to(self.root)): p.read_bytes() for p in paths if p.is_file()}
+
+    def test_scan_projection_failure_reports_committed_and_repairs_only_reports(self):
+        self.scan()
+        catalog = self.block_catalog()
+        self.plan['discovery']['entries'][0]['title'] = 'Committed changed title'
+        self.write_plan()
+        result = self.command('scan', SOURCE_URL, expect=4)
+        self.assertIn('committed=true', result.stdout)
+        self.assertIn('projections=dirty', result.stdout)
+        self.assertIn('active=2', result.stdout)
+        self.assertIn('State committed', result.stderr)
+        self.assertEqual(self.first()['title'], 'Committed changed title')
+        marker = self.root / 'State/ArchiveMode/projections-dirty.json'
+        self.assertTrue(marker.exists())
+        committed = self.durable_bytes()
+        catalog.rmdir()
+        self.command('rebuild-projections')
+        self.assertFalse(marker.exists())
+        self.assertIn('Committed changed title', catalog.read_text())
+        self.assertEqual(self.durable_bytes(), committed)
+        self.command('rebuild-projections')
+        self.assertEqual(self.durable_bytes(), committed)
+
+    def test_recovery_projection_failure_counts_accepted_and_never_repromotes(self):
+        self.scan()
+        package = self.make_package()
+        manifest = (package / 'manifest.json').read_bytes()
+        catalog = self.block_catalog()
+        result = self.command('ingest-pending', expect=4)
+        self.assertIn('accepted=1', result.stdout)
+        self.assertIn('warnings=1', result.stdout)
+        self.assertIn('State committed', result.stderr)
+        self.assertNotIn('retryable failure', result.stderr)
+        accepted = self.root / 'State/ArchiveMode/Imports/Accepted/recovery-package'
+        self.assertFalse(package.exists())
+        self.assertEqual((accepted / 'manifest.json').read_bytes(), manifest)
+        self.assertEqual(self.first()['video']['state'], 'complete')
+        committed = self.durable_bytes()
+        media = self.media_hashes()
+        catalog.rmdir()
+        self.command('rebuild-projections')
+        self.assertIn('accepted=0', self.command('ingest-pending').stdout)
+        self.assertEqual(self.durable_bytes(), committed)
+        self.assertEqual(self.media_hashes(), media)
+
     def test_scan_sync_verify_and_idempotent_rerun(self):
         self.scan()
         self.command('sync-item', VIDEO_URL)

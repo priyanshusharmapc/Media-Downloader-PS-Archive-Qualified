@@ -64,6 +64,45 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
    require(f.store.reconcile(source,reordered).committed,"reordered unresolved reconciliation failed");const auto after=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty()&&after.size()==2,"reordered unresolved occurrences missing");
    QSet<QString> beforeKeys,afterKeys;for(const auto& item:before)beforeKeys.insert(item.itemKey);for(const auto& item:after)afterKeys.insert(item.itemKey);require(beforeKeys==afterKeys,"unresolved reorder changed canonical identities");
   }
+
+ else if(name=="projection-commit-outcome"){
+  Fixture f;const auto catalog=QDir(f.paths.sourceDir(f.source.key)).filePath("catalog.csv");
+  require(QFile::remove(catalog)&&QDir().mkdir(catalog),"block generated catalog path");
+  Snapshot snapshot;snapshot.sourceKey=f.source.key;snapshot.complete=true;snapshot.items={f.item};
+  const auto result=f.store.reconcile(f.source,snapshot,&f.logger);
+  require(result.committed,"MDPS-AUDIT2-025: projection failure hid a durable reconciliation commit");
+  require(!result.projectionsCurrent&&!result.projectionWarning.isEmpty()&&result.error.isEmpty(),"commit and projection errors conflated");
+  require(result.active==1&&result.observed==1,"committed counts lost after projection failure");
+  const auto marker=QDir(f.paths.archiveState()).filePath("projections-dirty.json");
+  require(QFileInfo::exists(marker),"projection failure lost durable rebuild intent");
+  const auto items=get(f.paths.itemsFile()),sources=get(f.paths.sourcesFile());
+  const auto history=get(f.paths.playlistHistoryFile(f.source.key));QString error;
+  require(QDir().rmdir(catalog)&&f.store.initialize(&error),"projection-only restart repair failed: "+error);
+  require(!QFileInfo::exists(marker),"successful rebuild retained dirty marker");
+  require(get(f.paths.itemsFile())==items&&get(f.paths.sourcesFile())==sources&&get(f.paths.playlistHistoryFile(f.source.key))==history,
+      "projection repair replayed canonical mutation");
+  require(f.store.initialize(&error),"repeat projection repair failed");
+ }
+ else if(name=="recovery-commit-outcome"){
+  Fixture f;const auto package=f.package({{"metadata",QJsonObject{{"canonical_title","Recovered metadata"}}}});
+  const auto manifest=get(QDir(package).filePath("manifest.json"));
+  const auto catalog=QDir(f.paths.sourceDir(f.source.key)).filePath("catalog.csv");
+  require(QFile::remove(catalog)&&QDir().mkdir(catalog),"block generated catalog path");
+  RecoveryImporter importer(f.config,f.store,f.logger);QStringList failures,warnings;
+  const auto accepted=importer.ingestPending(&failures,{},&warnings);
+  require(accepted==1,"MDPS-AUDIT2-025: accepted recovery counted as pending after projection failure");
+  require(failures.isEmpty(),"committed recovery reported a retryable admission failure");
+  require(warnings.size()==1&&warnings.first().contains("State committed"),"committed projection warning lost");
+  const auto acceptedDir=QDir(f.paths.importsAccepted()).filePath(QFileInfo(package).fileName());
+  require(!QFileInfo::exists(package)&&QFileInfo(acceptedDir).isDir(),"accepted package moved to wrong state");
+  require(get(QDir(acceptedDir).filePath("manifest.json"))==manifest,"accepted evidence mutated");
+  const auto receipt=get(QDir(acceptedDir).filePath("receipt.json"));
+  const auto items=get(f.paths.itemsFile()),history=get(f.paths.playlistHistoryFile(f.source.key));
+  QString error;require(QDir().rmdir(catalog)&&f.store.initialize(&error),"recovery projection repair failed: "+error);
+  require(importer.ingestPending(&failures)==0&&failures.isEmpty(),"already accepted package was retried");
+  require(get(f.paths.itemsFile())==items&&get(f.paths.playlistHistoryFile(f.source.key))==history&&get(QDir(acceptedDir).filePath("receipt.json"))==receipt,
+      "projection-only retry changed committed recovery evidence");
+ }
  else if(name=="source-traversal"){Fixture f;Source s=f.source;s.key="..";Snapshot snap;snap.sourceKey=s.key;snap.complete=true;require(!f.store.reconcile(s,snap).committed,"unsafe source key must fail");}
  else if(name=="state-shape"){Fixture f;put(f.paths.itemsFile(),"{\"unexpected\":true}");QString e;f.store.loadCanonicalItems(&e);require(!e.isEmpty(),"wrong JSON root must be an error");const auto before=get(f.paths.itemsFile());Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(!f.store.reconcile(f.source,s).committed,"corrupt store must block writes");require(get(f.paths.itemsFile())==before,"corrupt state was overwritten");}
  else if(name=="source-state-corruption"){Fixture f;put(f.paths.sourcesFile(),"not json");Snapshot s;s.sourceKey=f.source.key;s.items={f.item};require(!f.store.reconcile(f.source,s).committed,"corrupt sources must block reconciliation");require(get(f.paths.sourcesFile())=="not json","source registry destroyed");}

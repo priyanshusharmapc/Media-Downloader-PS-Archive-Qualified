@@ -725,7 +725,13 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
         {dir+"playlist.json",QJsonDocument(sourceToJson(source)).toJson()},
         {dir+"history.jsonl",history}};
     if(!detail::commitTransaction(m_paths.root(),files,&error)){summary.error=error;return summary;}
-    if(!writeAllProjections(&error)){ summary.error="State committed, projection rebuild required: "+error; return summary; }
+    // The authoritative commit has already completed. Projection failures leave
+    // the durable dirty marker for report-only recovery; they must not erase
+    // counts or tell a caller to replay this registry/history transaction.
+    summary.committed=true;
+    summary.projectionsCurrent=writeAllProjections(&error);
+    if(!summary.projectionsCurrent)
+        summary.projectionWarning="State committed, projection rebuild required: "+error;
 
     for(const auto& p:result){
         if(p.membership=="active") ++summary.active;
@@ -735,11 +741,12 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             if(canonical[ci].audio.state!="complete") ++summary.needsAudio;
         }
     }
-    summary.committed=true;
-    if(logger) logger->event("INFO","reconciliation","snapshot_reconciled",{
+    if(logger) logger->event(summary.projectionsCurrent?"INFO":"WARNING","reconciliation","snapshot_reconciled",{
         {"source_key",source.key},{"complete",snapshot.complete},{"observed",summary.observed},{"active",summary.active},
         {"removed",summary.removed},{"reappeared",summary.reappeared},{"unavailable",summary.unavailable},
-        {"needs_video",summary.needsVideo},{"needs_audio",summary.needsAudio}});
+        {"needs_video",summary.needsVideo},{"needs_audio",summary.needsAudio},
+        {"committed",summary.committed},{"projections_current",summary.projectionsCurrent},
+        {"projection_warning",summary.projectionWarning}});
     return summary;
 }
 
@@ -1295,8 +1302,10 @@ bool RecoveryImporter::normalizeAudio(const QString& input,const QString& output
     if(!r.ok){if(error)*error=r.error+" "+r.standardError.left(1000);return false;} return true;
 }
 
-bool RecoveryImporter::ingest(const QString& packageDir,QString* error)
+bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* projectionWarning)
 {
+    if(error)error->clear();
+    if(projectionWarning)projectionWarning->clear();
     SyncLock lock(m_store.paths());if(!lock.tryLock())return detail::reject(error,lock.errorString());
     if(!m_store.initialize(error))return false;
     const auto absolute=QFileInfo(packageDir).absoluteFilePath();
@@ -1367,11 +1376,20 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error)
         return false;
     }
     staging.setAutoRemove(true);
-    if(!m_store.writeAllProjections(error))return false;
-    m_logger.event("INFO","import","recovery_package_accepted",{{"package_id",vr.packageId},{"item_key",vr.itemKey}});return true;
+    // Media promotion, registry/history, receipt and Accepted placement are
+    // already durable. Do not classify a report-path failure as a failed import
+    // or replay normalization. writeAllProjections retains the dirty marker.
+    QString reportError,warning;
+    const bool projectionsCurrent=m_store.writeAllProjections(&reportError);
+    if(!projectionsCurrent)warning="State committed, projection rebuild required: "+reportError;
+    if(projectionWarning)*projectionWarning=warning;
+    m_logger.event(projectionsCurrent?"INFO":"WARNING","import","recovery_package_accepted",{
+        {"package_id",vr.packageId},{"item_key",vr.itemKey},{"projections_current",projectionsCurrent},
+        {"projection_warning",warning}});
+    return true;
 }
 
-int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bool()>& shouldStop)
+int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bool()>& shouldStop,QStringList* warnings)
 {
     SyncLock lock(m_store.paths());if(!lock.tryLock()){if(failures)failures->append(lock.errorString());return 0;}
     QString initError;if(!m_store.initialize(&initError)){if(failures)failures->append(initError);return 0;}
@@ -1380,7 +1398,12 @@ int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bo
         if(shouldStop&&shouldStop()){if(failures)failures->append("Stopped before all packages completed");break;}
         const auto dir=d.filePath(name);const auto validation=validate(dir);QString error;
         if(validation.ok){
-            if(ingest(dir,&error)){++accepted;continue;}
+            QString warning;
+            if(ingest(dir,&error,&warning)){
+                ++accepted;
+                if(warnings&&!warning.isEmpty())warnings->append(name+": "+warning);
+                continue;
+            }
             // Tool, storage and interrupted-transaction failures stay retryable in Pending.
             if(failures)failures->append(name+": retryable failure: "+error);
             m_logger.event("ERROR","import","recovery_package_pending",{{"package_id",name},{"reason",error}});

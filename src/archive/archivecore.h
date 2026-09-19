@@ -84,9 +84,14 @@ struct Snapshot
     QVector<PlaylistItem> items;
 };
 
+// Authoritative state and generated reports have different commit boundaries.
+// A report failure never makes a completed registry/history transaction unsafe
+// to count as committed, nor is it permission to replay that transaction.
 struct ReconcileSummary
 {
     bool committed = false;
+    bool projectionsCurrent = false;
+    QString projectionWarning;
     bool completeSnapshot = false;
     int observed = 0;
     int active = 0;
@@ -248,8 +253,14 @@ class RecoveryImporter
 public:
     RecoveryImporter(RuntimeConfig config,Store& store,ActivityLogger& logger);
     ValidationResult validate(const QString& packageDir) const;
-    bool ingest(const QString& packageDir,QString* error = nullptr);
-    int ingestPending(QStringList* failures = nullptr,const std::function<bool()>& shouldStop = {});
+    // Accept one direct Pending package under the archive lock. True means the
+    // media, canonical state, receipt and Accepted move committed. A subsequent
+    // report rebuild failure is a warning, not a retryable admission failure.
+    // False preserves the existing failure/recovery contract through error.
+    bool ingest(const QString& packageDir,QString* error = nullptr,QString* projectionWarning = nullptr);
+    // Count durable acceptances. Append pre-commit failures and post-commit
+    // warnings separately, so callers never label an Accepted package Pending.
+    int ingestPending(QStringList* failures = nullptr,const std::function<bool()>& shouldStop = {},QStringList* warnings = nullptr);
 private:
     bool normalizeVideo(const QString& input,const QString& output,QString* error) const;
     bool normalizeAudio(const QString& input,const QString& output,QString* error) const;
