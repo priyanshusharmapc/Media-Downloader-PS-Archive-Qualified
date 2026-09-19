@@ -767,6 +767,7 @@ namespace utility
 	bool platformIsAppImage() ;
 	bool addData( const QByteArray& ) ;
 	bool containsLinkerWarning( const QByteArray& ) ;
+	bool libraryRenameDestination( const QString& cwd,const QString& newName,QString& destination,QString& error ) ;
 	QString rename( const Context&,QTableWidgetItem&,const QString&,const QString&,const QString& ) ;
 	QString rename( const QString& oldName,const QString& newName ) ;
 	QString removeFile( const QString& ) ;
