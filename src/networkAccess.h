@@ -365,7 +365,7 @@ private:
 		QString rename( const QString& e ) ;
 		bool write( const QByteArray& e )
 		{
-			if( m_writeFailed || !m_file ){
+			if( m_writeFailed || m_file.get() == nullptr ){
 				return false ;
 			}
 
