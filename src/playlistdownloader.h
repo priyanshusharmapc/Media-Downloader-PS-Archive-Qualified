@@ -202,7 +202,7 @@ private:
 		} ;
 		utility::vector< subscription::entry > entries() ;
 	private:
-		void save() ;
+		bool save() ;
 		QString m_path ;
 		tableMiniWidget< int,2 >& m_table ;
 		QWidget& m_ui ;
