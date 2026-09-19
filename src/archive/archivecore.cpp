@@ -467,6 +467,60 @@ void ActivityLogger::prune()
 Store::Store(Paths paths):m_paths(std::move(paths)){}
 const Paths& Store::paths() const{return m_paths;}
 
+namespace {
+const QString archiveIdentityRelative="State/ArchiveMode/archive-identity.json";
+
+QByteArray newArchiveIdentity(const QString& origin)
+{
+    return QJsonDocument(QJsonObject{{"schema_version",1},{"format","mdps-archive"},
+        {"archive_id",QUuid::createUuid().toString(QUuid::WithoutBraces)},
+        {"created_at",nowIso()},{"admitted_from",origin}}).toJson();
+}
+
+// Called only while the archive writer lock is owned. The lock/layout helpers
+// create empty structural directories before admission, so those exact paths
+// and this invocation's lock are allowed. Every other managed entry, including
+// hidden files and empty historical subdirectories, is evidence, not garbage.
+// Unrelated root-level files (for example operator notes or an application
+// installation) are left alone. No existing payload is removed or rewritten.
+bool freshArchiveRoot(const Paths& paths,QString* error)
+{
+    const QSet<QString> emptyLayout={"Video","Audio","Metadata","Temp","Playlists", "State",
+        "State/ArchiveMode","State/ArchiveMode/Schemas","State/ArchiveMode/Imports",
+        "State/ArchiveMode/Imports/Pending","State/ArchiveMode/Imports/Accepted",
+        "State/ArchiveMode/Imports/Rejected","State/ArchiveMode/Logs",
+        "State/ArchiveMode/Logs/Activity","State/ArchiveMode/Logs/Diagnostic"};
+    const QSet<QString> managedRoots={"video","audio","metadata","temp","playlists","state"};
+    const QSet<QString> rootEvidence={"archive_agent.md","catalog.csv","missing.csv",
+        "video.m3u8","audio.m3u8","download-archive.txt","unavailable.jsonl","removed.jsonl"};
+    auto evidence=[&](const QString& relative){
+        return detail::reject(error,"Canonical registries are missing beside Archive evidence: "+relative+
+            ". Preserve this root and restore its registries from a known-good backup; use a different empty root for a new archive.");
+    };
+    std::function<bool(const QString&)> visit=[&](const QString& relative){
+        const auto absolute=QDir(paths.root()).filePath(relative);
+        QFileInfo info(absolute);
+        if(!detail::noLinks(absolute))return evidence(relative);
+        if(relative=="State/ArchiveMode/sync.lock"&&info.isFile())return true;
+        if(!info.isDir()||!emptyLayout.contains(relative)||!info.isReadable())return evidence(relative);
+#ifndef Q_OS_WIN
+        // An unreadable/unsearchable directory is not proof of emptiness.
+        if(!info.isExecutable())return evidence(relative);
+#endif
+        const auto entries=QDir(absolute).entryInfoList(QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot);
+        for(const auto& entry:entries)if(!visit(relative+"/"+entry.fileName()))return false;
+        return true;
+    };
+    const auto entries=QDir(paths.root()).entryInfoList(QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot);
+    for(const auto& entry:entries){
+        const auto folded=entry.fileName().toCaseFolded();
+        if(rootEvidence.contains(folded))return evidence(entry.fileName());
+        if(managedRoots.contains(folded)&&!visit(entry.fileName()))return false;
+    }
+    return true;
+}
+}
+
 bool Store::initialize(QString* error)
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
@@ -474,14 +528,26 @@ bool Store::initialize(QString* error)
     if(!m_paths.ensureLayout(error)||!detail::recoverTransaction(m_paths.root(),error))return false;
     const bool sources=QFileInfo::exists(m_paths.sourcesFile()),items=QFileInfo::exists(m_paths.itemsFile());
     if(sources!=items)return detail::reject(error,"Incomplete Archive registry; existing state is preserved");
+    const auto identityPath=QDir(m_paths.root()).filePath(archiveIdentityRelative);
     if(!sources){
-        // Existing playlist history means this is not a fresh archive.
-        if(!QDir(m_paths.playlists()).entryList(QDir::Dirs|QDir::NoDotAndDotDot).isEmpty())
-            return detail::reject(error,"Canonical registries missing beside existing playlist history");
-        if(!detail::commitTransaction(m_paths.root(),{{"State/ArchiveMode/sources.json","[]\n"},{"State/ArchiveMode/items.json","[]\n"}},error))return false;
+        if(!freshArchiveRoot(m_paths,error))return false;
+        // Identity and both empty registries share the same journaled intent.
+        // A crash rolls this intent forward; it never needs a heuristic reset.
+        if(!detail::commitTransaction(m_paths.root(),{{"State/ArchiveMode/sources.json","[]\n"},
+            {"State/ArchiveMode/items.json","[]\n"},{archiveIdentityRelative,newArchiveIdentity("fresh")}},error))return false;
     }
     QJsonArray a;
     if(!detail::readArray(m_paths.sourcesFile(),"source",&a,error)||!detail::readArray(m_paths.itemsFile(),"canonical",&a,error))return false;
+    if(QFileInfo::exists(identityPath)||!detail::noLinks(identityPath)){
+        QByteArray identity;
+        if(!detail::readBytes(identityPath,&identity,error)||!detail::transactionPayload(archiveIdentityRelative,identity,error))return false;
+    }else{
+        // Supported unversioned archives already have two valid registries.
+        // Add only a marker: never reserialize historical registry/history
+        // bytes during this compatibility migration. Missing registries are
+        // not a recognized legacy format and cannot enter this branch.
+        if(!detail::commitTransaction(m_paths.root(),{{archiveIdentityRelative,newArchiveIdentity("legacy_unversioned")}},error))return false;
+    }
     if(!m_paths.materializeAgentResources(error))return false;
     if(QFileInfo::exists(QDir(m_paths.archiveState()).filePath("projections-dirty.json")))return writeAllProjections(error);
     return true;
@@ -952,14 +1018,38 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
     const auto root=doc.object();
     if(!root.value("entries").isArray()){s.error="Playlist entries must be an array; removal inference disabled";return s;}
     const auto entries=root.value("entries").toArray();
-    bool malformed=root.contains("id")&&!source.key.isEmpty()&&root.value("id").toString()!=source.key;
+    // Requested identity is not provider evidence. Removal inference requires
+    // an explicit matching playlist ID, even for a complete-looking empty list.
+    if(!detail::sourceKeySafe(source.key)||!root.value("id").isString()||root.value("id").toString()!=source.key){
+        // Unbound observations cannot safely be attributed to this source,
+        // even as additions. Keep its historical membership entirely intact.
+        s.error="Missing or mismatched provider playlist identity; observations and removal inference refused";
+        return s;
+    }
+    bool malformed=false;
+    QSet<int> positions;
     int pos=0;
     for(const auto& value:entries){
         ++pos;
         if(!value.isObject()){malformed=true;continue;}
         const auto e=value.toObject();
         PlaylistItem p;
-        p.position=e.value("playlist_index").toInt(pos);
+        // Array order is the supported fallback only when the field is absent.
+        // Qt's toInt(default) otherwise silently repairs strings, null and
+        // fractions, which must not authorize destructive membership changes.
+        if(e.contains("playlist_index")){
+            const auto index=e.value("playlist_index");
+            const auto number=index.toDouble();
+            if(!index.isDouble()||!std::isfinite(number)||std::floor(number)!=number||number<1||number>INT_MAX){
+                malformed=true;continue;
+            }
+            p.position=static_cast<int>(number);
+        }else p.position=pos;
+        // Repeated videos are valid occurrences, but contradictory positions
+        // are not evidence of complete enumeration. Retain usable observations
+        // without granting removal authority to this snapshot.
+        if(positions.contains(p.position))malformed=true;
+        positions.insert(p.position);
         p.providerId=e.value("id").toString();
         if(!p.providerId.isEmpty()&&!detail::videoIdSafe(p.providerId)){malformed=true;continue;}
         if(p.position<1){malformed=true;continue;}

@@ -44,6 +44,66 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
  }
 #endif
  if(name=="discovery-shape"){Source s;auto r=PlaylistDiscovery::parse(s,"{}","",0);require(!r.complete,"non-playlist JSON must not be complete");}
+
+ else if(name=="discovery-root-identity"){
+  Fixture f;const QJsonArray noEntries;
+  QVector<QJsonObject> suspect{{{"entries",noEntries}},{{"id",""},{"entries",noEntries}},
+   {{"id",1},{"entries",noEntries}},{{"id",QJsonValue::Null},{"entries",noEntries}},
+   {{"id","PLWRONG"},{"entries",noEntries}}};
+  for(const auto& object:suspect){
+   const auto snapshot=PlaylistDiscovery::parse(f.source,QJsonDocument(object).toJson(),{},0);
+   require(!snapshot.complete,"unbound provider output authorized removals");
+   require(!snapshot.error.isEmpty(),"unbound identity lacked diagnostic");
+   require(f.store.reconcile(f.source,snapshot).committed,"partial observation preservation failed");
+   const auto rows=f.store.loadPlaylistItems(f.source.key);
+   require(rows.size()==1&&rows.first().membership=="active","unbound output removed historical occurrence");
+  }
+  const QJsonArray unboundEntries{QJsonObject{{"id","xyz987QWE65"},{"title","Wrong source"}}};
+  for(auto object:QVector<QJsonObject>{{{"entries",unboundEntries}},{{"id","PLWRONG"},{"entries",unboundEntries}}}){
+   const auto snapshot=PlaylistDiscovery::parse(f.source,QJsonDocument(object).toJson(),{},0);
+   require(!snapshot.complete&&snapshot.items.isEmpty(),"unbound entries were attributed to the requested source");
+   require(f.store.reconcile(f.source,snapshot).committed,"refused observations could not preserve history");
+   require(f.store.loadPlaylistItems(f.source.key).size()==1,"wrong-source membership was inserted");
+  }
+  const auto valid=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",noEntries}}).toJson(),{},0);
+  require(valid.complete,"exact provider identity rejected a complete empty snapshot");
+  require(f.store.reconcile(f.source,valid).committed,"valid complete snapshot not committed");
+  require(f.store.loadPlaylistItems(f.source.key).first().membership=="removed","legitimate removal inference was disabled");
+ }
+ else if(name=="discovery-explicit-index"){
+  Fixture f;
+  const QVector<QJsonValue> bad{QString("1"),QJsonValue::Null,true,QJsonObject{{"index",1}},
+      QJsonArray{1},0,-1,1.5,2147483648.0};
+  for(const auto& index:bad){
+   const QJsonObject entry{{"id","xyz987QWE65"},{"title","Observed"},{"playlist_index",index}};
+   const auto snapshot=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{entry}}}).toJson(),{},0);
+   require(!snapshot.complete,"malformed explicit position was coerced into complete discovery");
+   require(f.store.reconcile(f.source,snapshot).committed,"partial malformed-index observation failed");
+   const auto rows=f.store.loadPlaylistItems(f.source.key);
+   bool kept=false;for(const auto& row:rows)if(row.itemKey==f.item.itemKey)kept=row.membership=="active";
+   require(kept,"malformed explicit position authorized removal");
+  }
+ }
+ else if(name=="discovery-position-uniqueness"){
+  Fixture f;
+  const QJsonObject first{{"id","xyz987QWE65"},{"title","One"},{"playlist_index",1}};
+  const QJsonObject second{{"id","AAA111bbb22"},{"title","Two"},{"playlist_index",1}};
+  const auto duplicate=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{first,second}}}).toJson(),{},0);
+  require(!duplicate.complete,"duplicate explicit positions authorized removals");
+  require(f.store.reconcile(f.source,duplicate).committed,"partial duplicate observation failed");
+  bool kept=false;for(const auto& row:f.store.loadPlaylistItems(f.source.key))if(row.itemKey==f.item.itemKey)kept=row.membership=="active";
+  require(kept,"contradictory positions removed history");
+  auto absentFirst=first,absentSecond=second;absentFirst.remove("playlist_index");absentSecond.remove("playlist_index");
+  const auto ordered=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{absentFirst,absentSecond}}}).toJson(),{},0);
+  require(ordered.complete&&ordered.items.size()==2,"supported absent-index fallback rejected");
+  require(ordered.items[0].position==1&&ordered.items[1].position==2,"array-order fallback not deterministic");
+  auto mixedFirst=first;mixedFirst["playlist_index"]=2;
+  const auto mixed=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{mixedFirst,absentSecond}}}).toJson(),{},0);
+  require(!mixed.complete,"explicit and inferred position conflict authorized removals");
+  auto repeated=absentFirst;
+  const auto repeat=PlaylistDiscovery::parse(f.source,QJsonDocument(QJsonObject{{"id",f.source.key},{"entries",QJsonArray{repeated,repeated}}}).toJson(),{},0);
+  require(repeat.complete&&repeat.items.size()==2,"legitimate repeated video occurrences disabled");
+ }
  else if(name=="discovery-null"){Source s;auto r=PlaylistDiscovery::parse(s,R"({"entries":[null]})","",0);require(!r.complete,"null entries must prevent removal inference");}
  else if(name=="discovery-count"){Source s;auto r=PlaylistDiscovery::parse(s,R"({"entries":[],"playlist_count":3})","",0);require(!r.complete,"truncated playlist must be partial");}
  else if(name=="discovery-error"){Source s;auto r=PlaylistDiscovery::parse(s,R"({"entries":[]})","ERROR: failed to fetch page",0);require(!r.complete,"ignore-errors cannot authorize removals");}
@@ -64,6 +124,98 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
    require(f.store.reconcile(source,reordered).committed,"reordered unresolved reconciliation failed");const auto after=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty()&&after.size()==2,"reordered unresolved occurrences missing");
    QSet<QString> beforeKeys,afterKeys;for(const auto& item:before)beforeKeys.insert(item.itemKey);for(const auto& item:after)afterKeys.insert(item.itemKey);require(beforeKeys==afterKeys,"unresolved reorder changed canonical identities");
   }
+
+ else if(name=="orphan-data"){
+  // Registry loss must never turn existing media, state or recovery evidence
+  // into a new empty archive. Each path is isolated and checked byte-for-byte.
+  const QStringList evidence{
+   "Video/kept.mp4", "Audio/kept.m4a", "Metadata/kept.json",
+   "State/download-archive.txt", "State/ArchiveMode/catalog.json",
+   "Temp/interrupted.part", "Video/.hidden-media",
+   "State/ArchiveMode/Imports/Pending/old/manifest.json",
+   "State/ArchiveMode/Imports/Accepted/old/receipt.json",
+   "State/ArchiveMode/Imports/Rejected/old/manifest.json",
+   "State/ArchiveMode/Logs/Activity/2000-01-01/history.jsonl",
+   "ARCHIVE_AGENT.md"
+  };
+  for(const auto& relative:evidence){
+   QTemporaryDir tmp(testTempTemplate());require(tmp.isValid(),"temporary root");
+   Paths paths(tmp.path());const auto file=QDir(tmp.path()).filePath(relative);
+   const QByteArray bytes="preserve this existing archive evidence\n";put(file,bytes);
+   Store store(paths);QString error;
+   require(!store.initialize(&error),"orphan evidence accepted as fresh: "+relative);
+   require(!error.isEmpty(),"orphan refusal needs an actionable error");
+   require(get(file)==bytes,"orphan evidence changed: "+relative);
+   require(!QFileInfo::exists(paths.sourcesFile())&&!QFileInfo::exists(paths.itemsFile()),"empty registries were created beside "+relative);
+   require(!store.initialize(&error),"repeated initialization bypassed orphan refusal");
+  }
+  for(const auto& relative:QStringList{"Video/old-empty-directory","Playlists/PLLOST","Metadata/old-empty-directory"}){
+   QTemporaryDir tmp(testTempTemplate());require(tmp.isValid(),"temporary root");
+   Paths paths(tmp.path());require(QDir().mkpath(QDir(tmp.path()).filePath(relative)),"make orphan directory");
+   Store store(paths);QString error;require(!store.initialize(&error),"orphan directory accepted: "+relative);
+  }
+ }
+ else if(name=="archive-identity"){
+  QTemporaryDir tmp(testTempTemplate());require(tmp.isValid(),"temporary root");
+  Paths paths(tmp.path());Store store(paths);QString error;
+  // Root-level unrelated documentation is not an archive payload. Generated
+  // empty layout from the existing logger/lock constructors remains admissible.
+  put(QDir(tmp.path()).filePath("operator-notes.txt"),"keep notes\n");
+  require(paths.ensureLayout(&error),error);
+  require(store.initialize(&error),"genuinely fresh root rejected: "+error);
+  const auto identity=QDir(paths.archiveState()).filePath("archive-identity.json");
+  require(QFileInfo::exists(identity),"fresh archive has no durable identity");
+  const auto identityBytes=get(identity);const auto object=QJsonDocument::fromJson(identityBytes).object();
+  require(object.value("schema_version")==1&&!object.value("archive_id").toString().isEmpty(),"invalid identity marker");
+  require(store.initialize(&error),error);require(get(identity)==identityBytes,"identity changed after restart");
+  // Even an otherwise empty previously initialized archive must not reset.
+  require(QFile::remove(paths.sourcesFile())&&QFile::remove(paths.itemsFile()),"remove fixture registries");
+  require(!store.initialize(&error),"identified archive silently reset after both registries disappeared");
+  require(get(identity)==identityBytes,"lost-registry refusal changed identity");
+  require(get(QDir(tmp.path()).filePath("operator-notes.txt"))=="keep notes\n","unrelated file changed");
+ }
+ else if(name=="legacy-admission"){
+  Fixture f;const auto identity=QDir(f.paths.archiveState()).filePath("archive-identity.json");
+  if(QFileInfo::exists(identity))require(QFile::remove(identity),"remove fixture identity for legacy test");
+  const auto sources=get(f.paths.sourcesFile()),items=get(f.paths.itemsFile());
+  const auto playlist=get(f.paths.playlistItemsFile(f.source.key));
+  const auto history=get(f.paths.playlistHistoryFile(f.source.key));QString error;
+  require(f.store.initialize(&error),"valid legacy archive rejected: "+error);
+  require(QFileInfo::exists(identity),"legacy archive identity migration missing");
+  require(get(f.paths.sourcesFile())==sources&&get(f.paths.itemsFile())==items,"legacy registry rewritten by identity migration");
+  require(get(f.paths.playlistItemsFile(f.source.key))==playlist&&get(f.paths.playlistHistoryFile(f.source.key))==history,"legacy history changed");
+  const QByteArray damaged="{\"schema_version\":99,\"archive_id\":\"broken\"}\n";put(identity,damaged);
+  require(!f.store.initialize(&error),"unsupported identity marker accepted");
+  require(!error.isEmpty(),"unsupported marker must explain its refusal");
+  require(get(identity)==damaged&&get(f.paths.itemsFile())==items,"unsupported marker or registry overwritten");
+  require(QFile::remove(identity)&&QFile::remove(f.paths.sourcesFile()),"prepare incomplete registry");
+  require(!f.store.initialize(&error),"one missing legacy registry accepted");
+  require(get(f.paths.itemsFile())==items,"incomplete legacy state overwritten");
+ }
+
+ else if(name=="admission-journal"){
+  QTemporaryDir tmp(testTempTemplate());require(tmp.isValid(),"temporary root");Paths paths(tmp.path());Store store(paths);QString error;
+  require(paths.ensureLayout(&error),error);
+  const QString identityRel="State/ArchiveMode/archive-identity.json";
+  const auto identity=QJsonDocument(QJsonObject{{"schema_version",1},{"format","mdps-archive"},
+      {"archive_id","11111111-2222-4333-8444-555555555555"},
+      {"created_at","2026-01-01T00:00:00.000Z"},{"admitted_from","fresh"}}).toJson();
+  QMap<QString,QByteArray> writes{{identityRel,identity},{"State/ArchiveMode/items.json","[]\n"},{"State/ArchiveMode/sources.json","[]\n"}};
+  QJsonArray operations;
+  for(auto i=writes.begin();i!=writes.end();++i)operations.append(QJsonObject{
+      {"path",i.key()},{"before_exists",false},{"before_sha256",detail::digest({})},
+      {"after_base64",QString::fromLatin1(i.value().toBase64())},{"after_sha256",detail::digest(i.value())}});
+  const auto journal=QJsonDocument(QJsonObject{{"schema_version",1},{"operations",operations}}).toJson();
+  put(detail::journalPath(paths.root()),journal);
+  // Simulate a process dying after the first atomic replacement. Restart must
+  // honor the complete durable intent, not reject or generate a new identity.
+  put(QDir(paths.root()).filePath(identityRel),identity);
+  require(store.initialize(&error),"interrupted initialization did not recover: "+error);
+  require(get(QDir(paths.root()).filePath(identityRel))==identity,"restart changed journaled identity");
+  require(get(paths.itemsFile())=="[]\n"&&get(paths.sourcesFile())=="[]\n","restart did not restore exact registry payloads");
+  require(!QFileInfo::exists(detail::journalPath(paths.root())),"completed admission intent not retired");
+  require(store.initialize(&error),"repeated admission recovery failed");
+ }
 
  else if(name=="projection-commit-outcome"){
   Fixture f;const auto catalog=QDir(f.paths.sourceDir(f.source.key)).filePath("catalog.csv");
