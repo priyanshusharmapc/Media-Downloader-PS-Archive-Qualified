@@ -178,6 +178,13 @@ else()
 endif()
 
 if(BUILD_TESTING)
+    if(NOT APPLE)
+        add_test(NAME engine-proxy-secret-redaction
+            COMMAND media-downloader --media-downloader-test-engine-proxy-security)
+        set_tests_properties(engine-proxy-secret-redaction PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endif()
+
     add_executable(archive-core-tests
         tests/archive-core-tests.cpp
         src/archive/archivecore.cpp
