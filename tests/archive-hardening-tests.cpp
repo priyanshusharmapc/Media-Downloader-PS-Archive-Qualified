@@ -63,6 +63,7 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
   require(!resolved.isEmpty()&&QFileInfo(resolved).fileName().compare(toolName,Qt::CaseInsensitive)==0,
           "explicit development mode could not opt into system tools");
   qputenv("PATH",oldPath);
+  return 0;
  }
  if(name=="discovery-shape"){Source s;auto r=PlaylistDiscovery::parse(s,"{}","",0);require(!r.complete,"non-playlist JSON must not be complete");}
 
