@@ -105,3 +105,9 @@ boundary, and how unavailable media becomes durably `blocked_unavailable`.
 [Sealed runtime tool resolution](remediation/005.md) documents the default
 package-only resolver and the explicit, non-qualified development opt-in for
 system `PATH` tools.
+
+## Application update trust boundary
+
+[Fork-bound application updates](remediation/003.md) documents the qualified
+fork release endpoint, opt-in automatic update policy, and release-asset
+repository validation.
