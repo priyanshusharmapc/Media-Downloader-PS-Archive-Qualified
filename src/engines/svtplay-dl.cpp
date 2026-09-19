@@ -504,6 +504,8 @@ std::vector<engines::engine::baseEngine::mediaInfo> svtplay_dl::mediaProperties(
 
 		}else if( n == 3 ){
 
+			// Exact-three-token rows contain only the prefix, format and method.
+			// Do not consume a fourth field from an already empty token list.
 			a.takeAt( 0 ) ;
 
 			auto format = a.takeAt( 0 ) ;
@@ -511,7 +513,7 @@ std::vector<engines::engine::baseEngine::mediaInfo> svtplay_dl::mediaProperties(
 			if( _add( s,format ) ){
 
 				auto method     = "Method: " + a.takeAt( 0 ) ;
-				auto codec      = a.takeAt( 0 ) ;
+				auto codec      = QString( "N/A" ) ;
 				auto resolution = "N/A" ;
 				auto notes      = method ;
 
