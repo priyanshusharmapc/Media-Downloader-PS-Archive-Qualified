@@ -2219,6 +2219,13 @@ namespace utility
 
 					auto args = util::splitPreserveQuotes( a ) ;
 
+					// A non-empty persisted string can still tokenize to zero
+					// arguments (for example, whitespace-only legacy settings).
+					// Do not index/remove element 0 until a real executable token exists.
+					if( args.isEmpty() ){
+						return ;
+					}
+
 					auto exe = args.takeAt( 0 ) ;
 
 					QProcess::startDetached( exe,args ) ;
