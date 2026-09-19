@@ -261,7 +261,9 @@ void MainWindow::setUpSignals( MainWindow * m )
 	// Fatal synchronous signals deliberately keep their default disposition:
 	// attempting autosave/UI work from corrupted process state is unsafe and
 	// returning from SIGSEGV/SIGABRT can immediately re-enter the fault.
-	MainWindow::setUpSignal( SIGTERM,SIGINT ) ;
+	if( !MainWindow::setUpSignal( SIGTERM,SIGINT ) ){
+		std::cerr << "Failed to install one or more graceful signal handlers" << std::endl ;
+	}
 }
 
 void MainWindow::signalHandler( int sig )
@@ -269,9 +271,9 @@ void MainWindow::signalHandler( int sig )
 	m_signalPending = sig ;
 }
 
-void MainWindow::setUpSignal( int sig )
+bool MainWindow::setUpSignal( int sig )
 {
-	std::signal( sig,MainWindow::signalHandler ) ;
+	return std::signal( sig,MainWindow::signalHandler ) != SIG_ERR ;
 }
 
 void MainWindow::closeEvent( QCloseEvent * )
