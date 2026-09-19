@@ -3075,8 +3075,14 @@ void batchdownloader::downloadRecursively( const engines::engine& eng,int index 
 	class meaw
 	{
 	public:
-		meaw( batchdownloader& p,const engines::engine& engine,int index ) :
-			m_parent( p ),m_engine( engine ),m_index( index )
+		meaw( batchdownloader& p,
+		      const engines::engine& defaultEngine,
+		      const engines::engine& engine,
+		      int index ) :
+			m_parent( p ),
+			m_defaultEngine( defaultEngine ),
+			m_engine( engine ),
+			m_index( index )
 		{
 		}
 		void whenCreated()
@@ -3111,17 +3117,18 @@ void batchdownloader::downloadRecursively( const engines::engine& eng,int index 
 
 			if( m != -1 ){
 
-				m_parent.downloadRecursively( m_engine,m ) ;
+				m_parent.downloadRecursively( m_defaultEngine,m ) ;
 			}
 		}
 		batchdownloader& m_parent ;
+		const engines::engine& m_defaultEngine ;
 		const engines::engine& m_engine ;
 		int m_index ;
 	} ;
 
 	const auto& engine = utility::resolveEngine( m_table,eng,m_ctx.Engines(),index ) ;
 
-	this->downloadEvent( meaw( *this,engine,index ),engine,index,true ) ;
+	this->downloadEvent( meaw( *this,eng,engine,index ),engine,index,true ) ;
 }
 
 void batchdownloader::addTextToUi( const QByteArray& data,int index )
