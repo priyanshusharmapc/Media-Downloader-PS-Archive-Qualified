@@ -144,6 +144,10 @@ quickjs_ng::nameAndExe quickjs_ng::getNameAndExe()
 		}else{
 			return str( "qjs-windows-x86.exe" ) ;
 		}
+	}else if( utility::platformIsOSX() ){
+
+		// The macOS release uses one executable name for supported CPU variants.
+		return str( "qjs-darwin" ) ;
 	}else{
 		if( cpu.x86_64() ){
 
