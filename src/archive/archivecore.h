@@ -299,7 +299,8 @@ QString videoIdFromUrl(const QString& url);
 QString sourceKeyFromUrl(const QString& url);
 QString availabilityFromEntry(const QJsonObject& entry);
 QString canonicalKey(const QString& providerId,const QString& sourceKey,int position,const QString& title);
-QString derivedStatus(const PlaylistItem& playlistItem,const CanonicalItem* canonical);
+bool representationVerificationCurrent(const Paths& paths,const Representation& representation);
+QString derivedStatus(const PlaylistItem& playlistItem,const CanonicalItem* canonical,bool videoCurrent,bool audioCurrent);
 
 } // namespace archive
 
