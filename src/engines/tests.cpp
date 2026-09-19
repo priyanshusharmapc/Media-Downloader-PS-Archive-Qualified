@@ -29,12 +29,23 @@
 #include "getsauce.h"
 
 #include "../util.hpp"
+#include "../utility.h"
+#include "../directoryEntries.h"
 
 #include <iostream>
 #include <array>
+#include <atomic>
 
 #include <QString>
 #include <QEventLoop>
+#include <QTemporaryDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 #define TEST_ENGINE_PREFIX "--media-downloader-test-engine"
 
@@ -109,6 +120,9 @@ public:
 			if( arg == TEST_ENGINE_PREFIX"-proxy-security" ){
 				return this->testProxySecurity() ;
 			}
+			if( arg == TEST_ENGINE_PREFIX"-library-filesystem-boundary" ){
+				return this->testLibraryFilesystemBoundary() ;
+			}
 		}
 
 		Tests tests ;
@@ -161,6 +175,92 @@ public:
 			}
 		} ) ;
 	}
+	void testLibraryFilesystemBoundary()
+	{
+		QTemporaryDir temp ;
+		bool ok = temp.isValid() ;
+		const auto base = temp.path() ;
+		const auto root = base + "/root" ;
+		const auto nested = root + "/nested" ;
+		const auto outside = base + "/outside" ;
+		const auto outsideFile = outside + "/sentinel.txt" ;
+		const auto outsideDirectoryFile = outside + "/directory-sentinel.txt" ;
+
+		QDir().mkpath( nested ) ;
+		QDir().mkpath( outside ) ;
+		{
+			QFile f( outsideFile ) ;
+			ok = ok && f.open( QIODevice::WriteOnly ) && f.write( "sentinel" ) == 8 ;
+		}
+		{
+			QFile f( outsideDirectoryFile ) ;
+			ok = ok && f.open( QIODevice::WriteOnly ) && f.write( "directory-sentinel" ) == 18 ;
+		}
+
+		const auto directoryLink = nested + "/external-directory" ;
+		const auto fileLink = nested + "/external-file" ;
+		bool directoryLinked = false ;
+		bool fileLinked = false ;
+#ifdef Q_OS_WIN
+		const DWORD allowUnprivilegedCreate = 0x2 ;
+		auto nativeDirectoryLink = QDir::toNativeSeparators( directoryLink ).toStdWString() ;
+		auto nativeOutside = QDir::toNativeSeparators( outside ).toStdWString() ;
+		auto nativeFileLink = QDir::toNativeSeparators( fileLink ).toStdWString() ;
+		auto nativeOutsideFile = QDir::toNativeSeparators( outsideFile ).toStdWString() ;
+		directoryLinked = CreateSymbolicLinkW( nativeDirectoryLink.c_str(),nativeOutside.c_str(),
+			SYMBOLIC_LINK_FLAG_DIRECTORY | allowUnprivilegedCreate ) != 0 ;
+		fileLinked = CreateSymbolicLinkW( nativeFileLink.c_str(),nativeOutsideFile.c_str(),
+			allowUnprivilegedCreate ) != 0 ;
+#else
+		directoryLinked = QFile::link( outside,directoryLink ) ;
+		fileLinked = QFile::link( outsideFile,fileLink ) ;
+#endif
+
+		ok = ok && directoryLinked && fileLinked ;
+		if( directoryLinked && fileLinked ){
+			std::atomic_bool keepGoing{ true } ;
+			directoryManager::removeDirectory( root,keepGoing ) ;
+			ok = ok && QFileInfo::exists( outsideFile ) && QFileInfo::exists( outsideDirectoryFile ) ;
+			ok = ok && !QFileInfo::exists( root ) ;
+		}
+
+		const auto renameRoot = base + "/rename" ;
+		QDir().mkpath( renameRoot ) ;
+		const auto source = renameRoot + "/source.txt" ;
+		const auto collision = renameRoot + "/collision.txt" ;
+		{
+			QFile f( source ) ;
+			ok = ok && f.open( QIODevice::WriteOnly ) && f.write( "source" ) == 6 ;
+		}
+		{
+			QFile f( collision ) ;
+			ok = ok && f.open( QIODevice::WriteOnly ) && f.write( "collision" ) == 9 ;
+		}
+
+		QString destination ;
+		QString error ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,"../outside.txt",destination,error ) ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,"nested/name.txt",destination,error ) ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,"nested\\name.txt",destination,error ) ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,QDir( base ).absoluteFilePath( "absolute.txt" ),destination,error ) ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,"collision.txt",destination,error ) ;
+		ok = ok && utility::libraryRenameDestination( renameRoot,"renamed.txt",destination,error ) ;
+		if( ok ){
+			ok = utility::rename( source,destination ).isEmpty() ;
+			ok = ok && QFileInfo::exists( destination ) && QFileInfo::exists( collision ) ;
+		}
+
+		if( ok ){
+			std::cout << "library-filesystem-boundary=PASS" << std::endl ;
+			m_args.app.exit( 0 ) ;
+		}else{
+			std::cerr << "library-filesystem-boundary=FAIL"
+				<< " directoryLinked=" << directoryLinked
+				<< " fileLinked=" << fileLinked << std::endl ;
+			m_args.app.exit( 1 ) ;
+		}
+	}
+
 	void testProxySecurity()
 	{
 		const QString secret = "DistinctiveProxySecret077" ;
