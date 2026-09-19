@@ -1,0 +1,281 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 2f1aaf86cc1999255a6b2b98c2517eac85b0d547..cf0d56941f09630ed8bf47992d84b8cebf10536c 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -484,6 +484,10 @@ if(BUILD_TESTING)
+     else()
+         target_link_libraries(archive-hardening-tests Qt5::Core)
+     endif()
++    foreach(case projection-commit-outcome recovery-commit-outcome)
++        add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
++        set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30)
++    endforeach()
+     foreach(case discovery-shape discovery-null discovery-count discovery-error portable-paths reserved-device-variants reparse-policy root-symlink parent-symlink linked-state linked-media placeholder-position placeholder-reorder source-traversal state-shape source-state-corruption snapshot-identity import-identity import-id-only import-schema partial-recovery-status nested-redaction deleted-title linked-package-file)
+         add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
+         set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
+diff --git a/docs/README.md b/docs/README.md
+index 3d13646b418d09b03d30d1fa10090ba3b892ba84..fc22f4241c771fdec728581cb383d94783d7176d 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -76,3 +76,9 @@ Do not add hardcoded "latest" build identities to maintained docs. Point readers
+ ## Archive Root selection
+ 
+ [Archive Root configuration and recovery](ARCHIVE_ROOT_CONFIGURATION.md) documents explicit opt-in, offline-root behavior, transactional selection, and settings compatibility for audit findings 001 and 032.
++
++## Committed work and report warnings
++
++[Transaction outcomes and projection repair](remediation/025.md) documents
++accurate accepted counts, separate post-commit warnings, CLI exit codes, and
++non-destructive report-only recovery.
+diff --git a/docs/remediation/025.md b/docs/remediation/025.md
+new file mode 100644
+index 0000000000000000000000000000000000000000..4b12b1bcfde03562a3345344400e9a0bf93e5097
+--- /dev/null
++++ b/docs/remediation/025.md
+@@ -0,0 +1,60 @@
++# MDPS-AUDIT2-025: committed state and generated-report outcomes
++
++The authoritative transaction and its generated reports have separate outcomes.
++Reconciliation returns `committed=true` as soon as registry and history writes
++have committed, with accurate observed/active/removal counts even when a report
++cannot be rebuilt. `projectionsCurrent` and `projectionWarning` describe that
++second stage. `error` remains the authoritative-operation failure channel.
++
++Recovery acceptance follows the same rule: a true `ingest` result means media
++promotion, canonical state, receipt and the move to Accepted committed. A later
++report failure is returned separately and logged against the acceptance event.
++`ingestPending` counts that acceptance and appends its projection warning to a
++separate list, not to retryable Pending failures. A genuinely uncommitted next
++package still fails normally; this change does not bypass initialization,
++transaction recovery, validation, locks or filesystem checks.
++
++The existing journaled `projections-dirty.json` marker survives report failure.
++Fix the blocked generated-report destination, preserving any unrelated file or
++directory there. Rebuild views from committed state with:
++
++```text
++archive-cli rebuild-projections <archive-root>
++```
++
++Normal initialization also repairs a dirty projection when its destination is
++usable again. Neither route repeats discovery, re-promotes media, changes an
++Accepted receipt, or appends another acceptance/history event. No archive data
++or user-created obstruction is deleted automatically to make a report writable.
++
++## CLI compatibility
++
++Existing command forms and result fields remain. Scan adds `committed` and
++`projections` fields; import adds `warnings`. Diagnostics describe committed work
++explicitly. Exit codes are:
++
++| Code | Meaning |
++| --- | --- |
++| 0 | Requested operation and generated reports succeeded. |
++| 1 | A requested authoritative operation, initialization, or explicit report repair failed. An import batch can still report earlier accepted packages. |
++| 2 | Invalid CLI arguments, unchanged. |
++| 3 | Incomplete discovery, unchanged, including when the same scan also reports dirty projections. |
++| 4 | A complete scan or otherwise successful import batch committed, but generated reports need rebuilding. Do not resubmit accepted packages. |
++
++The GUI shows `COMPLETED WITH WARNINGS`, preserves accepted/observed counts, and
++explains report-only recovery. A later health refresh may still show the blocked
++projection as unhealthy; it does not change the recorded operation outcome.
++Mixed batches retain failures and warnings separately, and cancellation retains
++its existing stop-at-boundary behavior.
++
++## Regression evidence
++
++Two new hardening cases and two real-media CLI integration tests reproduced the
++old false-failure behavior before the correction. They block only a generated
++catalog path in a temporary initialized archive, assert durable state and package
++placement, and compare registry/history/receipt/media bytes after repeated
++report-only recovery. The actual-widget regression exercises the asynchronous
++Pending-import action and verifies accepted count plus warning classification.
++The complete existing suite remains enabled. Exact commit, local/sanitizer/CI
++results and integration status are recorded in issue #3, not inferred from this
++document. Frozen audit evidence remains unchanged.
+diff --git a/src/archive/archivecli.cpp b/src/archive/archivecli.cpp
+index bd441458888f8fb3ef1470b31e314be1c80884e9..a6c806f9d691051f7692419ed6a3a14a33b6306b 100644
+--- a/src/archive/archivecli.cpp
++++ b/src/archive/archivecli.cpp
+@@ -20,6 +20,7 @@ void usage(QTextStream& out){out<<"Usage:\n"
+     "  archive-cli preflight <archive-root>\n"
+     "  archive-cli validate <archive-root> <package-dir>\n"
+     "  archive-cli ingest-pending <archive-root>\n"
++    "  archive-cli rebuild-projections <archive-root>\n"
+     "  archive-cli scan <archive-root> <youtube-playlist-url> [display-name]\n"
+     "  archive-cli sync-item <archive-root> <youtube-video-url>\n"
+     "  archive-cli verify-item <archive-root> <youtube-video-url>\n";}
+@@ -28,7 +29,7 @@ int main(int argc,char** argv){
+     QCoreApplication app(argc,argv);QTextStream out(stdout),error(stderr);const auto args=app.arguments();
+     if(args.size()<3){usage(error);return 2;}
+     const auto command=args[1];
+-    const bool valid=(QStringList{"preflight","ingest-pending"}.contains(command)&&args.size()==3)||
++    const bool valid=(QStringList{"preflight","ingest-pending","rebuild-projections"}.contains(command)&&args.size()==3)||
+         (QStringList{"validate","sync-item","verify-item"}.contains(command)&&args.size()==4)||
+         (command=="scan"&&(args.size()==4||args.size()==5));
+     if(!valid||args[2].trimmed().isEmpty()){usage(error);return 2;}
+@@ -50,14 +51,26 @@ int main(int argc,char** argv){
+         ok=checkTool(out,error,"deno",tools.deno(),{"--version"})&&ok;
+         out<<"preflight="<<(ok?"PASS":"FAIL")<<"\n";return ok?0:1;
+     }
++    if(command=="rebuild-projections"){
++        // Retry only rebuildable views of already committed state. In
++        // particular, never replay a scan or an Accepted recovery package.
++        if(!store.writeAllProjections(&stateError)){error<<"Projection rebuild failed: "<<stateError<<"\n";return 1;}
++        out<<"projections=current\n";return 0;
++    }
+     if(command=="validate"){
+         archive::RecoveryImporter importer(config,store,logger);const auto result=importer.validate(QFileInfo(args[3]).absoluteFilePath());
+         if(result.ok){out<<"VALID\npackage_id="<<result.packageId<<"\nitem_key="<<result.itemKey<<"\n";return 0;}
+         error<<"INVALID\n"<<result.errors.join('\n')<<"\n";return 1;
+     }
+     if(command=="ingest-pending"){
+-        archive::RecoveryImporter importer(config,store,logger);QStringList failures;const auto accepted=importer.ingestPending(&failures);
+-        out<<"accepted="<<accepted<<"\n";if(!failures.isEmpty())error<<failures.join('\n')<<"\n";return failures.isEmpty()?0:1;
++        archive::RecoveryImporter importer(config,store,logger);QStringList failures,warnings;
++        const auto accepted=importer.ingestPending(&failures,{},&warnings);
++        out<<"accepted="<<accepted<<"\nwarnings="<<warnings.size()<<"\n";
++        if(!failures.isEmpty())error<<failures.join('\n')<<"\n";
++        if(!warnings.isEmpty())error<<warnings.join('\n')<<"\n";
++        // Preserve failure=1. Exit 4 means acceptance committed but generated
++        // reports need repair; callers must not resubmit those packages.
++        return !failures.isEmpty()?1:!warnings.isEmpty()?4:0;
+     }
+     if(command=="scan"){
+         auto sources=store.loadSources(&stateError);if(!stateError.isEmpty()){error<<stateError<<"\n";return 1;}
+@@ -66,8 +79,13 @@ int main(int argc,char** argv){
+         for(const auto& previous:sources)if(previous.key==sourceKey){source=previous;source.url=args[3];if(args.size()==5)source.title=args[4];break;}
+         archive::PlaylistDiscovery discovery(config,logger);const auto snapshot=discovery.discover(source);const auto result=store.reconcile(source,snapshot,&logger);
+         out<<"complete="<<(snapshot.complete?"true":"false")<<"\nobserved="<<result.observed<<"\nactive="<<result.active<<"\nremoved="<<result.removed<<"\nunavailable="<<result.unavailable<<"\n";
++        out<<"committed="<<(result.committed?"true":"false")<<"\nprojections="<<(!result.committed?"not_attempted":result.projectionsCurrent?"current":"dirty")<<"\n";
+         if(!result.committed){error<<result.error<<"\n";return 1;}
+-        if(!snapshot.complete)error<<snapshot.error<<"\n";return snapshot.complete?0:3;
++        if(!result.projectionWarning.isEmpty())error<<result.projectionWarning<<"\n";
++        if(!snapshot.complete)error<<snapshot.error<<"\n";
++        // Partial discovery keeps its existing exit 3, even with dirty views.
++        // A complete committed scan with dirty views has distinct exit 4.
++        return !snapshot.complete?3:!result.projectionsCurrent?4:0;
+     }
+     const auto key="youtube:"+id;auto items=store.loadCanonicalItems(&stateError);
+     if(!stateError.isEmpty()){error<<stateError<<"\n";return 1;}
+diff --git a/src/archive/archivecore.cpp b/src/archive/archivecore.cpp
+index 423740c720820a1f8bcf999632e1399b52b0f7b4..155702ad10c0fbe11b64fda98946faa0a235179b 100644
+--- a/src/archive/archivecore.cpp
++++ b/src/archive/archivecore.cpp
+@@ -725,7 +725,13 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
+         {dir+"playlist.json",QJsonDocument(sourceToJson(source)).toJson()},
+         {dir+"history.jsonl",history}};
+     if(!detail::commitTransaction(m_paths.root(),files,&error)){summary.error=error;return summary;}
+-    if(!writeAllProjections(&error)){ summary.error="State committed, projection rebuild required: "+error; return summary; }
++    // The authoritative commit has already completed. Projection failures leave
++    // the durable dirty marker for report-only recovery; they must not erase
++    // counts or tell a caller to replay this registry/history transaction.
++    summary.committed=true;
++    summary.projectionsCurrent=writeAllProjections(&error);
++    if(!summary.projectionsCurrent)
++        summary.projectionWarning="State committed, projection rebuild required: "+error;
+ 
+     for(const auto& p:result){
+         if(p.membership=="active") ++summary.active;
+@@ -735,11 +741,12 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
+             if(canonical[ci].audio.state!="complete") ++summary.needsAudio;
+         }
+     }
+-    summary.committed=true;
+-    if(logger) logger->event("INFO","reconciliation","snapshot_reconciled",{
++    if(logger) logger->event(summary.projectionsCurrent?"INFO":"WARNING","reconciliation","snapshot_reconciled",{
+         {"source_key",source.key},{"complete",snapshot.complete},{"observed",summary.observed},{"active",summary.active},
+         {"removed",summary.removed},{"reappeared",summary.reappeared},{"unavailable",summary.unavailable},
+-        {"needs_video",summary.needsVideo},{"needs_audio",summary.needsAudio}});
++        {"needs_video",summary.needsVideo},{"needs_audio",summary.needsAudio},
++        {"committed",summary.committed},{"projections_current",summary.projectionsCurrent},
++        {"projection_warning",summary.projectionWarning}});
+     return summary;
+ }
+ 
+@@ -1295,8 +1302,10 @@ bool RecoveryImporter::normalizeAudio(const QString& input,const QString& output
+     if(!r.ok){if(error)*error=r.error+" "+r.standardError.left(1000);return false;} return true;
+ }
+ 
+-bool RecoveryImporter::ingest(const QString& packageDir,QString* error)
++bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* projectionWarning)
+ {
++    if(error)error->clear();
++    if(projectionWarning)projectionWarning->clear();
+     SyncLock lock(m_store.paths());if(!lock.tryLock())return detail::reject(error,lock.errorString());
+     if(!m_store.initialize(error))return false;
+     const auto absolute=QFileInfo(packageDir).absoluteFilePath();
+@@ -1367,11 +1376,20 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error)
+         return false;
+     }
+     staging.setAutoRemove(true);
+-    if(!m_store.writeAllProjections(error))return false;
+-    m_logger.event("INFO","import","recovery_package_accepted",{{"package_id",vr.packageId},{"item_key",vr.itemKey}});return true;
++    // Media promotion, registry/history, receipt and Accepted placement are
++    // already durable. Do not classify a report-path failure as a failed import
++    // or replay normalization. writeAllProjections retains the dirty marker.
++    QString reportError,warning;
++    const bool projectionsCurrent=m_store.writeAllProjections(&reportError);
++    if(!projectionsCurrent)warning="State committed, projection rebuild required: "+reportError;
++    if(projectionWarning)*projectionWarning=warning;
++    m_logger.event(projectionsCurrent?"INFO":"WARNING","import","recovery_package_accepted",{
++        {"package_id",vr.packageId},{"item_key",vr.itemKey},{"projections_current",projectionsCurrent},
++        {"projection_warning",warning}});
++    return true;
+ }
+ 
+-int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bool()>& shouldStop)
++int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bool()>& shouldStop,QStringList* warnings)
+ {
+     SyncLock lock(m_store.paths());if(!lock.tryLock()){if(failures)failures->append(lock.errorString());return 0;}
+     QString initError;if(!m_store.initialize(&initError)){if(failures)failures->append(initError);return 0;}
+@@ -1380,7 +1398,12 @@ int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bo
+         if(shouldStop&&shouldStop()){if(failures)failures->append("Stopped before all packages completed");break;}
+         const auto dir=d.filePath(name);const auto validation=validate(dir);QString error;
+         if(validation.ok){
+-            if(ingest(dir,&error)){++accepted;continue;}
++            QString warning;
++            if(ingest(dir,&error,&warning)){
++                ++accepted;
++                if(warnings&&!warning.isEmpty())warnings->append(name+": "+warning);
++                continue;
++            }
+             // Tool, storage and interrupted-transaction failures stay retryable in Pending.
+             if(failures)failures->append(name+": retryable failure: "+error);
+             m_logger.event("ERROR","import","recovery_package_pending",{{"package_id",name},{"reason",error}});
+diff --git a/src/archive/archivecore.h b/src/archive/archivecore.h
+index fe26f773f42b707e5a568ee73407c32f95249bb5..49c328df4aec6c14065b102cb8bf945d04e7340d 100644
+--- a/src/archive/archivecore.h
++++ b/src/archive/archivecore.h
+@@ -84,9 +84,14 @@ struct Snapshot
+     QVector<PlaylistItem> items;
+ };
+ 
++// Authoritative state and generated reports have different commit boundaries.
++// A report failure never makes a completed registry/history transaction unsafe
++// to count as committed, nor is it permission to replay that transaction.
+ struct ReconcileSummary
+ {
+     bool committed = false;
++    bool projectionsCurrent = false;
++    QString projectionWarning;
+     bool completeSnapshot = false;
+     int observed = 0;
+     int active = 0;
+@@ -248,8 +253,14 @@ class RecoveryImporter
+ public:
+     RecoveryImporter(RuntimeConfig config,Store& store,ActivityLogger& logger);
+     ValidationResult validate(const QString& packageDir) const;
+-    bool ingest(const QString& packageDir,QString* error = nullptr);
+-    int ingestPending(QStringList* failures = nullptr,const std::function<bool()>& shouldStop = {});
++    // Accept one direct Pending package under the archive lock. True means the
++    // media, canonical state, receipt and Accepted move committed. A subsequent
++    // report rebuild failure is a warning, not a retryable admission failure.
++    // False preserves the existing failure/recovery contract through error.
++    bool ingest(const QString& packageDir,QString* error = nullptr,QString* projectionWarning = nullptr);
++    // Count durable acceptances. Append pre-commit failures and post-commit
++    // warnings separately, so callers never label an Accepted package Pending.
++    int ingestPending(QStringList* failures = nullptr,const std::function<bool()>& shouldStop = {},QStringList* warnings = nullptr);
+ private:
+     bool normalizeVideo(const QString& input,const QString& output,QString* error) const;
+     bool normalizeAudio(const QString& input,const QString& output,QString* error) const;
