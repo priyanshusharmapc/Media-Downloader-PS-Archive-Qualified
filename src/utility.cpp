@@ -2889,6 +2889,50 @@ quint64 utility::simpleRandomNumber()
 	return static_cast< quint64 >( time( nullptr ) ) ;
 }
 
+bool utility::libraryRenameDestination( const QString& cwd,
+						const QString& newName,
+						QString& destination,
+						QString& error )
+{
+	// Library Rename is intentionally a basename-only operation. Moving an
+	// entry to another directory is a different capability and must never be
+	// smuggled through "..", separators or an absolute path.
+	if( newName.isEmpty() || newName == "." || newName == ".." ||
+		QDir::isAbsolutePath( newName ) || newName.contains( '/' ) || newName.contains( '\\' ) ||
+		QFileInfo( newName ).fileName() != newName ){
+
+		error = QObject::tr( "Rename requires a file or folder name, not a path." ) ;
+		return false ;
+	}
+
+	const auto parent = QDir::cleanPath( QDir( cwd ).absolutePath() ) ;
+	const auto candidate = QDir::cleanPath( QDir( parent ).absoluteFilePath( newName ) ) ;
+	const auto candidateParent = QDir::cleanPath( QFileInfo( candidate ).absolutePath() ) ;
+
+#ifdef Q_OS_WIN
+	const auto sameParent = candidateParent.compare( parent,Qt::CaseInsensitive ) == 0 ;
+#else
+	const auto sameParent = candidateParent == parent ;
+#endif
+
+	if( !sameParent ){
+
+		error = QObject::tr( "Rename destination is outside the current Library folder." ) ;
+		return false ;
+	}
+
+	QFileInfo existing( candidate ) ;
+	if( existing.exists() || existing.isSymLink() ){
+
+		error = QObject::tr( "Rename destination already exists." ) ;
+		return false ;
+	}
+
+	destination = candidate ;
+	error.clear() ;
+	return true ;
+}
+
 QString utility::rename( const Context& ctx,
 			QTableWidgetItem& item,
 			const QString& cwd,
@@ -2896,11 +2940,22 @@ QString utility::rename( const Context& ctx,
 			const QString& oldName )
 {
 	Logger& logger = ctx.logger() ;
-
-	auto oldPath = cwd + "/" + oldName ;
-	auto newPath = cwd + "/" + newName ;
-
 	auto id = utility::loggerID() ;
+
+	if( newName == oldName ){
+
+		return newName ;
+	}
+
+	QString newPath ;
+	QString validationError ;
+	if( !utility::libraryRenameDestination( cwd,newName,newPath,validationError ) ){
+
+		logger.add( validationError,id ) ;
+		return {} ;
+	}
+
+	const auto oldPath = QDir( cwd ).absoluteFilePath( oldName ) ;
 
 	fileRename rename( oldPath,newPath ) ;
 
