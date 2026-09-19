@@ -1043,15 +1043,37 @@ QString canonicalKey(const QString& providerId,const QString& sourceKey,int,cons
     return placeholderBaseKey(sourceKey,title);
 }
 
-QString derivedStatus(const PlaylistItem& p,const CanonicalItem* c)
+bool representationVerificationCurrent(const Paths& paths,const Representation& representation)
+{
+    if(representation.state!="complete"||representation.path.trimmed().isEmpty()||representation.verifiedAt.trimmed().isEmpty())
+        return false;
+    const auto absolute=paths.absoluteFromRelative(representation.path);
+    const QFileInfo file(absolute);
+    if(absolute.isEmpty()||!file.isFile()||file.size()<=0)
+        return false;
+
+    auto verified=QDateTime::fromString(representation.verifiedAt,Qt::ISODateWithMs);
+    if(!verified.isValid())verified=QDateTime::fromString(representation.verifiedAt,Qt::ISODate);
+    if(!verified.isValid())
+        return false;
+
+    // A successful verification is evidence only for the bytes that existed at
+    // that time. Deletion, truncation, replacement, or ordinary corruption
+    // changes the file metadata and invalidates the visible health claim until
+    // the normal verifier runs again and records a new verifiedAt timestamp.
+    return file.lastModified().toUTC()<=verified.toUTC();
+}
+
+QString derivedStatus(const PlaylistItem& p,const CanonicalItem* c,bool videoCurrent,bool audioCurrent)
 {
     if(!c) return "Unknown";
     const bool v=c->video.state=="complete", a=c->audio.state=="complete";
-    if(p.membership=="removed") return v&&a?"Removed · Archived":"Removed";
-    if(isUnavailable(p.availability)) return v&&a?"Unavailable · Archived":"Missing";
+    const bool current=v&&a&&videoCurrent&&audioCurrent;
+    if(p.membership=="removed") return current?"Removed · Archived":"Removed";
+    if(isUnavailable(p.availability)) return current?"Unavailable · Archived":"Missing";
     if(c->video.state=="failed"||c->audio.state=="failed") return "Failed";
     if(c->video.state=="interrupted"||c->audio.state=="interrupted") return "Interrupted";
-    if(v&&a) return "Protected";
+    if(v&&a) return current?"Protected":"Failed";
     return "Needs Sync";
 }
 
