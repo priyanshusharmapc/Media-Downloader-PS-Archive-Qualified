@@ -67,6 +67,10 @@ int main(int argc,char** argv)
 
     const auto testTemp=QDir(qEnvironmentVariable("ARCHIVE_TEST_TMP",QDir::tempPath())).filePath("archive-media-XXXXXX");
     QTemporaryDir temp(testTemp);require(temp.isValid(),"temporary test root");
+    // Admit the empty fixture root before adding deliberately corrupt media.
+    // Existing-media admission is now separately required to fail closed; every
+    // original decode/verification assertion below remains unchanged.
+    Store store(Paths(temp.path()));QString error;require(store.initialize(&error),"initialize state: "+error);
     const auto video=QDir(temp.path()).filePath("valid.mp4");
     const auto audio=QDir(temp.path()).filePath("valid.m4a");
     const auto wrong=QDir(temp.path()).filePath("wrong.mp4");
@@ -91,7 +95,6 @@ int main(int argc,char** argv)
     require(!verifier.verifyAudio(Paths(temp.path()).relativeToRoot(truncatedAudio)).ok,"truncated audio accepted as complete");
     require(!verifier.verifyVideo(Paths(temp.path()).relativeToRoot(wrong)).ok,"wrong video codec accepted");
 
-    Store store(Paths(temp.path()));QString error;require(store.initialize(&error),"initialize state: "+error);
     CanonicalItem item;item.key="youtube:abc123DEF45";item.providerId="abc123DEF45";item.title="integrity";item.video.state="complete";item.video.path="Video/truncated.mp4";
     require(store.saveCanonicalItems({item},&error),"save complete corrupt state: "+error);
     require(!verifier.verifyVideo(item.video.path).ok,"corrupt complete representation reverified as valid");

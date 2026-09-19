@@ -72,3 +72,7 @@ Documentation should be updated whenever any of the following changes:
 A code change that alters one of these contracts is incomplete until the corresponding documentation is updated. Use [DOCUMENTATION_CHECKLIST.md](DOCUMENTATION_CHECKLIST.md) as the release review checklist.
 
 Do not add hardcoded "latest" build identities to maintained docs. Point readers to package identity and CI evidence instead.
+
+## Archive admission and missing registries
+
+[Missing-registry admission](remediation/012.md) describes orphan-evidence refusal, durable root identity, supported legacy admission and non-destructive recovery expectations.

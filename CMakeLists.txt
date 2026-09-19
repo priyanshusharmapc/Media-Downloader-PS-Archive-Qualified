@@ -487,6 +487,11 @@ if(BUILD_TESTING)
         set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
     endforeach()
 
+    foreach(case orphan-data archive-identity legacy-admission admission-journal)
+        add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
+        set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30)
+    endforeach()
+
     add_executable(archive-media-integrity-tests tests/archive-media-integrity-tests.cpp src/archive/archivecore.cpp src/archive/archive.qrc)
     if(BUILD_WITH_QT6)
         target_link_libraries(archive-media-integrity-tests Qt6::Core)

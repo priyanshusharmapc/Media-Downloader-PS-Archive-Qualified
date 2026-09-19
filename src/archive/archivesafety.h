@@ -2,6 +2,7 @@
 #define MDPS_ARCHIVESAFETY_H
 // Internal filesystem and state integrity helpers. No network or provider access.
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -138,10 +139,28 @@ inline bool historyValid(const QByteArray& bytes,QString* error){
     }
     return true;
 }
+// A root identity survives loss of otherwise empty registries. Its version is
+// deliberately independent of per-record schemas; unknown versions are not
+// permission to initialize a new archive over existing data.
+inline bool archiveIdentityValid(const QJsonObject& object,QString* error){
+    const auto id=object.value("archive_id").toString();
+    const auto origin=object.value("admitted_from").toString();
+    if(object.value("schema_version")!=1||object.value("format")!="mdps-archive"||
+       !QRegularExpression("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").match(id).hasMatch()||
+       id=="00000000-0000-0000-0000-000000000000"||
+       !QDateTime::fromString(object.value("created_at").toString(),Qt::ISODateWithMs).isValid()||
+       (origin!="fresh"&&origin!="legacy_unversioned"))
+        return reject(error,"Invalid or unsupported Archive identity; preserve the marker and restore the archive, not empty registries");
+    return true;
+}
 inline bool transactionPayload(const QString& path,const QByteArray& after,QString* error){
     if(path.endsWith("/history.jsonl"))return historyValid(after,error);
     QJsonParseError pe;const auto doc=QJsonDocument::fromJson(after,&pe);
     if(pe.error!=QJsonParseError::NoError)return reject(error,"Invalid JSON transaction payload");
+    if(path=="State/ArchiveMode/archive-identity.json"){
+        if(!doc.isObject())return reject(error,"Archive identity must be a JSON object; preserve the existing marker");
+        return archiveIdentityValid(doc.object(),error);
+    }
     if(path=="State/ArchiveMode/items.json")return doc.isArray()&&arrayShape(doc.array(),"canonical",error);
     if(path=="State/ArchiveMode/sources.json")return doc.isArray()&&arrayShape(doc.array(),"source",error);
     if(path.startsWith("Playlists/")&&path.endsWith("/items.json"))return doc.isArray()&&arrayShape(doc.array(),"playlist",error);
@@ -149,7 +168,7 @@ inline bool transactionPayload(const QString& path,const QByteArray& after,QStri
 }
 inline QString journalPath(const QString& root){return QDir(root).filePath("State/ArchiveMode/transaction.json");}
 inline bool journalTarget(const QString& path){
-    if(path=="State/ArchiveMode/items.json"||path=="State/ArchiveMode/sources.json"||path=="State/ArchiveMode/projections-dirty.json")return true;
+    if(path=="State/ArchiveMode/items.json"||path=="State/ArchiveMode/sources.json"||path=="State/ArchiveMode/projections-dirty.json"||path=="State/ArchiveMode/archive-identity.json")return true;
     if(QRegularExpression("^State/ArchiveMode/Imports/Pending/[A-Za-z0-9_-]{1,160}/receipt\\.json$").match(path).hasMatch())return true;
     const auto parts=path.split('/');return parts.size()==3&&parts[0]=="Playlists"&&sourceKeySafe(parts[1])&&QStringList{"items.json","playlist.json","history.jsonl"}.contains(parts[2]);
 }
