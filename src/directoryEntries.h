@@ -147,6 +147,19 @@ public:
 	{
 		std::sort( m_folders.begin(),m_folders.end(),s ) ;
 		std::sort( m_files.begin(),m_files.end(),s ) ;
+
+		// Keep a globally sorted mixed sequence as well. This is the model used
+		// when folder-first grouping is disabled.
+		m_joined.clear() ;
+		for( const auto& it : m_folders ){
+			m_joined.emplace_back( it ) ;
+		}
+		for( const auto& it : m_files ){
+			m_joined.emplace_back( it ) ;
+		}
+		std::sort( m_joined.begin(),m_joined.end(),[ & ]( const wrapper& lhs,const wrapper& rhs ){
+			return s( *lhs.operator->(),*rhs.operator->() ) ;
+		} ) ;
 	}
 	void addFile( qint64 dateCreated,QString path )
 	{
@@ -197,28 +210,21 @@ public:
 
 	void join( bool folderFirst )
 	{
-		m_joined.clear() ;
-
 		if( folderFirst ){
 
+			m_joined.clear() ;
+
 			for( const auto& it : m_folders ){
 
 				m_joined.emplace_back( it ) ;
 			}
 			for( const auto& it : m_files ){
-
-				m_joined.emplace_back( it ) ;
-			}
-		}else{
-			for( const auto& it : m_files ){
-
-				m_joined.emplace_back( it ) ;
-			}
-			for( const auto& it : m_folders ){
 
 				m_joined.emplace_back( it ) ;
 			}
 		}
+		// When folderFirst is false, sort() has already produced one globally
+		// ordered mixed sequence. Preserve it rather than forcing files-first.
 	}
 
 	directoryEntries::iter Iter()
