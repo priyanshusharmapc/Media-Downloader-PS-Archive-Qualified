@@ -383,7 +383,12 @@ void tableWidget::selectRow( QTableWidgetItem * current,QTableWidgetItem * previ
 		}else{
 			_update_table_row( current,true ) ;
 
-			if( QGuiApplication::keyboardModifiers() != Qt::ControlModifier ){
+			const auto modifiers = QGuiApplication::keyboardModifiers() ;
+
+			// Let Qt's ExtendedSelection model preserve Ctrl, Shift and
+			// Ctrl+Shift gestures. Only a plain click should collapse the
+			// selection to the current row.
+			if( !( modifiers & ( Qt::ControlModifier | Qt::ShiftModifier ) ) ){
 
 				auto currentRow = current->row() ;
 
