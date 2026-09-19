@@ -794,8 +794,10 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
     QHash<QString,QVector<int>> priorPlaceholders;
     QHash<QString,int> priorOccurrences;
     QHash<QString,QVector<int>> priorResolvedOccurrences;
+    QSet<QString> knownEntryKeys;
     for(int i=0;i<prior.size();++i){
         ++priorOccurrences[prior[i].itemKey];
+        knownEntryKeys.insert(prior[i].entryKey);
         if(!prior[i].providerId.isEmpty())priorResolvedOccurrences[prior[i].itemKey].append(i);
         // loadPlaylistItems has already validated or explicitly migrated every
         // occurrence identity. Never synthesize identities silently here.
@@ -892,7 +894,10 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
                     // rotate their historical IDs according to this scan's
                     // ordinal. Allocate a fresh occurrence identity and leave
                     // unmatched historical rows to the normal removed policy.
-                    p.entryKey=p.itemKey+"#"+QString::number(++nextOccurrence[p.itemKey]);
+                    do{
+                        p.entryKey=p.itemKey+"#"+QString::number(++nextOccurrence[p.itemKey]);
+                    }while(knownEntryKeys.contains(p.entryKey));
+                    knownEntryKeys.insert(p.entryKey);
                 }
             }
         }
