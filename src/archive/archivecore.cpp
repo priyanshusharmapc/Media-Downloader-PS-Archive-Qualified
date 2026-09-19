@@ -521,7 +521,7 @@ bool freshArchiveRoot(const Paths& paths,QString* error)
 }
 }
 
-bool Store::initialize(QString* error)
+bool Store::initialize(QString* error,bool recoverStaleRunning)
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
     if(error)error->clear();
@@ -547,6 +547,29 @@ bool Store::initialize(QString* error)
         // bytes during this compatibility migration. Missing registries are
         // not a recognized legacy format and cannot enter this branch.
         if(!detail::commitTransaction(m_paths.root(),{{archiveIdentityRelative,newArchiveIdentity("legacy_unversioned")}},error))return false;
+    }
+
+    if(recoverStaleRunning){
+        // A persisted "running" state is a lease owned by the process that held
+        // the Archive lock. At a fresh operation boundary no such worker can
+        // still exist, so retaining "running" would be false state. Preserve
+        // paths/origin/verification evidence and append restart provenance.
+        bool changed=false;
+        for(int index=0;index<a.size();++index){
+            auto item=a[index].toObject();
+            for(const auto& kind:QStringList{"video","audio"}){
+                auto rep=item.value(kind).toObject();
+                if(rep.value("state").toString()!="running")continue;
+                rep["state"]="interrupted";
+                const auto prior=rep.value("error").toString();
+                const auto recovery=QString("Restart recovery: prior running state has no active Archive worker");
+                rep["error"]=prior.isEmpty()?recovery:prior+" | "+recovery;
+                item[kind]=rep;changed=true;
+            }
+            a[index]=item;
+        }
+        if(changed&&!detail::commitTransaction(m_paths.root(),
+            {{"State/ArchiveMode/items.json",QJsonDocument(a).toJson()}},error))return false;
     }
     if(!m_paths.materializeAgentResources(error))return false;
     if(QFileInfo::exists(QDir(m_paths.archiveState()).filePath("projections-dirty.json")))return writeAllProjections(error);
@@ -654,7 +677,7 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
     QString error;
     SyncLock lock(m_paths);if(!lock.tryLock()){summary.error=lock.errorString();return summary;}
     if(!detail::sourceKeySafe(source.key)||snapshot.sourceKey!=source.key){summary.error="Snapshot/source identity mismatch or unsafe source key";return summary;}
-    if(!initialize(&error)){ summary.error=error; return summary; }
+    if(!initialize(&error,lock.acquiredFreshly())){ summary.error=error; return summary; }
 
     auto prior=loadPlaylistItems(source.key,&error);
     if(!error.isEmpty()){ summary.error=error; return summary; }
@@ -1276,7 +1299,7 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
 bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool wantAudio,QString* error)
 {
     SyncLock lock(m_store.paths());if(!lock.tryLock())return detail::reject(error,lock.errorString());
-    if(!m_store.initialize(error))return false;
+    if(!m_store.initialize(error,lock.acquiredFreshly()))return false;
     QString stateError;const auto current=m_store.loadCanonicalItems(&stateError);if(!stateError.isEmpty())return detail::reject(error,stateError);
     CanonicalItem item;bool found=false;for(const auto& c:current)if(c.key==requested.key){item=c;found=true;break;}
     if(!found||!detail::videoIdSafe(item.providerId))return detail::reject(error,"Missing or invalid canonical download target");
@@ -1297,7 +1320,16 @@ bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool 
             representation.state="failed";representation.error="Previously complete media is missing or failed verification";
             QString e;if(!m_store.updateRepresentation(item.key,kind,representation,&e)){errors<<e;continue;}
         }
-        if(isUnavailable(item.availability)){errors<<kind+": source is unavailable; external recovery required";continue;}
+        if(isUnavailable(item.availability)){
+            Representation blocked=representation;
+            blocked.state="blocked_unavailable";
+            const auto reason=kind+": source is unavailable; external recovery required";
+            if(!blocked.error.contains(reason))blocked.error=blocked.error.isEmpty()?reason:blocked.error+" | "+reason;
+            QString e;
+            if(!m_store.updateRepresentation(item.key,kind,blocked,&e))errors<<e;
+            errors<<reason;
+            continue;
+        }
         QString e;const bool ok=kind=="video"?downloadVideo(item,&e):downloadAudio(item,&e);if(!ok)errors<<kind+": "+e;
     }
     if(!m_store.writeAllProjections(&stateError))errors<<stateError;
@@ -1397,7 +1429,7 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* 
     if(error)error->clear();
     if(projectionWarning)projectionWarning->clear();
     SyncLock lock(m_store.paths());if(!lock.tryLock())return detail::reject(error,lock.errorString());
-    if(!m_store.initialize(error))return false;
+    if(!m_store.initialize(error,lock.acquiredFreshly()))return false;
     const auto absolute=QFileInfo(packageDir).absoluteFilePath();
     const auto pending=m_store.paths().importsPending();
     if(QFileInfo(absolute).absolutePath()!=pending||!detail::noLinks(absolute))return detail::reject(error,"Only direct, unlinked Pending packages can be ingested");
@@ -1482,7 +1514,7 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* 
 int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bool()>& shouldStop,QStringList* warnings)
 {
     SyncLock lock(m_store.paths());if(!lock.tryLock()){if(failures)failures->append(lock.errorString());return 0;}
-    QString initError;if(!m_store.initialize(&initError)){if(failures)failures->append(initError);return 0;}
+    QString initError;if(!m_store.initialize(&initError,lock.acquiredFreshly())){if(failures)failures->append(initError);return 0;}
     QDir d(m_store.paths().importsPending());int accepted=0;
     for(const auto& name:d.entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
         if(shouldStop&&shouldStop()){if(failures)failures->append("Stopped before all packages completed");break;}
@@ -1528,6 +1560,7 @@ SyncLock::~SyncLock(){unlock();}
 bool SyncLock::tryLock(int timeoutMs)
 {
     if(m_lock)return true;
+    m_acquiredFreshly=false;
     if(!m_paths.ensureLayout(&m_error))return false;
     auto path=QDir(m_paths.archiveState()).filePath("sync.lock");
     if(!detail::noLinks(path)){m_error="Linked Archive lock path refused";return false;}
@@ -1542,9 +1575,10 @@ bool SyncLock::tryLock(int timeoutMs)
     }
     auto next=std::make_shared<ArchiveLockState>(path);
     if(!next->file.tryLock(qMax(0,timeoutMs))){m_error="Another Archive operation is active or the lock could not be acquired";return false;}
-    m_lock=next;archiveLocks[path]=next;m_error.clear();return true;
+    m_lock=next;archiveLocks[path]=next;m_acquiredFreshly=true;m_error.clear();return true;
 }
-void SyncLock::unlock(){QMutexLocker guard(&archiveLocksMutex);m_lock.reset();}
+void SyncLock::unlock(){QMutexLocker guard(&archiveLocksMutex);m_lock.reset();m_acquiredFreshly=false;}
 QString SyncLock::errorString() const{return m_error;}
+bool SyncLock::acquiredFreshly() const{return m_acquiredFreshly;}
 
 } // namespace archive

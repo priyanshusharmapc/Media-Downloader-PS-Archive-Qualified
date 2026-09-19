@@ -41,7 +41,7 @@ int main(int argc,char** argv){
     archive::Paths paths(args[2]);archive::RuntimeConfig config{paths.root(),QCoreApplication::applicationDirPath()};
     archive::SyncLock lock(paths);if(!lock.tryLock()){error<<lock.errorString()<<"\n";return 1;}
     archive::Store store(paths);QString stateError;
-    if(!store.initialize(&stateError)){error<<"Archive initialization failed: "<<stateError<<"\n";return 1;}
+    if(!store.initialize(&stateError,lock.acquiredFreshly())){error<<"Archive initialization failed: "<<stateError<<"\n";return 1;}
     archive::ActivityLogger logger(paths);
     if(command=="preflight"){
         archive::ToolResolver tools(config);bool ok=true;

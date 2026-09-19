@@ -72,6 +72,29 @@ int main(int argc,char** argv)
     check(store.updateRepresentation(a.itemKey,"video",interrupted,&error),"write interrupted representation");
     check(byKey(store.loadCanonicalItems(),a.itemKey).video.state=="interrupted","interrupted representation retained");
 
+    // A same-thread nested operation may observe a live running worker. It must
+    // not perform restart recovery. Once the owning session releases its fresh
+    // lock, the next initialization must atomically recover that stale lease.
+    Representation running; running.state="running"; running.origin="automatic_download";
+    running.path="Video/in-progress.mp4"; running.error="download worker had started";
+    SyncLock liveSession(paths); check(liveSession.tryLock(),"acquire live Archive session");
+    check(liveSession.acquiredFreshly(),"top-level session did not establish fresh ownership");
+    check(store.updateRepresentation(a.itemKey,"video",running,&error),"write live running representation");
+    {
+        SyncLock nested(paths); check(nested.tryLock(),"join live Archive session");
+        check(!nested.acquiredFreshly(),"nested same-thread lock falsely reported fresh ownership");
+        Store nestedStore(paths);
+        check(nestedStore.initialize(&error,nested.acquiredFreshly()),"nested initialize: "+error);
+        check(byKey(store.loadCanonicalItems(),a.itemKey).video.state=="running","live worker was falsely interrupted");
+    }
+    liveSession.unlock();
+    Store restarted(paths); check(restarted.initialize(&error),"restart initialize: "+error);
+    const auto recovered=byKey(restarted.loadCanonicalItems(),a.itemKey).video;
+    check(recovered.state=="interrupted","stale running representation was not recovered after restart");
+    check(recovered.path==running.path&&recovered.origin==running.origin,"restart recovery discarded representation evidence");
+    check(recovered.error.contains("download worker had started")&&recovered.error.contains("Restart recovery"),
+          "restart recovery did not preserve prior error and append provenance");
+
     // A partial/429-like snapshot may observe only A but must not remove B.
     Snapshot partial; partial.sourceKey=source.key; partial.complete=false; partial.scannedAt="2026-09-14T10:10:00+05:30"; partial.error="HTTP 429"; partial.items={a};
     s=store.reconcile(source,partial); check(s.committed&&s.removed==0,"partial snapshot cannot infer removal");
