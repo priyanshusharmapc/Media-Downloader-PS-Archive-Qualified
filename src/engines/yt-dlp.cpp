@@ -1601,7 +1601,7 @@ const QByteArray& yt_dlp::yt_dlplFilter::operator()( Logger::Data& s )
 
 			auto m = m_parent.Settings().downloadFolder() ;
 
-			utility::deleteTmpFiles( m,m_fileNames ) ;
+			utility::deleteTmpFiles( m,m_ownedFileNames ) ;
 		}
 
 	}else if( s.lastLineIsProgressLine() ){
@@ -1762,7 +1762,7 @@ const QByteArray& yt_dlp::yt_dlplFilter::parseOutput( const Logger::Data::QByteA
 			auto m = e.mid( e.indexOf( " " ) + 1 ) ;
 			m.truncate( m.indexOf( " has already been downloaded" ) ) ;
 
-			this->setFileName( m ) ;
+			this->setFileName( m,false ) ;
 		}
 		if( e.contains( "] Destination: " ) ){
 
@@ -1826,13 +1826,13 @@ const QByteArray& yt_dlp::yt_dlplFilter::parseOutput( const Logger::Data::QByteA
 	return m_preProcessing.text() ;
 }
 
-void yt_dlp::yt_dlplFilter::setFileName( const QByteArray& fileName )
+void yt_dlp::yt_dlplFilter::setFileName( const QByteArray& fileName,bool ownedByInvocation )
 {
 	if( !fileName.isEmpty() ){
 
-		auto _add = [ this ]( const QByteArray& fn ){
+		auto _add = []( std::vector< QByteArray >& files,const QByteArray& fn ){
 
-			for( const auto& it : m_fileNames ){
+			for( const auto& it : files ){
 
 				if( it == fn ){
 
@@ -1840,16 +1840,25 @@ void yt_dlp::yt_dlplFilter::setFileName( const QByteArray& fileName )
 				}
 			}
 
-			m_fileNames.emplace_back( fn ) ;
+			files.emplace_back( fn ) ;
 		} ;
+
+		QByteArray normalized = fileName ;
 
 		if( utility::platformisFlatPak() ){
 
 			auto m = m_parent.Settings().downloadFolder().size() ;
 
-			_add( fileName.mid( m + 1 ) ) ;
-		}else{
-			_add( fileName ) ;
+			normalized = fileName.mid( m + 1 ) ;
+		}
+
+		// m_fileNames is observational state used for result/progress reporting.
+		// Cancellation cleanup must use the stricter ownership set below.
+		_add( m_fileNames,normalized ) ;
+
+		if( ownedByInvocation ){
+
+			_add( m_ownedFileNames,normalized ) ;
 		}
 	}
 }
