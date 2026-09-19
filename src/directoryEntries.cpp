@@ -184,8 +184,8 @@ private:
 
 			LARGE_INTEGER filesize ;
 
-			filesize.LowPart = data.ftCreationTime.dwLowDateTime ;
-			filesize.HighPart = data.ftCreationTime.dwHighDateTime ;
+			filesize.LowPart = data.ftLastWriteTime.dwLowDateTime ;
+			filesize.HighPart = data.ftLastWriteTime.dwHighDateTime ;
 
 			if( data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ){
 
@@ -314,11 +314,11 @@ private:
 
 					if( S_ISREG( m.st_mode ) ){
 
-						entries.addFile( m.st_ctime,name ) ;
+						entries.addFile( m.st_mtime,name ) ;
 
 					}else if( S_ISDIR( m.st_mode ) ){
 
-						entries.addFolder( m.st_ctime,name ) ;
+						entries.addFolder( m.st_mtime,name ) ;
 					}
 				}
 			}
