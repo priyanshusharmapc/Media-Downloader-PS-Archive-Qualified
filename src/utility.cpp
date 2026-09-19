@@ -1979,10 +1979,12 @@ bool utility::startedUpdatedVersion( settings& s,const utility::cliArguments& ca
 		if( !dir.rename( update_new,update ) ){
 
 			// The old tree was successfully moved but the new tree could not be
-			// promoted. Restore the old location before giving up so startup
-			// state is coherent and no unpromoted/stale executable is launched.
-			if( hadCurrentUpdate ){
-				dir.rename( updated_old,update ) ;
+			// promoted. Restore the old location before giving up. If that
+			// restoration also fails, keep both update_new and updated_old
+			// untouched as recovery evidence and still abort before inspecting
+			// any staged executable.
+			if( hadCurrentUpdate && !dir.rename( updated_old,update ) ){
+				return false ;
 			}
 			return false ;
 		}
