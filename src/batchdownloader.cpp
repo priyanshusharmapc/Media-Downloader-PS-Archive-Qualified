@@ -2624,8 +2624,9 @@ void batchdownloader::showList( batchdownloader::listType listType,
 		events( batchdownloader& p,
 			batchdownloader::listType l,
 			const engines::engine& engine,
-			int row ) :
-			m_parent( p ),m_listType( l ),m_engine( engine ),m_row( row )
+			int row,
+			QString url ) :
+			m_parent( p ),m_listType( l ),m_engine( engine ),m_row( row ),m_url( std::move( url ) )
 		{
 		}
 		const engines::engine& engine()
@@ -2687,6 +2688,13 @@ void batchdownloader::showList( batchdownloader::listType listType,
 
 				m_parent.showComments( a ) ;
 			}else{
+				// Async metadata belongs to the row/URL that launched the chooser.
+				// Do not cache formats into a replacement row if the table changed.
+				if( m_row < 0 || m_row >= m_parent.m_table.rowCount() ||
+				    m_parent.m_table.url( m_row ) != m_url ){
+					return ;
+				}
+
 				auto& logger = m_parent.m_ctx.logger() ;
 
 				auto ee = m_engine.mediaProperties( logger,a ) ;
@@ -2729,6 +2737,7 @@ void batchdownloader::showList( batchdownloader::listType listType,
 		const engines::engine& m_engine ;
 		QByteArray m_listData ;
 		int m_row ;
+		QString m_url ;
 	} ;
 
 	auto term = m_terminator.setUp( m_ui.pbCancelBatchDownloder,&QPushButton::clicked,-1 ) ;
@@ -2742,7 +2751,7 @@ void batchdownloader::showList( batchdownloader::listType listType,
 
 	BatchLoggerWrapper< outPut > logger( m_ctx.logger(),logs,outPut( *this,listType ) ) ;
 
-	events ev( *this,listType,engine,row ) ;
+	events ev( *this,listType,engine,row,url ) ;
 
 	auto ctx = utility::make_ctx( m_ctx,ev.move(),logger.move(),term.move(),ch ) ;
 
