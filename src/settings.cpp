@@ -384,12 +384,13 @@ std::unique_ptr< QSettings > settings::init()
 			return this->setConfig( m_appDataPath ) ;
 		}else{
 			/*
-			 * Migrating to .ini config file
+			 * Migrating to .ini config file. The legacy store remains the
+			 * authoritative fallback until the destination is durably synced
+			 * and a fresh reader confirms every copied value.
 			 */
 			QSettings oldSettings( "media-downloader","media-downloader" ) ;
 
 			auto newSettings = this->setConfig( m_appDataPath ) ;
-
 			const auto keys = oldSettings.allKeys() ;
 
 			for( const auto& it : keys ){
@@ -397,9 +398,43 @@ std::unique_ptr< QSettings > settings::init()
 				newSettings->setValue( it,oldSettings.value( it ) ) ;
 			}
 
-			oldSettings.clear() ;
+			newSettings->sync() ;
 
-			return newSettings ;
+			bool migrationVerified = newSettings->status() == QSettings::NoError ;
+
+			if( migrationVerified ){
+
+				QSettings verify( newSettings->fileName(),QSettings::IniFormat ) ;
+				verify.sync() ;
+
+				migrationVerified = verify.status() == QSettings::NoError ;
+
+				for( const auto& it : keys ){
+
+					if( !migrationVerified || verify.value( it ) != oldSettings.value( it ) ){
+
+						migrationVerified = false ;
+						break ;
+					}
+				}
+			}
+
+			if( migrationVerified ){
+
+				// Cleanup is a separate finalization step. If clearing the
+				// legacy backend itself fails, the durable new copy still wins.
+				oldSettings.clear() ;
+				oldSettings.sync() ;
+				return newSettings ;
+			}
+
+			// Do not let a failed/partial destination shadow the intact legacy
+			// settings on the next launch. Continue this session on legacy too.
+			const auto failedPath = newSettings->fileName() ;
+			newSettings.reset() ;
+			QFile::remove( failedPath ) ;
+
+			return std::make_unique< QSettings >( "media-downloader","media-downloader" ) ;
 		}
 	}
 }
