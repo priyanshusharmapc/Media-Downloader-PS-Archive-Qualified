@@ -167,6 +167,11 @@ inline bool arrayShape(const QJsonArray& array,const QString& kind,QString* erro
                 for(const auto& field:QStringList{"item_key","entry_key","provider_id","title","url","availability","membership","first_seen","last_seen"})
                     if(!stringField(o,field,field=="item_key"||field=="entry_key",error,kind))return false;
                 if(!integerField(o,"position",false,error,kind)||!integerField(o,"last_position",false,error,kind))return false;
+                // -1 is the only sentinel used by the model. Other negative
+                // positions are semantically corrupt even though they fit int.
+                if((o.contains("position")&&o.value("position").toInt() < -1)||
+                   (o.contains("last_position")&&o.value("last_position").toInt() < -1))
+                    return reject(error,"Invalid playlist position range");
                 if(o.value("membership")!="active"&&o.value("membership")!="removed")return reject(error,"Invalid playlist membership");
             }
         }
