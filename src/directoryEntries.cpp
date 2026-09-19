@@ -114,7 +114,18 @@ private:
 
 			auto m = w + L'\\' + name ;
 
-			if( data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ){
+			// Directory junctions and symbolic links are name-surrogate reparse
+			// points. Recursing through them would cross the user's selected
+			// Library tree and can delete data owned by another filesystem path.
+			// Treat every reparse point as a leaf and remove only the link itself.
+			if( data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ){
+
+				if( data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ){
+					RemoveDirectoryW( m.data() ) ;
+				}else{
+					DeleteFileW( m.data() ) ;
+				}
+			}else if( data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY ){
 
 				this->removeDirectory( m,true ) ;
 			}else{
@@ -124,6 +135,21 @@ private:
 	}
 	void removeDirectory( const std::wstring& w,bool removeDirectory )
 	{
+		// A top-level directory passed by Library may itself be a junction or
+		// directory symlink. Never enumerate through a reparse point.
+		const auto attributes = GetFileAttributesW( w.data() ) ;
+		if( attributes != INVALID_FILE_ATTRIBUTES && ( attributes & FILE_ATTRIBUTE_REPARSE_POINT ) ){
+
+			if( removeDirectory ){
+				if( attributes & FILE_ATTRIBUTE_DIRECTORY ){
+					RemoveDirectoryW( w.data() ) ;
+				}else{
+					DeleteFileW( w.data() ) ;
+				}
+			}
+			return ;
+		}
+
 		handle h( w ) ;
 
 		if( h.valid() ){
