@@ -191,10 +191,24 @@ namespace utils
 				QObject::connect( &m_localServer,&QLocalServer::newConnection,[ this ](){
 
 					auto s = m_localServer.nextPendingConnection() ;
+					auto data = std::make_shared< QByteArray >() ;
 
-					QObject::connect( s,&QLocalSocket::readyRead,[ this,s ]{
+					// QLocalSocket is a byte stream. readyRead is not a message
+					// boundary, so accumulate every fragment and deliver the event
+					// only after the secondary instance closes its write side.
+					QObject::connect( s,&QLocalSocket::readyRead,[ s,data ](){
 
-						m_mainApp->hasEvent( s->readAll() ) ;
+						data->append( s->readAll() ) ;
+					} ) ;
+
+					QObject::connect( s,&QLocalSocket::disconnected,[ this,s,data ](){
+
+						data->append( s->readAll() ) ;
+
+						if( !data->isEmpty() ){
+							m_mainApp->hasEvent( *data ) ;
+						}
+
 						s->deleteLater() ;
 					} ) ;
 				} ) ;
