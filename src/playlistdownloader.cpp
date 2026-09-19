@@ -1578,31 +1578,38 @@ void playlistdownloader::subscription::add( const QString& uiName,const QString&
 		}
 	}
 
-	m_array.append( subscription::entry::toObject( uiName,url,Opts ) ) ;
+	auto next = m_array ;
+	next.append( subscription::entry::toObject( uiName,url,Opts ) ) ;
 
-	m_table.add( uiName,url ) ;
-
-	m_table.selectLast() ;
-
-	if( !this->save() ){
+	if( !this->save( next ) ){
 
 		QMessageBox::warning( &m_ui,
 				      QObject::tr( "Save Failed" ),
 				      QObject::tr( "The subscription change could not be saved. The previous file was preserved." ) ) ;
+		return ;
 	}
+
+	m_array = next ;
+	m_table.add( uiName,url ) ;
+	m_table.selectLast() ;
 }
 
 void playlistdownloader::subscription::remove( int s )
 {
-	m_array.removeAt( s ) ;
-	m_table.removeRow( s ) ;
+	if( s < 0 || s >= m_array.size() )return ;
+	auto next = m_array ;
+	next.removeAt( s ) ;
 
-	if( !this->save() ){
+	if( !this->save( next ) ){
 
 		QMessageBox::warning( &m_ui,
 				      QObject::tr( "Save Failed" ),
 				      QObject::tr( "The subscription change could not be saved. The previous file was preserved." ) ) ;
+		return ;
 	}
+
+	m_array = next ;
+	m_table.removeRow( s ) ;
 }
 
 void playlistdownloader::subscription::setVisible( bool e )
@@ -1664,7 +1671,7 @@ utility::vector< playlistdownloader::subscription::entry > playlistdownloader::s
 	return e ;
 }
 
-bool playlistdownloader::subscription::save()
+bool playlistdownloader::subscription::save( const QJsonArray& array )
 {
 	QSaveFile f( m_path ) ;
 
@@ -1673,7 +1680,7 @@ bool playlistdownloader::subscription::save()
 		return false ;
 	}
 
-	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
+	const auto data = QJsonDocument( array ).toJson( QJsonDocument::Indented ) ;
 
 	if( f.write( data ) != data.size() ){
 
