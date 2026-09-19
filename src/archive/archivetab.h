@@ -84,7 +84,12 @@ private:
 
     QTabWidget& m_hostTabs;
     QWidget* m_page=nullptr;
+    QLabel* m_rootTitle=nullptr;
     QLabel* m_rootLabel=nullptr;
+    QGroupBox* m_systemGroup=nullptr;
+    QGroupBox* m_operationGroup=nullptr;
+    QList<QLabel*> m_systemNameLabels;
+    QLabel* m_playlistLabel=nullptr;
     QLabel* m_systemOverall=nullptr;
     QLabel* m_systemRoot=nullptr;
     QLabel* m_systemState=nullptr;
@@ -121,6 +126,12 @@ private:
     QPushButton* m_stop=nullptr;
     QPushButton* m_retry=nullptr;
     QToolButton* m_more=nullptr;
+    QAction* m_openRootAction=nullptr;
+    QAction* m_openPlaylistAction=nullptr;
+    QAction* m_openCatalogAction=nullptr;
+    QAction* m_openMissingAction=nullptr;
+    QAction* m_importsAction=nullptr;
+    QAction* m_openLogsAction=nullptr;
     QPushButton* m_activityToggle=nullptr;
     QFutureWatcher<QString>* m_watcher=nullptr;
     QString m_root;
