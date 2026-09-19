@@ -13,5 +13,6 @@ assert "if( totalSize == 0 )" not in body
 unknown=body.index("if( totalSize <= 0 )")
 percentage=body.index("double( received ) * 100 / double( totalSize )")
 assert unknown < percentage
-assert "std::min( 100.0,double( received ) * 100 / double( totalSize ) )" in body
+assert "const auto rawPerc = double( received ) * 100 / double( totalSize )" in body
+assert "const auto perc = rawPerc > 100.0 ? 100.0 : rawPerc" in body
 print("unknown network total policy: PASS")
