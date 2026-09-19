@@ -65,6 +65,7 @@ private:
     archive::Source selectedSource() const;
     QString selectedSourceKey() const;
     QString selectedItemKey() const;
+    QString selectedEntryKey() const;
     QVector<archive::CanonicalItem> itemsForSource(const archive::Source& source) const;
     void addPlaylist();
     void removePlaylist();
