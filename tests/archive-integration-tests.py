@@ -505,7 +505,7 @@ class ArchiveIntegration(unittest.TestCase):
         with wrong_artifact.open('ab') as stream:
             stream.write(b'wrong-artifact')
         wrong = list(args)
-        wrong[wrong.index(str(artifact))] = str(wrong_artifact)
+        wrong[wrong.index('-ArtifactZipPath') + 1] = wrong_artifact
         wrong_result = run(wrong + ['-AllowExistingArchive'], env=self.env, timeout=120)
         self.assertNotEqual(wrong_result.returncode, 0)
         self.assertIn('External artifact SHA-256', wrong_result.stdout + wrong_result.stderr)
