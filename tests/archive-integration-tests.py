@@ -570,6 +570,43 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertEqual(history.read_bytes(), b'not-json\n')
         self.assertEqual(self.canonical(), before)
 
+    def test_external_downloader_state_leaf_links_are_refused(self):
+        self.scan()
+        state = self.root / 'State'
+        outside = self.base / 'outside-state-leaf.txt'
+        outside.write_text('outside sentinel\n')
+
+        def link_file(link: Path):
+            if link.exists() or link.is_symlink():
+                link.unlink()
+            if os.name == 'nt':
+                result = subprocess.run(['cmd', '/c', 'mklink', str(link), str(outside)], capture_output=True, text=True)
+                if result.returncode:
+                    self.skipTest('Host does not permit file symbolic-link creation')
+            else:
+                link.symlink_to(outside)
+
+        catalog = state / 'video-catalog.jsonl'
+        link_file(catalog)
+        before = outside.read_bytes()
+        result = self.command('sync-item', VIDEO_URL, expect=1)
+        self.assertIn('Unsafe external-tool state path refused', result.stderr)
+        self.assertEqual(outside.read_bytes(), before)
+        if catalog.exists() or catalog.is_symlink():
+            catalog.unlink()
+
+        archive = state / 'video-archive.txt'
+        link_file(archive)
+        before = outside.read_bytes()
+        result = self.command('sync-item', VIDEO_URL, expect=1)
+        self.assertIn('Unsafe external-tool state path refused', result.stderr)
+        self.assertEqual(outside.read_bytes(), before)
+        if archive.exists() or archive.is_symlink():
+            archive.unlink()
+
+        # Normal unlinked state leaves retain the existing sync path.
+        self.command('sync-item', VIDEO_URL)
+
     def test_linked_state_directory_is_refused(self):
         outside = self.base / 'outside'
         outside.mkdir()

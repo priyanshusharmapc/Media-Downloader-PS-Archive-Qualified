@@ -296,6 +296,19 @@ void appendYtRuntimeArgs(QStringList& args,const ToolResolver& tools)
     if(!deno.isEmpty()) args << "--js-runtimes" << ("deno:"+deno);
 }
 
+bool validateExternalToolStatePaths(const Paths& paths,const QStringList& relativePaths,QString* error)
+{
+    // External tools open these deterministic files themselves, so validate
+    // the exact leaf and all of its ancestors immediately before every child
+    // launch. This mirrors the fail-closed link/reparse policy used by the
+    // application's own writers.
+    for(const auto& relative:relativePaths){
+        if(!paths.isSafeRelative(relative))
+            return detail::reject(error,"Unsafe external-tool state path refused: "+relative);
+    }
+    return true;
+}
+
 QStringList withoutDownloadArchive(QStringList args)
 {
     for(int i=0;i<args.size();++i){
@@ -1254,11 +1267,16 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     appendYtRuntimeArgs(args,m_tools);
     args << "--" << url;
     if(!previous.isEmpty())args=withoutDownloadArchive(args);
+    QString statePathError;
+    const QStringList videoStatePaths={"State/video-archive.txt","State/video-catalog.jsonl"};
+    if(!validateExternalToolStatePaths(m_store.paths(),videoStatePaths,&statePathError))return fail(statePathError);
     auto r=run(m_tools.ytDlp(),args,"video-download");
     QString rel=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
     if(r.ok && rel.isEmpty()){
         m_logger.event("WARNING","download","video_archive_retry",{{"item_key",item.key}});
         const auto retryArgs=withoutDownloadArchive(args);
+        statePathError.clear();
+        if(!validateExternalToolStatePaths(m_store.paths(),videoStatePaths,&statePathError))return fail(statePathError);
         r=run(m_tools.ytDlp(),retryArgs,"video-download-retry-without-archive");
         rel=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
     }
@@ -1314,11 +1332,16 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
         args[outputIndex].replace(".%(ext)s"," [repair-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8)+"].%(ext)s");
         args=withoutDownloadArchive(args);
     }
+    QString statePathError;
+    const QStringList audioStatePaths={"State/audio-archive.txt","State/audio-catalog.jsonl"};
+    if(!validateExternalToolStatePaths(m_store.paths(),audioStatePaths,&statePathError))return fail(statePathError);
     auto r=run(m_tools.ytDlp(),args,"audio-download");
     QString rel=findExistingById("Audio",item.providerId,{"m4a","mp4"});
     if(r.ok && rel.isEmpty()){
         m_logger.event("WARNING","download","audio_archive_retry",{{"item_key",item.key}});
         const auto retryArgs=withoutDownloadArchive(args);
+        statePathError.clear();
+        if(!validateExternalToolStatePaths(m_store.paths(),audioStatePaths,&statePathError))return fail(statePathError);
         r=run(m_tools.ytDlp(),retryArgs,"audio-download-retry-without-archive");
         rel=findExistingById("Audio",item.providerId,{"m4a","mp4"});
     }
