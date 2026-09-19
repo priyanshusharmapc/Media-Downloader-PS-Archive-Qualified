@@ -27,3 +27,7 @@ print("Signal-safe shutdown handoff policy: PASS")
 assert "std::signal( sig,MainWindow::signalHandler ) != SIG_ERR" in cpp
 assert "if( !MainWindow::setUpSignal( SIGTERM,SIGINT ) )" in cpp
 assert "static bool setUpSignal( int )" in hdr
+
+assert "#include <iostream>" in cpp
+assert "static bool setUpSignal( Int sig,INTS ... sigs )" in hdr
+assert "return MainWindow::setUpSignal( sigs ... ) && current" in hdr
