@@ -90,13 +90,13 @@ playlistdownloader::playlistdownloader( Context& ctx ) :
 		QLockFile lock( path + ".lock" ) ;
 		lock.setStaleLockTime( 30000 ) ;
 		if( !lock.tryLock( 0 ) ){
-			QMessageBox::warning( &m_mainWindow,tr( "Archive In Use" ),
+			QMessageBox::warning( &m_ctx.mainWidget(),tr( "Archive In Use" ),
 				tr( "The internal download archive is being used by another application instance. It was not cleared." ) ) ;
 			return ;
 		}
 
 		if( QFile::exists( path ) && !QFile::remove( path ) ){
-			QMessageBox::warning( &m_mainWindow,tr( "Clear Archive Failed" ),
+			QMessageBox::warning( &m_ctx.mainWidget(),tr( "Clear Archive Failed" ),
 				tr( "The internal download archive could not be removed. Its previous contents were preserved." ) ) ;
 		}
 	} ) ;
