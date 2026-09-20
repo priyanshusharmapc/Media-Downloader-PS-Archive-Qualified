@@ -1032,10 +1032,10 @@ void settings::setOpenWith( const QString& e )
 }
 
 settings::mediaPlayer settings::openWith( Logger& logger )
-{	
-	static auto s = this->openWith() ;
-
-	return { *this,s,logger } ;
+{
+	// Player discovery and the persisted custom Open With setting are mutable
+	// during a process lifetime. Return a fresh, self-owned snapshot per menu.
+	return { *this,this->openWith(),logger } ;
 }
 
 std::vector< settings::mediaPlayer::PlayerOpts > settings::openWith()
@@ -1595,9 +1595,9 @@ QByteArray settings::proxySettings::proxyAddress() const
 }
 
 settings::mediaPlayer::mediaPlayer( settings& e,
-				   const std::vector< settings::mediaPlayer::PlayerOpts >& s,
+				   std::vector< settings::mediaPlayer::PlayerOpts > s,
 				   Logger& logger ) :
-	m_playerOpts( s ),
+	m_playerOpts( std::move( s ) ),
 	m_logger( logger ),
 	m_settings( e )
 {
@@ -1712,7 +1712,9 @@ void settings::mediaPlayer::action::operator()() const
 				return ;
 			}
 
-			auto duration = m_obj.value( "duration" ).toString().toUtf8() ;
+			bool durationOk = false ;
+			const auto durationValue = m_obj.value( "duration" ).toString().toLongLong( &durationOk ) ;
+			auto duration = durationOk && durationValue >= 0 ? QByteArray::number( durationValue ) : QByteArray( "0" ) ;
 			auto title    = m_obj.value( "title" ).toString().toUtf8() ;
 
 			// EXTINF metadata is line-oriented. Provider-controlled title text
@@ -1819,8 +1821,8 @@ void settings::flatpakRuntimeOptions::VLC::checkAvailability() const
 	class probe
 	{
 	public:
-		probe( const VLC& owner,std::shared_ptr< std::atomic_bool > cancel ) :
-			m_owner( &owner ),m_cancel( std::move( cancel ) )
+		probe( std::shared_ptr< QStringList > target,std::shared_ptr< std::atomic_bool > cancel ) :
+			m_target( std::move( target ) ),m_cancel( std::move( cancel ) )
 		{
 		}
 		QStringList bg()
@@ -1842,12 +1844,12 @@ void settings::flatpakRuntimeOptions::VLC::checkAvailability() const
 		}
 		void fg( QStringList&& args )
 		{
-			m_owner->m_args = std::move( args ) ;
+			*m_target = std::move( args ) ;
 		}
 	private:
-		const VLC * m_owner ;
+		std::shared_ptr< QStringList > m_target ;
 		std::shared_ptr< std::atomic_bool > m_cancel ;
 	} ;
 
-	utils::qthread::run( context,probe( *this,cancel ) ) ;
+	utils::qthread::run( context,probe( m_args,cancel ) ) ;
 }
