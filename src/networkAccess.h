@@ -627,6 +627,7 @@ private:
 		QString tmpPath ;
 		QString name ;
 		QString finalPath ;
+		QString extractStagePath ;
 		QString hash ;
 		cmdArgs exeArgs ;
 		networkAccess::downloadSpeed speed ;
