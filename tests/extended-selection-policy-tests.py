@@ -7,7 +7,7 @@ s=(p.parse_args().source_root/"src/tableWidget.cpp").read_text(encoding="utf-8")
 start=s.index("void tableWidget::selectRow")
 end=s.index("void tableWidget::clear",start)
 body=s[start:end]
-assert "Qt::ControlModifier | Qt::ShiftModifier" in body
+assert "Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier" in body
 assert "keyboardModifiers() != Qt::ControlModifier" not in body
 assert "if( !( modifiers &" in body
 print("Extended selection modifier policy: PASS")
