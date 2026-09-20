@@ -25,6 +25,7 @@
 #include "tableWidget.h"
 #include "tabmanager.h"
 #include "version.h"
+#include "archive/archiveprocess.h"
 
 #include <QEventLoop>
 #include <QDesktopServices>
@@ -2079,25 +2080,22 @@ static util::version _get_process_version( const QString& path,
 		file.remove() ;
 	}
 
-	QProcess exe ;
+	// The staged updater executable is untrusted until its version has been
+	// checked. Probe it through the bounded process-tree helper and preserve
+	// the explicit updater environment required for bundled Qt/plugins.
+	const auto probe = archive::detail::runContainedProcess(
+		cmd,{ "--version" },QString(),10000,nullptr,&env ) ;
 
-	exe.setProgram( cmd ) ;
-	exe.setArguments( { "--version" } ) ;
-	exe.setProcessEnvironment( env ) ;
-
-	exe.start() ;
-
-	exe.waitForFinished() ;
-
-	util::version m = exe.readAllStandardOutput().trimmed() ;
+	util::version m = probe.ok ? probe.standardOutput.trimmed() : QString() ;
 
 	if( m.valid() ){
-
-		QFile file( e ) ;
-
-		if( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-			file.write( m.toString().toUtf8() ) ;
+		const auto bytes = m.toString().toUtf8() ;
+		QSaveFile file( e ) ;
+		file.setDirectWriteFallback( false ) ;
+		if( file.open( QIODevice::WriteOnly ) && file.write( bytes ) == bytes.size() ){
+			file.commit() ;
+		}else{
+			file.cancelWriting() ;
 		}
 	}
 
