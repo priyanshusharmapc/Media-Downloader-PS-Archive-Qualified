@@ -789,7 +789,7 @@ namespace utility
 	bool fileIsInvalidForGettingThumbnail( const QByteArray& ) ;
 	QString downloadFolder( const Context& ctx ) ;
 	bool onlyWantedVersionInfo( const utility::cliArguments& ) ;
-	bool isOwnedUpdateCleanupPath( const QString& configPath,const QString& candidate,bool runningUpdated ) ;
+	bool isOwnedUpdateCleanupPath( const QString& configPath,const QString& candidate,bool runningUpdated,const QString& currentExecutable ) ;
 	bool startedUpdatedVersion( settings&,const utility::cliArguments& ) ;
 	void hideUnhideEntries( QMenu&,tableWidget&,int,bool ) ;
 	quint64 simpleRandomNumber() ;
