@@ -1349,6 +1349,13 @@ bool playlistdownloader::parseJson( const engines::engine&,
 
 void playlistdownloader::networkResult( utility::MediaEntry media,const utils::network::reply& reply )
 {
+	// Only real thumbnail requests reach this callback. Keep request
+	// accounting separate from row-materialization accounting so synthetic
+	// thumbnails cannot drive the network counter negative.
+	if( m_networkRunning > 0 ){
+		m_networkRunning-- ;
+	}
+
 	emit this->networkDataSignal( { m_ctx,reply,-1,media.move() } ) ;
 }
 
@@ -1371,8 +1378,6 @@ void playlistdownloader::networkData( utility::networkReply m )
 
 		this->showEntry( { img,s,m.media() },true ) ;
 	}
-
-	m_networkRunning-- ;
 
 	if( m_pendingRowMaterializations > 0 ){
 		m_pendingRowMaterializations-- ;
