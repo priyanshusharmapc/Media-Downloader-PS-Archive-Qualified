@@ -139,7 +139,7 @@ void settings::addToHistory( QSettings& settings,
 		changed = true ;
 	}
 
-	if( input.isEmpty() || history.contains( input ) ){
+	if( input.trimmed().isEmpty() || history.contains( input ) ){
 
 		if( changed ){
 
