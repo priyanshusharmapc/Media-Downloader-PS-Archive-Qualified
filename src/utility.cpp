@@ -1724,7 +1724,7 @@ QJsonObject utility::MediaEntry::uiJson() const
 	obj.insert( "title",m_title ) ;
 	obj.insert( "url",m_url ) ;
 	obj.insert( "duration",d ) ;
-	obj.insert( "intDuration",m_intDuration ) ;
+	obj.insert( "intDuration",static_cast< double >( m_intDuration ) ) ;
 	obj.insert( "upload_date",u ) ;
 	obj.insert( "uploader",m_uploader ) ;
 	obj.insert( "id",m_id ) ;
@@ -1777,17 +1777,27 @@ void utility::MediaEntry::parseJson()
 	}
 
 	auto duration = object.value( "duration" ) ;
-
+	double durationSeconds = 0.0 ;
+	bool durationOk = false ;
 	if( duration.isDouble() ){
+		durationSeconds = duration.toDouble() ;
+		durationOk = std::isfinite( durationSeconds ) ;
+	}else if( duration.isString() ){
+		durationSeconds = duration.toString().toDouble( &durationOk ) ;
+	}
 
-		m_intDuration = static_cast< int >( duration.toDouble() ) ;
+	constexpr double largestExactJsonInteger=9007199254740991.0 ;
+	const double largestSafeSeconds=std::min(
+		largestExactJsonInteger,
+		static_cast< double >( std::numeric_limits< qint64 >::max() / 1000LL ) ) ;
+	if( durationOk && durationSeconds >= 0.0 && durationSeconds <= largestSafeSeconds ){
+		m_intDuration = static_cast< qint64 >( std::floor( durationSeconds ) ) ;
 	}else{
-		m_intDuration = duration.toInt() ;
+		m_intDuration = 0 ;
 	}
 
 	if( m_intDuration != 0 ){
-
-		auto s = engines::engine::baseEngine::timer::duration( m_intDuration * 1000 ) ;
+		auto s = engines::engine::baseEngine::timer::duration( m_intDuration * 1000LL ) ;
 		m_duration = utility::stringConstants::duration() + " " + s ;
 	}
 }
