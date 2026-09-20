@@ -1007,7 +1007,11 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 	// window so another instance cannot clear, migrate or concurrently mutate
 	// the same deduplication state.
 	if( !this->acquireInternalArchiveLock( engine,id ) ){
-		if( m_table.noneAreRunning() )this->enableAll() ;
+		m_table.setRunningState( reportFinished::finishedStatus::finishedWithError(),index ) ;
+		if( m_table.noneAreRunning() ){
+			this->releaseInternalArchiveLocksIfIdle() ;
+			this->enableAll() ;
+		}
 		return ;
 	}
 	auto ff     = engine.filter( id ) ;
