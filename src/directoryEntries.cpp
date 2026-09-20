@@ -104,6 +104,13 @@ private:
 	public:
 		handle( std::wstring s )
 		{
+			// setPath() deliberately returns an empty string for malformed,
+			// relative and unsupported native namespaces. Preserve that fail-closed
+			// result instead of dereferencing rbegin() on an empty string.
+			if( s.empty() ){
+				return ;
+			}
+
 			if( *s.rbegin() == L'\\' ){
 
 				s += L"*" ;
@@ -131,11 +138,13 @@ private:
 		}
 		~handle()
 		{
-			FindClose( m_handle ) ;
+			if( m_handle != INVALID_HANDLE_VALUE ){
+				FindClose( m_handle ) ;
+			}
 		}
 	private:
-		WIN32_FIND_DATAW m_data ;
-		HANDLE m_handle ;
+		WIN32_FIND_DATAW m_data{} ;
+		HANDLE m_handle = INVALID_HANDLE_VALUE ;
 	};
 	void removePath( const std::wstring& w,const wchar_t * name,const WIN32_FIND_DATAW& data )
 	{
@@ -210,6 +219,13 @@ private:
 		auto m = data.cFileName ;
 
 		if( entries.valid( m ) ){
+
+			// Reparse points may resolve outside the configured Library root.
+			// They are managed as link leaves by deletion code and must never be
+			// presented as ordinary navigable folders.
+			if( data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT ){
+				return ;
+			}
 
 			LARGE_INTEGER filesize ;
 
@@ -338,7 +354,10 @@ private:
 
 				auto s = mm + '/' + name ;
 
-				if( stat( s.data(),&m ) == 0 ){
+				// lstat() preserves link identity. stat() followed directory
+				// symlinks and allowed Library navigation to cross its filesystem
+				// ownership boundary.
+				if( lstat( s.data(),&m ) == 0 ){
 
 					if( S_ISREG( m.st_mode ) ){
 

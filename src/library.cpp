@@ -26,6 +26,82 @@
 #include "utils/miscellaneous.hpp"
 
 #include <QDir>
+#include <QFileInfo>
+
+namespace
+{
+QString canonicalLibraryPath( const QString& path )
+{
+	QFileInfo info( QDir::cleanPath( path ) ) ;
+	const auto canonical = info.canonicalFilePath() ;
+	return canonical.isEmpty() ? QString() :
+		QDir::cleanPath( QDir::fromNativeSeparators( canonical ) ) ;
+}
+
+bool pathWithinLibraryRoot( const QString& root,const QString& candidate )
+{
+	const auto rootCanonical = canonicalLibraryPath( root ) ;
+	const auto candidateCanonical = canonicalLibraryPath( candidate ) ;
+	if( rootCanonical.isEmpty() || candidateCanonical.isEmpty() ){
+		return false ;
+	}
+
+#ifdef Q_OS_WIN
+	if( rootCanonical.compare( candidateCanonical,Qt::CaseInsensitive ) == 0 ){
+		return true ;
+	}
+#else
+	if( rootCanonical == candidateCanonical ){
+		return true ;
+	}
+#endif
+
+	const auto prefix = rootCanonical.endsWith( '/' ) ? rootCanonical : rootCanonical + "/" ;
+#ifdef Q_OS_WIN
+	return candidateCanonical.startsWith( prefix,Qt::CaseInsensitive ) ;
+#else
+	return candidateCanonical.startsWith( prefix,Qt::CaseSensitive ) ;
+#endif
+}
+
+bool parentWithinLibraryRoot( const QString& root,const QString& candidate )
+{
+	return pathWithinLibraryRoot( root,QFileInfo( candidate ).absolutePath() ) ;
+}
+
+bool deleteLibraryPath( const QString& root,const QString& path,std::atomic_bool& keepGoing )
+{
+	if( !keepGoing.load() ){
+		return true ;
+	}
+
+	QFileInfo info( path ) ;
+
+	// A link itself may live safely inside the Library even when its target does
+	// not. Delete only the link leaf and never follow it.
+	if( info.isSymLink() ){
+		if( !parentWithinLibraryRoot( root,path ) ){
+			return true ;
+		}
+		QFile::remove( path ) ;
+		info.refresh() ;
+		return info.exists() || info.isSymLink() ;
+	}
+
+	if( !pathWithinLibraryRoot( root,path ) ){
+		return true ;
+	}
+
+	if( info.isDir() ){
+		directoryManager::removeDirectory( path,keepGoing ) ;
+	}else{
+		QFile::remove( path ) ;
+	}
+
+	info.refresh() ;
+	return info.exists() ;
+}
+}
 
 library::library( const Context& ctx ) :
 	m_ctx( ctx ),
@@ -46,6 +122,9 @@ library::library( const Context& ctx ) :
 		m_continue = false ;
 		if( m_scanContinue ){
 			*m_scanContinue = false ;
+		}
+		if( m_deleteContinue ){
+			*m_deleteContinue = false ;
 		}
 	} ) ;
 
@@ -92,6 +171,7 @@ library::library( const Context& ctx ) :
 				this->disableAll() ;
 				m_ui.pbLibraryCancel->setEnabled( true ) ;
 				m_continue = true ;
+				m_deleteContinue = std::make_shared< std::atomic_bool >( true ) ;
 				this->deleteEntries( rows ) ;
 			}
 		}
@@ -171,13 +251,19 @@ library::library( const Context& ctx ) :
 
 		auto s = m_table.item( row,1 ).text() ;
 
+		const auto candidate = QDir::cleanPath( m_currentPath + "/" + s ) ;
+
+		if( !pathWithinLibraryRoot( m_downloadFolder,candidate ) ){
+			return ;
+		}
+
 		if( m_table.stuffAt( row ) == directoryEntries::ICON::FOLDER ){
 
-			m_currentPath +=  "/" + s ;
+			m_currentPath = candidate ;
 
 			this->showContents( m_currentPath ) ;
 		}else{
-			m_ctx.Engines().openUrls( m_currentPath + "/" + s ) ;
+			m_ctx.Engines().openUrls( candidate ) ;
 		}
 	} ) ;
 }
@@ -220,6 +306,10 @@ void library::exiting()
 		*m_scanContinue = false ;
 		m_scanContinue.reset() ;
 	}
+	if( m_deleteContinue ){
+		*m_deleteContinue = false ;
+		m_deleteContinue.reset() ;
+	}
 }
 
 void library::retranslateUi()
@@ -243,6 +333,9 @@ void library::tabExited()
 	m_continue = false ;
 	if( m_scanContinue ){
 		*m_scanContinue = false ;
+	}
+	if( m_deleteContinue ){
+		*m_deleteContinue = false ;
 	}
 }
 
@@ -323,79 +416,68 @@ bool library::hasMultipleSelections()
 
 bool library::deletePath( const QString& m )
 {
-	if( !m_continue ){
-		return true ;
-	}
-
-	QFileInfo mm( m ) ;
-
-	if( mm.isSymLink() ){
-
-		QFile::remove( m ) ;
-
-	}else if( mm.isDir() ){
-
-		directoryManager::removeDirectory( m,m_continue ) ;
-	}else{
-		QFile::remove( m ) ;
-	}
-
-	mm.refresh() ;
-
-	return mm.exists() ;
+	return deleteLibraryPath( m_downloadFolder,m,m_continue ) ;
 }
 
 void library::deleteEntries( library::iter items )
 {
-	if( !m_continue || items.empty() ){
+	if( !m_continue || !m_deleteContinue || !m_deleteContinue->load() || items.empty() ){
 
+		m_deleteContinue.reset() ;
 		// Successful filesystem mutations invalidate the cached directory
 		// snapshot used by sorting. Re-read it before re-enabling the view.
 		return this->showContents( m_currentPath ) ;
 	}
 
 	auto row = items.next() ;
+	if( row < 0 || row >= m_table.rowCount() ){
+		m_deleteContinue.reset() ;
+		return this->showContents( m_currentPath ) ;
+	}
+
+	const auto path = QDir::cleanPath( m_currentPath + "/" + m_table.item( row,1 ).text() ) ;
+	const auto root = m_downloadFolder ;
+	auto keepGoing = m_deleteContinue ;
 
 	class meaw
 	{
 	public:
-		meaw( library& library,library::iter items,int row ) :
-			m_parent( library ),
-			m_items( items.move() ),
-			m_row( row ),
-			m_path( this->path() )
+		meaw( library * parent,library::iter items,int row,QString root,QString path,
+		      std::shared_ptr< std::atomic_bool > keepGoing ) :
+			m_parent( parent ),m_items( items.move() ),m_row( row ),
+			m_root( std::move( root ) ),m_path( std::move( path ) ),
+			m_continue( std::move( keepGoing ) )
 		{
 		}
 		bool bg()
 		{
-			return m_parent.deletePath( m_path ) ;
+			return deleteLibraryPath( m_root,m_path,*m_continue ) ;
 		}
-		void fg( bool s )
+		void fg( bool stillExists )
 		{
-			if( !m_parent.m_continue ){
-				m_parent.enableAll() ;
+			if( !m_continue->load() || m_parent->m_deleteContinue != m_continue ){
+				m_parent->enableAll() ;
 				return ;
 			}
 
-			if( !s ){
-				m_parent.m_table.removeRow( m_row ) ;
+			if( !stillExists ){
+				m_parent->m_table.removeRow( m_row ) ;
 			}
 
-			m_parent.deleteEntries( m_items.move() ) ;
+			m_parent->deleteEntries( m_items.move() ) ;
 		}
 	private:
-		QString path() const
-		{
-			auto s = m_parent.m_table.item( m_row,1 ).text() ;
-			return m_parent.m_currentPath + "/" + s ;
-		}
-		library& m_parent ;
+		library * m_parent ;
 		library::iter m_items ;
 		int m_row ;
+		QString m_root ;
 		QString m_path ;
+		std::shared_ptr< std::atomic_bool > m_continue ;
 	} ;
 
-	utils::qthread::run( meaw( *this,items.move(),row ) ) ;
+	// The background phase owns only value state and a shared cancellation token.
+	// Foreground publication is automatically suppressed if Library is destroyed.
+	utils::qthread::run( this,meaw( this,items.move(),row,root,path,std::move( keepGoing ) ) ) ;
 }
 
 void library::setRenameUiVisible( bool e )
@@ -412,6 +494,11 @@ void library::renameFile( int row )
 	auto nn = m_ui.plainTextLibrarySetNewName->toPlainText() ;
 
 	auto& item = m_table.item( row,1 ) ;
+
+	if( !pathWithinLibraryRoot( m_downloadFolder,m_currentPath ) ){
+		this->showContents( m_downloadFolder ) ;
+		return ;
+	}
 
 	if( !utility::rename( m_ctx,item,m_currentPath,nn,item.text() ).isEmpty() ){
 
@@ -450,6 +537,7 @@ void library::deleteEntry( int row )
 
 		m_ui.pbLibraryCancel->setEnabled( true ) ;
 		m_continue = true ;
+		m_deleteContinue = std::make_shared< std::atomic_bool >( true ) ;
 
 		this->deleteEntries( row ) ;
 	}
@@ -461,29 +549,46 @@ void library::deleteAll()
 
 	m_ui.pbLibraryCancel->setEnabled( true ) ;
 	m_continue = true ;
+	m_deleteContinue = std::make_shared< std::atomic_bool >( true ) ;
+
+	const auto root = m_downloadFolder ;
+	const auto path = m_currentPath ;
+	auto keepGoing = m_deleteContinue ;
 
 	class meaw
 	{
 	public:
-		meaw( library& library ) : m_parent( library )
+		meaw( library * parent,QString root,QString path,std::shared_ptr< std::atomic_bool > keepGoing ) :
+			m_parent( parent ),m_root( std::move( root ) ),m_path( std::move( path ) ),
+			m_continue( std::move( keepGoing ) )
 		{
 		}
 		void bg()
 		{
-			const auto& a = m_parent.m_currentPath ;
-			auto& b = m_parent.m_continue ;
-
-			directoryManager::removeDirectoryContents( a,b ) ;
+			if( pathWithinLibraryRoot( m_root,m_path ) ){
+				directoryManager::removeDirectoryContents( m_path,*m_continue ) ;
+			}
 		}
 		void fg()
 		{
-			m_parent.showContents( m_parent.m_currentPath ) ;
+			if( m_parent->m_deleteContinue == m_continue ){
+				const auto completed = m_continue->load() ;
+				m_parent->m_deleteContinue.reset() ;
+				if( completed ){
+					m_parent->showContents( m_parent->m_currentPath ) ;
+				}else{
+					m_parent->enableAll() ;
+				}
+			}
 		}
 	private:
-		library& m_parent ;
+		library * m_parent ;
+		QString m_root ;
+		QString m_path ;
+		std::shared_ptr< std::atomic_bool > m_continue ;
 	} ;
 
-	utils::qthread::run( meaw( *this ) ) ;
+	utils::qthread::run( this,meaw( this,root,path,std::move( keepGoing ) ) ) ;
 }
 
 void library::enableAll()
@@ -759,6 +864,17 @@ void library::arrangeEntries( int )
 void library::showContents( const QString& path )
 {
 	m_continue = true ;
+
+	auto safePath = QDir::cleanPath( path ) ;
+	if( !pathWithinLibraryRoot( m_downloadFolder,safePath ) ){
+		safePath = QDir::cleanPath( m_downloadFolder ) ;
+		if( !pathWithinLibraryRoot( m_downloadFolder,safePath ) ){
+			m_table.clear() ;
+			this->enableAll() ;
+			return ;
+		}
+	}
+	m_currentPath = safePath ;
 	m_table.get().setHorizontalHeaderItem( 1,new QTableWidgetItem( m_currentPath ) ) ;
 
 	this->disableAll() ;
@@ -804,5 +920,5 @@ void library::showContents( const QString& path )
 		std::shared_ptr< std::atomic_bool > m_continue ;
 	} ;
 
-	utils::qthread::run( meaw( this,path,std::move( scanContinue ) ) ) ;
+	utils::qthread::run( meaw( this,safePath,std::move( scanContinue ) ) ) ;
 }

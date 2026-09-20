@@ -108,6 +108,9 @@ private:
 	settings& m_settings ;
 	std::atomic_bool m_continue ;
 	std::shared_ptr< std::atomic_bool > m_scanContinue ;
+	// Destructive workers own this cancellation token independently of the
+	// Library QObject so shutdown never leaves a thread dereferencing m_continue.
+	std::shared_ptr< std::atomic_bool > m_deleteContinue ;
 	Ui::MainWindow& m_ui ;
 	tableMiniWidget< directoryEntries::ICON,2 > m_table ;
 	QString m_downloadFolder ;

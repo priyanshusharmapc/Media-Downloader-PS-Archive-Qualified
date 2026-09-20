@@ -1,4 +1,4 @@
-"""Regression policy for MDPS-AUDIT2-117 Library batch cancellation."""
+"""Regression policy for Library destructive-operation cancellation and AUDIT2-085 lifetime."""
 from __future__ import annotations
 import argparse
 from pathlib import Path
@@ -6,31 +6,34 @@ from pathlib import Path
 p=argparse.ArgumentParser()
 p.add_argument("--source-root",required=True,type=Path)
 root=p.parse_args().source_root
-library=(root/"src/library.cpp").read_text(encoding="utf-8")
+hdr=(root/"src/library.h").read_text(encoding="utf-8")
+src=(root/"src/library.cpp").read_text(encoding="utf-8")
 entries=(root/"src/directoryEntries.cpp").read_text(encoding="utf-8")
 
-delete_start=library.index("bool library::deletePath")
-delete_end=library.index("void library::setRenameUiVisible",delete_start)
-delete_body=library[delete_start:delete_end]
-assert "if( !m_continue )" in delete_body
-assert "if( !m_continue || items.empty() )" in delete_body
-assert "if( !m_parent.m_continue )" in delete_body
+assert "std::shared_ptr< std::atomic_bool > m_deleteContinue" in hdr
+ctor=src[src.index("library::library( const Context& ctx )"):src.index("void library::moveUp")]
+assert "if( m_deleteContinue )" in ctor
+assert "*m_deleteContinue = false" in ctor
 
-# New operations explicitly arm cancellation once.
-assert library.count("m_continue = true ;") >= 4
+delete=src[src.index("void library::deleteEntries"):src.index("void library::setRenameUiVisible")]
+assert "m_deleteContinue->load()" in delete
+assert "auto keepGoing = m_deleteContinue" in delete
+assert "deleteLibraryPath( m_root,m_path,*m_continue )" in delete
+assert "utils::qthread::run( this,meaw" in delete
+bg=delete[delete.index("bool bg()"):delete.index("void fg(")]
+assert "m_parent" not in bg
 
-# Per-directory workers must never reset the shared operation token.
-assert "m_continue = true ;" not in entries.split("#ifdef Q_OS_WIN",1)[1].split("#else",1)[0].split("private:",1)[0]
-posix=entries.split("#else",1)[1].split("#endif",1)[0]
-assert "m_continue = true ;" not in posix.split("private:",1)[0]
+delete_all=src[src.index("void library::deleteAll"):src.index("void library::enableAll")]
+assert "auto keepGoing = m_deleteContinue" in delete_all
+assert "directoryManager::removeDirectoryContents( m_path,*m_continue )" in delete_all
+assert "utils::qthread::run( this,meaw" in delete_all
+bg_all=delete_all[delete_all.index("void bg()"):delete_all.index("void fg()")]
+assert "m_parent" not in bg_all
 
-# Standalone enumeration still initializes its own token.
-assert "std::atomic_bool s{ true }" in entries
-print("Library delete cancellation scope policy: PASS")
+exit_body=src[src.index("void library::exiting"):src.index("void library::retranslateUi")]
+assert "*m_deleteContinue = false" in exit_body
+assert "m_deleteContinue.reset()" in exit_body
 
-# The UI cancellation control must actually lower the shared operation token.
-assert "pbLibraryCancel" in library
-assert "m_continue = false" in library
-# No recursive delete continuation may run after the foreground cancellation gate.
-fg=delete_body[delete_body.index("void fg( bool s )"):]
-assert fg.index("if( !m_parent.m_continue )") < fg.index("m_parent.deleteEntries( m_items.move() )")
+# Recursive directory helpers consume the caller-owned atomic and never re-arm it.
+assert "std::atomic_bool& m_continue" in entries
+print("Library delete cancellation/lifetime policy: PASS")

@@ -1108,41 +1108,13 @@ void playlistdownloader::getList( playlistdownloader::listIterator iter,
 
 	m_networkRunning = 0 ;
 
-	class meaw
-	{
-	public:
-		meaw(	const QString& url,
-			const engines::engine& engine,
-			QStringList opts,
-			playlistdownloader& parent,
-			playlistdownloader::listIterator iter,
-			bool ad ) :
-			m_engine( engine ),
-			m_opts( std::move( opts ) ),
-			m_parent( parent ),
-			m_iter( std::move( iter ) ),
-			m_url( url ),
-			m_autoDownload( ad )
-		{
-		}
-		utility::archiveData bg()
-		{
-			return { std::move( m_opts ),m_engine,m_parent.m_ctx } ;
-		}
-		void fg( utility::archiveData o )
-		{
-			m_parent.getList( m_url,o.move(),m_engine,m_iter.move(),m_autoDownload ) ;
-		}
-	private:
-		const engines::engine& m_engine ;
-		QStringList m_opts ;
-		playlistdownloader& m_parent ;
-		playlistdownloader::listIterator m_iter ;
-		QString m_url ;
-		bool m_autoDownload ;
-	} ;
+	// This setup used to run in a detached worker that retained both
+	// playlistdownloader& and engine&. Construct the lightweight archive options
+	// while both owners are known alive, then continue through the existing
+	// asynchronous process pipeline.
+	utility::archiveData archiveData( std::move( opts ),engine,m_ctx ) ;
+	this->getList( url,archiveData.move(),engine,iter.move(),autoDownload ) ;
 
-	utils::qthread::run( meaw( url,engine,std::move( opts ),*this,iter.move(),autoDownload ) ) ;
 }
 
 void playlistdownloader::getList(  const QString& url,
