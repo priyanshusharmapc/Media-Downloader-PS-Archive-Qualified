@@ -516,6 +516,7 @@ if(BUILD_TESTING)
     add_executable(archive-gui-settings-tests tests/archive-gui-settings-tests.cpp
         src/archive/archivesettings.cpp src/archive/archivetab.cpp src/archive/archivetab.h
         src/archive/archivecore.cpp src/archive/archive.qrc src/mainwindow.ui)
+    target_compile_definitions(archive-gui-settings-tests PRIVATE MDPS_ARCHIVE_TEST_HOOKS=1)
     if(BUILD_WITH_QT6)
         target_link_libraries(archive-gui-settings-tests Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent)
     else()
