@@ -274,9 +274,10 @@ bool copyResource(const QString& resource,const QString& destination,QString* er
     return atomicWrite(destination,bytes,error);
 }
 
-ProcessResult runProcess(const QString& program,const QStringList& args,const QString& cwd,int timeoutMs)
+ProcessResult runProcess(const QString& program,const QStringList& args,const QString& cwd,int timeoutMs,
+                         const std::atomic_bool* cancelRequested=nullptr)
 {
-    return detail::runContainedProcess(program,args,cwd,timeoutMs);
+    return detail::runContainedProcess(program,args,cwd,timeoutMs,cancelRequested);
 }
 
 QJsonObject historyEvent(const QString& event,const QString& itemKey,const QJsonObject& detail={})
@@ -1459,7 +1460,7 @@ Snapshot PlaylistDiscovery::discover(const Source& source)
     QStringList args={"--ignore-config","--flat-playlist","--dump-single-json","--skip-download","--ignore-errors"};
     appendYtRuntimeArgs(args,tools);
     args << "--" << source.url;
-    const auto r=runProcess(exe,args,m_config.archiveRoot,300000);
+    const auto r=runProcess(exe,args,m_config.archiveRoot,300000,m_config.cancelRequested);
     s=parse(source,r.standardOutput.toUtf8(),r.standardError,r.exitCode);
     s.scannedAt=nowIso();
     if(!r.ok){s.complete=false;if(s.error.isEmpty())s.error=r.error;}
@@ -1567,7 +1568,7 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
     if(absolute.isEmpty()||!file.isFile()||file.size()==0){result.errors<<"Missing, empty or unsafe media path";return result;}
     if(video?file.suffix().toLower()!="mp4":!QStringList{"m4a","mp4"}.contains(file.suffix().toLower()))result.errors<<"Media has the wrong container extension";
     ToolResolver tools(m_config);
-    const auto process=runProcess(tools.ffprobe(),{"-v","error","-show_streams","-show_format","-of","json",absolute},m_config.archiveRoot,60000);
+    const auto process=runProcess(tools.ffprobe(),{"-v","error","-show_streams","-show_format","-of","json",absolute},m_config.archiveRoot,60000,m_config.cancelRequested);
     if(!process.ok||!process.standardError.trimmed().isEmpty()){result.errors<<(process.error+": "+process.standardError.left(1000));return result;}
     QString parseError;const auto doc=parseJson(process.standardOutput.toUtf8(),&parseError);
     if(!doc.isObject()){result.errors<<("Invalid ffprobe JSON: "+parseError);return result;}
@@ -1602,7 +1603,7 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
     const auto boundedDurationMs=std::min(24.0*60.0*60.0*1000.0,duration*2000.0);
     const qint64 durationTimeout=static_cast<qint64>(boundedDurationMs);
     const int integrityTimeout=static_cast<int>(std::max<qint64>(10*60*1000,durationTimeout));
-    const auto integrity=runProcess(ffmpeg,integrityArgs,m_config.archiveRoot,integrityTimeout);
+    const auto integrity=runProcess(ffmpeg,integrityArgs,m_config.archiveRoot,integrityTimeout,m_config.cancelRequested);
     if(!integrity.ok){
         const auto detail=integrity.standardError.trimmed().left(1600);
         result.errors<<("Full media integrity decode failed: "+(detail.isEmpty()?integrity.error:detail));
@@ -1651,7 +1652,7 @@ bool verifiedRepresentationUnchanged(const Paths& paths,const Representation& re
 ProcessResult MediaExecutor::run(const QString& program,const QStringList& args,const QString& purpose) const
 {
     m_logger.diagnostic(QString("%1 command: %2 %3").arg(purpose,program,args.join(' ')));
-    auto r=runProcess(program,args,m_config.archiveRoot,60*60*1000);
+    auto r=runProcess(program,args,m_config.archiveRoot,60*60*1000,m_config.cancelRequested);
     m_logger.diagnostic(QString("%1 result exit=%2 stderr=%3").arg(purpose).arg(r.exitCode).arg(r.standardError.left(16000)));
     return r;
 }
@@ -2078,14 +2079,14 @@ bool RecoveryImporter::normalizeVideo(const QString& input,const QString& output
     const QStringList args={"-nostdin","-n","-i",input,"-map","0:v:0","-map","0:a:0?","-map_metadata","0","-map_chapters","0",
                             "-vf","scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
                             "-c:v","libx264","-preset","medium","-crf","18","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k",output};
-    const auto r=runProcess(m_tools.ffmpeg(),args,m_config.archiveRoot,60*60*1000);
+    const auto r=runProcess(m_tools.ffmpeg(),args,m_config.archiveRoot,60*60*1000,m_config.cancelRequested);
     if(!r.ok){if(error)*error=r.error+" "+r.standardError.left(1000);return false;} return true;
 }
 
 bool RecoveryImporter::normalizeAudio(const QString& input,const QString& output,QString* error) const
 {
     const QStringList args={"-nostdin","-n","-i",input,"-vn","-map_metadata","0","-map_chapters","0","-c:a","aac","-b:a","192k",output};
-    const auto r=runProcess(m_tools.ffmpeg(),args,m_config.archiveRoot,60*60*1000);
+    const auto r=runProcess(m_tools.ffmpeg(),args,m_config.archiveRoot,60*60*1000,m_config.cancelRequested);
     if(!r.ok){if(error)*error=r.error+" "+r.standardError.left(1000);return false;} return true;
 }
 
