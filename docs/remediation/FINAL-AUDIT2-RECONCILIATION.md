@@ -228,6 +228,49 @@ The exact production-remediation head workflow run `35502470214` was attempted t
 
 ## Definition-of-Done state
 
-Source remediation, regression coverage, conflict reconciliation, and source integration are complete for all 202 non-retracted technical records. No remediation PR remains open. The sole remaining release gate is external: executable exact-head Linux/Windows GitHub Actions qualification and the dependent durable package/evidence publication. No test, safety invariant, or CI requirement is waived.
+Source remediation, regression coverage, conflict reconciliation, and source integration are complete for all 224 currently known non-retracted technical records through MDPS-AUDIT2-225, including the reopened residual scopes listed below. No remediation PR remains open. The sole remaining release gate is external: executable exact-head Linux/Windows GitHub Actions qualification and the dependent durable package/evidence publication. No test, safety invariant, or CI requirement is waived.
 
 Records represented only by semantic-integration history: MDPS-AUDIT2-023, MDPS-AUDIT2-047, MDPS-AUDIT2-055, MDPS-AUDIT2-151, MDPS-AUDIT2-153, MDPS-AUDIT2-160, MDPS-AUDIT2-179, MDPS-AUDIT2-185, MDPS-AUDIT2-186, MDPS-AUDIT2-188, MDPS-AUDIT2-189, MDPS-AUDIT2-190, MDPS-AUDIT2-191, MDPS-AUDIT2-192, MDPS-AUDIT2-194, MDPS-AUDIT2-195, MDPS-AUDIT2-198, MDPS-AUDIT2-199.
+
+
+## Post-remediation forensic integration through MDPS-AUDIT2-225
+
+**Remediation PR:** #211  
+**Merged integration commit:** `f2841b672c692378b6e613c0300ea64452903caa`  
+**Consolidated regression:** `tests/post-remediation-204-225-policy-tests.py`  
+**Reopened canonical scopes closed in the same PR:** `004, 021, 026, 038, 048, 074, 075, 077, 085, 093, 112, 183, 196`, plus the appended Flatpak/updater version-probe scope under `213`.
+
+| Finding | Severity | Integrated remediation |
+| --- | --- | --- |
+| MDPS-AUDIT2-204 | High | Reconciled `settings::addToHistory` declaration/definition/call signature so the application target is compile-consistent. |
+| MDPS-AUDIT2-205 | Medium | Raised the declared CMake minimum to the version required by `FindPython3`. |
+| MDPS-AUDIT2-206 | Medium | Explicit list exports now use atomic checked persistence and preserve the prior file on failure. |
+| MDPS-AUDIT2-207 | High | Removed duplicate policy-test registration so each test name is registered once. |
+| MDPS-AUDIT2-208 | Medium | Flatpak external-player playlists now reserve an exclusive temporary filename. |
+| MDPS-AUDIT2-209 | Medium | Network payload callbacks are driven by `readyRead` plus a terminal unread-tail drain; `downloadProgress` only updates counters. |
+| MDPS-AUDIT2-210 | Medium | External-player handoff files use a lease instead of unconditional startup/destructor deletion. |
+| MDPS-AUDIT2-211 | Medium | Archive qualification hooks are compile-time test-only and excluded from the production executable. |
+| MDPS-AUDIT2-212 | Medium | Linux/Arch build scripts build the checkout containing the script rather than a hard-coded home-directory tree. |
+| MDPS-AUDIT2-213 | Medium | Engine, Flatpak VLC, and staged-updater version probes use bounded contained-process execution with lifetime/environment preservation. |
+| MDPS-AUDIT2-214 | Medium | Windows updater startup/promotion is serialized before single-instance handoff. |
+| MDPS-AUDIT2-215 | Medium | Linux gateway proxy selection validates route shape/flags and chooses the lowest valid metric. |
+| MDPS-AUDIT2-216 | Medium | Windows system-proxy discovery is asynchronous and owner-lifetime guarded. |
+| MDPS-AUDIT2-217 | Medium | System-proxy alternatives preserve direct/default preference ordering. |
+| MDPS-AUDIT2-218 | Medium | Archive lock failures expose owner data and recover dead-owner stale lock files safely. |
+| MDPS-AUDIT2-219 | Medium | Post-download finalization failures transition durable representations out of `running`. |
+| MDPS-AUDIT2-220 | Medium | Background clipboard callbacks use generation ordering and owner-lifetime guards. |
+| MDPS-AUDIT2-221 | Medium | Application update release selection requires one exact approved asset identity. |
+| MDPS-AUDIT2-222 | Medium | Missing application-update SHA-256 digest is fail-closed. |
+| MDPS-AUDIT2-223 | High | Extracted updater trees reject symlinks/junctions/reparse points, special entries, hard links, and canonical escapes before promotion. |
+| MDPS-AUDIT2-224 | Low | Temporary M3U persistence checks full write/commit success before launch. |
+| MDPS-AUDIT2-225 | Low | Media duration storage and formatting use checked 64-bit arithmetic and elapsed-duration formatting. |
+
+### Qualification state after PR #211
+
+Post-merge workflow run `35533110339` targeted integration head `f2841b672c692378b6e613c0300ea64452903caa`. Both executable jobs failed before any step was allocated:
+
+- Linux: `steps: []`, `runner_id: 0`
+- Windows: `steps: []`, `runner_id: 0`
+- durable qualification publication: skipped
+
+This is an external runner-allocation blocker. It is **not** recorded as a passing build, and it is **not** evidence of a compiler/test assertion failure. Executable exact-head qualification remains required.
