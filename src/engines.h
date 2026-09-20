@@ -69,10 +69,10 @@ public:
 			m_filePath( path ),m_file( m_filePath ),m_logger( logger )
 		{
 		}
-		void write( const QString& ) ;
-		void write( const QJsonDocument&,
+		bool write( const QString& ) ;
+		bool write( const QJsonDocument&,
 			    QJsonDocument::JsonFormat = QJsonDocument::Indented ) ;
-		void write( const QJsonObject&,
+		bool write( const QJsonObject&,
 			    QJsonDocument::JsonFormat = QJsonDocument::Indented ) ;
 		QByteArray readAll() ;
 		QStringList readAllAsLines() ;
