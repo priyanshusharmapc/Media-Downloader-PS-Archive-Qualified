@@ -10,5 +10,7 @@ reset=body.index("lineEditConfigureTextEncoding->setVisible( true )")
 deno=body.index('if( s.name() == "deno" )')
 assert reset < deno
 assert "cbDenoEnableAutoDownload->setVisible( false )" in body[:deno]
+assert "labelConfigureTextEncoding->setVisible( true )" in body[:deno]
+assert "labelConfigureTextEncoding->setEnabled( s.supportsTextEnconding() || s.name() == \"deno\" )" in body[:deno]
 assert 'labelConfigureTextEncoding->setText( tr( "Text Encoding" ) )' in body[:deno]
 print("Configure engine visibility reset policy: PASS")
