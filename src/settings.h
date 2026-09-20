@@ -355,7 +355,6 @@ public:
 			}
 			void checkAvailability() const ;
 		private:
-			bool checkAvailability( const QStringList& ) const ;
 			mutable QStringList m_args ;
 		} ;
 
