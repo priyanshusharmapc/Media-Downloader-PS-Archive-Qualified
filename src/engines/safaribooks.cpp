@@ -251,16 +251,17 @@ void safaribooks::updateDownLoadCmdOptions( const engines::engine::baseEngine::u
 {
 	if( s.urls.size() > 0 ){
 
-		const auto m = util::split( s.urls[ 0 ],'/',true ) ;
+		const auto input = s.urls[ 0 ].trimmed() ;
+		const auto m = util::split( input,'/',true ) ;
 
-		// Slash-only or otherwise component-less input is malformed. Do not
-		// dereference QStringList::last() unless a real book identifier exists.
-		if( m.isEmpty() ){
+		// Slash-only, whitespace-only or otherwise component-less input is
+		// malformed. Do not retain a whitespace token as a fake identifier.
+		if( input.isEmpty() || m.isEmpty() || m.last().trimmed().isEmpty() ){
 			s.urls.clear() ;
 			return ;
 		}
 
-		s.urls[ 0 ] = m.last() ;
+		s.urls[ 0 ] = m.last().trimmed() ;
 	}
 
 	s.ourOptions.append( "--destination" ) ;
