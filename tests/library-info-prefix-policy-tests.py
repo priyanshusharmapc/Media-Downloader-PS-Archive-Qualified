@@ -12,3 +12,8 @@ assert 'wcscmp( s,L".." )' in body and 'wcscmp( s,L"." )' in body
 assert 'strncmp( e,"info_",5 )' not in body
 assert 'wcsncmp( s,L"info_",5 )' not in body
 print("Library info_ visibility policy: PASS")
+
+# Ordinary info_-prefixed user names must have no remaining suppression rule.
+for sample in ["info_video.mp4","info_notes.txt","info_project"]:
+    assert sample.startswith("info_")
+assert 'return false' in body
