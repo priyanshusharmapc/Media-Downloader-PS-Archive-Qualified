@@ -1641,7 +1641,7 @@ void settings::mediaPlayer::action::operator()() const
 
 				QByteArray aa = "#EXTM3U\n\n" ;
 
-				if( duration != "0" && !title.contains( "NA" ) ){
+				if( duration != "0" && !title.isEmpty() && title != "NA" ){
 
 					aa += "#EXTINF:" + duration + ", " + title + "\n" ;
 				}
