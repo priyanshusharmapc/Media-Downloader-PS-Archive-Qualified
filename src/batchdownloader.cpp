@@ -646,15 +646,16 @@ void batchdownloader::init_done()
 	const auto shared = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
 
 	if( QFile::exists( shared ) ){
-		// Claim one immutable recovery generation while holding the same lock
-		// used by shutdown writers. Later writers are free to create a new
-		// shared generation without the restore callback ever deleting it.
+		// Snapshot the exact recovery generation under the same lock used by
+		// writers, but leave the shared recovery file in place until parsing
+		// succeeds. A crash during restore therefore cannot strand the only
+		// durable copy in a private pathname.
 		QLockFile lock( shared + ".lock" ) ;
 		lock.setStaleLockTime( 30000 ) ;
 		if( lock.tryLock( 10000 ) && QFile::exists( shared ) ){
 			const auto claimed = shared + ".consume-" +
 				QUuid::createUuid().toString( QUuid::WithoutBraces ) + ".json" ;
-			if( QFile::rename( shared,claimed ) ){
+			if( QFile::copy( shared,claimed ) ){
 				this->getListFromFile( claimed,true ) ;
 			}
 		}
@@ -2017,20 +2018,17 @@ void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 {
 	engines::file::readAll( this,e,m_ctx.logger(),[ this,deleteFile,e ]( bool readOk,QByteArray list ){
 
-		const auto restoreClaimedAutosave = [ this,deleteFile,&e ](){
-			if( !deleteFile || !e.contains( ".consume-" ) ){
-				return ;
-			}
-			const auto shared = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
-			QLockFile lock( shared + ".lock" ) ;
-			lock.setStaleLockTime( 30000 ) ;
-			if( lock.tryLock( 10000 ) && !QFile::exists( shared ) ){
-				QFile::rename( e,shared ) ;
+		const auto isAutosaveSnapshot = deleteFile && e.contains( ".consume-" ) ;
+		const auto discardSnapshot = [ & ](){
+			if( isAutosaveSnapshot ){
+				QFile::remove( e ) ;
 			}
 		} ;
 
 		if( !readOk || list.isEmpty() ){
-			restoreClaimedAutosave() ;
+			// The shared autosave was never removed, so a failed snapshot read
+			// leaves the canonical recovery generation available for retry.
+			discardSnapshot() ;
 			return ;
 		}
 
@@ -2058,13 +2056,36 @@ void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 			m_ui.tabWidget->setCurrentIndex( 1 ) ;
 			this->parseItems( items.move(),{ false,false } ) ;
 
-			if( deleteFile && !QFile::remove( e ) ){
+			if( isAutosaveSnapshot ){
+				const auto shared = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
+				QLockFile lock( shared + ".lock" ) ;
+				lock.setStaleLockTime( 30000 ) ;
+				if( lock.tryLock( 10000 ) ){
+					QFile current( shared ) ;
+					QByteArray currentBytes ;
+					if( current.open( QIODevice::ReadOnly ) ){
+						currentBytes = current.readAll() ;
+					}
+
+					// Retire the canonical file only if it is still exactly the
+					// generation that was restored. A newer shutdown save is
+					// left untouched.
+					if( currentBytes == list ){
+						if( QFile::exists( shared ) && !QFile::remove( shared ) ){
+							m_ctx.logger().add(
+								"Failed to retire restored autosave generation: " + shared,
+								utility::loggerID() ) ;
+						}
+					}
+				}
+				QFile::remove( e ) ;
+			}else if( deleteFile && !QFile::remove( e ) ){
 				m_ctx.logger().add( "Failed to remove restored autosave: " + e,utility::loggerID() ) ;
 			}
 		}else{
-			// Parsing produced no recoverable jobs. Put a claimed autosave back
-			// only if no newer generation has appeared in the meantime.
-			restoreClaimedAutosave() ;
+			// Malformed/empty recovery evidence is never retired merely because
+			// a parser produced no jobs. Remove only the private snapshot.
+			discardSnapshot() ;
 		}
 	} ) ;
 }
