@@ -16,6 +16,12 @@
                     "lux"
                 ],
                 "Name": "lux"
+            },
+            "aarch64": {
+                "Args": [
+                    "lux"
+                ],
+                "Name": "lux"
             }
         },
         "Windows": {
@@ -30,13 +36,17 @@
                     "lux.exe"
                 ],
                 "Name": "lux.exe"
+            },
+            "aarch64": {
+                "Args": [
+                    "lux.exe"
+                ],
+                "Name": "lux.exe"
             }
         }
     },
-    "ControlJsonStructure": {
-    },
-    "DefaultDownLoadCmdOptions": [
-    ],
+    "ControlJsonStructure": {},
+    "DefaultDownLoadCmdOptions": [],
     "DefaultListCmdOptions": [
         "-j"
     ],
@@ -44,10 +54,8 @@
     "LikeYoutubeDl": false,
     "Name": "lux",
     "OptionsArgument": "-f",
-    "RemoveText": [
-    ],
-    "SkipLineWithText": [
-    ],
+    "RemoveText": [],
+    "SkipLineWithText": [],
     "SplitLinesBy": [
         "\n"
     ],

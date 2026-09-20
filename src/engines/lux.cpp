@@ -191,27 +191,41 @@ std::vector<engines::engine::baseEngine::mediaInfo> lux::mediaProperties( Logger
 
 bool lux::foundNetworkUrl( const QString& s )
 {
+	const utility::CPU cpu ;
+
 	if( utility::platformIsWindows() ){
 
-		if( utility::CPU().x86_32() ){
-
+		if( cpu.x86_32() ){
 			return s.contains( "Windows_i386" ) ;
-		}else{
+		}else if( cpu.aarch64() ){
+			return s.contains( "Windows_arm64" ) ;
+		}else if( cpu.x86_64() ){
 			return s.contains( "Windows_x86_64" ) ;
+		}else{
+			return false ;
 		}
 
 	}else if( utility::platformIsLinux() ){
 
-		if( utility::CPU().x86_32() ){
-
+		if( cpu.x86_32() ){
 			return s.contains( "Linux_i386" ) ;
-		}else{
+		}else if( cpu.aarch64() ){
+			return s.contains( "Linux_arm64" ) ;
+		}else if( cpu.x86_64() ){
 			return s.contains( "Linux_x86_64" ) ;
+		}else{
+			return false ;
 		}
 
 	}else if( utility::platformIsOSX() ){
 
-		return s.contains( "Darwin_x86_64.tar.gz" ) ;
+		if( cpu.aarch64() ){
+			return s.contains( "Darwin_arm64.tar.gz" ) ;
+		}else if( cpu.x86_64() ){
+			return s.contains( "Darwin_x86_64.tar.gz" ) ;
+		}else{
+			return false ;
+		}
 	}else{
 		return false ;
 	}
