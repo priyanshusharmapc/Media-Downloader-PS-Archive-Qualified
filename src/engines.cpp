@@ -2608,29 +2608,43 @@ const engines::engine& engines::engine::baseEngine::engine() const
 	return m_engine ;
 }
 
-void engines::file::write( const QString& e )
+bool engines::file::write( const QString& e )
 {
-	if( m_file.open( QIODevice::WriteOnly ) ){
-
-		m_file.write( e.toUtf8() ) ;
-	}else{
+	const auto data = e.toUtf8() ;
+	QSaveFile file( m_filePath ) ;
+	if( !file.open( QIODevice::WriteOnly ) ){
 		this->failToOpenForWriting() ;
+		return false ;
 	}
+	if( file.write( data ) != data.size() || !file.commit() ){
+		auto id = utility::loggerID() ;
+		m_logger.add( QObject::tr( "Failed to atomically write file" ) + ": " + m_filePath,id ) ;
+		file.cancelWriting() ;
+		return false ;
+	}
+	return true ;
 }
 
-void engines::file::write( const QJsonDocument& doc,QJsonDocument::JsonFormat format )
+bool engines::file::write( const QJsonDocument& doc,QJsonDocument::JsonFormat format )
 {
-	if( m_file.open( QIODevice::WriteOnly ) ){
-
-		m_file.write( doc.toJson( format ) ) ;
-	}else{
+	const auto data = doc.toJson( format ) ;
+	QSaveFile file( m_filePath ) ;
+	if( !file.open( QIODevice::WriteOnly ) ){
 		this->failToOpenForWriting() ;
+		return false ;
 	}
+	if( file.write( data ) != data.size() || !file.commit() ){
+		auto id = utility::loggerID() ;
+		m_logger.add( QObject::tr( "Failed to atomically write file" ) + ": " + m_filePath,id ) ;
+		file.cancelWriting() ;
+		return false ;
+	}
+	return true ;
 }
 
-void engines::file::write( const QJsonObject& obj,QJsonDocument::JsonFormat format )
+bool engines::file::write( const QJsonObject& obj,QJsonDocument::JsonFormat format )
 {
-	this->write( QJsonDocument( obj ),format ) ;
+	return this->write( QJsonDocument( obj ),format ) ;
 }
 
 QByteArray engines::file::readAll()
