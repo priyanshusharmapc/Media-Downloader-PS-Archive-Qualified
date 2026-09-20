@@ -8,6 +8,7 @@ p.add_argument("--source-root",required=True,type=Path)
 root=p.parse_args().source_root
 settings=(root/"src/settings.cpp").read_text(encoding="utf-8")
 translator=(root/"src/translator.cpp").read_text(encoding="utf-8")
+cmake=(root/"CMakeLists.txt").read_text(encoding="utf-8")
 
 s0=settings.index("QString settings::localizationLanguage()")
 s1=settings.index("bool settings::portableVersion()",s0)
@@ -25,3 +26,10 @@ assert 'm_settings.setLocalizationLanguage( "en_US" )' in tbody
 assert "//???" not in tbody
 
 print("Localization fallback truthfulness policy: PASS")
+
+# macOS packaging must ship the complete compiled translation set rather than
+# a manually maintained subset (canonical 089 packaging clarification).
+assert 'file(GLOB MD_TRANSLATION_FILES "${CMAKE_CURRENT_SOURCE_DIR}/translations/*.qm")' in cmake
+assert 'file(COPY ${MD_TRANSLATION_FILES}' in cmake
+for locale in ["bg_BG.qm","el_GR.qm","ko_KR.qm","uk_UA.qm"]:
+    assert f"file( COPY translations/{locale}" not in cmake
