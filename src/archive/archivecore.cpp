@@ -26,6 +26,7 @@
 #include <QUrlQuery>
 
 #include <algorithm>
+#include <limits>
 
 namespace archive
 {
@@ -97,6 +98,9 @@ QJsonObject repToJson(const Representation& r)
     if(!r.path.isEmpty()) o["path"]=r.path;
     if(!r.origin.isEmpty()) o["origin"]=r.origin;
     if(!r.verifiedAt.isEmpty()) o["verified_at"]=r.verifiedAt;
+    if(!r.verifiedSha256.isEmpty()) o["verified_sha256"]=r.verifiedSha256;
+    if(r.verifiedSize>=0) o["verified_size"]=static_cast<double>(r.verifiedSize);
+    if(!r.verificationProfile.isEmpty()) o["verification_profile"]=r.verificationProfile;
     if(!r.error.isEmpty()) o["error"]=r.error;
     return o;
 }
@@ -108,6 +112,14 @@ Representation repFromJson(const QJsonObject& o)
     r.path=o.value("path").toString();
     r.origin=o.value("origin").toString();
     r.verifiedAt=o.value("verified_at").toString();
+    r.verifiedSha256=o.value("verified_sha256").toString().toLower();
+    const auto persistedSize=o.value("verified_size");
+    if(persistedSize.isDouble()){
+        const auto n=persistedSize.toDouble();
+        if(std::isfinite(n)&&n>=0&&std::floor(n)==n&&n<=static_cast<double>(std::numeric_limits<qint64>::max()))
+            r.verifiedSize=static_cast<qint64>(n);
+    }
+    r.verificationProfile=o.value("verification_profile").toString();
     r.error=o.value("error").toString();
     return r;
 }
@@ -1356,7 +1368,13 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
     if(video) integrityArgs<<"-map"<<"0:v?"<<"-map"<<"0:a?";
     else integrityArgs<<"-map"<<"0:a?";
     integrityArgs<<"-f"<<"null"<<"-";
-    const auto integrity=runProcess(ffmpeg,integrityArgs,m_config.archiveRoot,10*60*1000);
+    // Deep verification timeout scales with media duration. Ten minutes remains
+    // the floor for short files, while long valid media is not rejected merely
+    // because decoding it cannot finish within a fixed wall-clock ceiling.
+    const auto boundedDurationMs=std::min(24.0*60.0*60.0*1000.0,duration*2000.0);
+    const qint64 durationTimeout=static_cast<qint64>(boundedDurationMs);
+    const int integrityTimeout=static_cast<int>(std::max<qint64>(10*60*1000,durationTimeout));
+    const auto integrity=runProcess(ffmpeg,integrityArgs,m_config.archiveRoot,integrityTimeout);
     if(!integrity.ok){
         const auto detail=integrity.standardError.trimmed().left(1600);
         result.errors<<("Full media integrity decode failed: "+(detail.isEmpty()?integrity.error:detail));
@@ -1366,6 +1384,41 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
 }
 
 MediaExecutor::MediaExecutor(RuntimeConfig c,Store& s,ActivityLogger& l):m_config(std::move(c)),m_store(s),m_logger(l),m_tools(m_config),m_verifier(m_config,l){}
+
+namespace
+{
+constexpr auto mediaVerificationProfile="full-decode-v1";
+
+void stampVerifiedRepresentation(const Paths& paths,Representation& representation,QString* error)
+{
+    const auto absolute=paths.absoluteFromRelative(representation.path);
+    QFileInfo info(absolute);
+    if(absolute.isEmpty()||!info.isFile()){
+        representation.verifiedSha256.clear();
+        representation.verifiedSize=-1;
+        representation.verificationProfile.clear();
+        return;
+    }
+    const auto hash=detail::fileDigest(absolute,error);
+    if(hash.isEmpty())return;
+    representation.verifiedSha256=hash;
+    representation.verifiedSize=info.size();
+    representation.verificationProfile=mediaVerificationProfile;
+}
+
+bool verifiedRepresentationUnchanged(const Paths& paths,const Representation& representation)
+{
+    if(representation.state!="complete"||representation.verificationProfile!=mediaVerificationProfile||
+       !QRegularExpression("^[0-9a-f]{64}$").match(representation.verifiedSha256).hasMatch()||
+       representation.verifiedSize<0)return false;
+    const auto absolute=paths.absoluteFromRelative(representation.path);
+    QFileInfo info(absolute);
+    if(absolute.isEmpty()||!info.isFile()||info.size()!=representation.verifiedSize)return false;
+    QString error;
+    return detail::fileDigest(absolute,&error)==representation.verifiedSha256;
+}
+}
+
 
 ProcessResult MediaExecutor::run(const QString& program,const QStringList& args,const QString& purpose) const
 {
@@ -1516,6 +1569,7 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     if(!verify.ok) return fail("Video verification failed: "+verify.errors.join("; "),rel);
     if(!writeMediaBinding(rel,item,"video",error))return false;
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
+    stampVerifiedRepresentation(m_store.paths(),done,error); if(error && !error->isEmpty())return false;
     if(!m_store.updateRepresentation(item.key,"video",done,error))return false;
     m_logger.event("INFO","verification","video_complete",{{"item_key",item.key},{"path",rel}});
     return true;
@@ -1582,6 +1636,7 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
     if(!verify.ok)return fail("Audio verification failed: "+verify.errors.join("; "),rel);
     if(!writeMediaBinding(rel,item,"audio",error))return false;
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
+    stampVerifiedRepresentation(m_store.paths(),done,error); if(error && !error->isEmpty())return false;
     if(!m_store.updateRepresentation(item.key,"audio",done,error))return false;
     m_logger.event("INFO","verification","audio_complete",{{"item_key",item.key},{"path",rel}});
     return true;
@@ -1599,11 +1654,25 @@ bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool 
         if((kind=="video"&&!wantVideo)||(kind=="audio"&&!wantAudio))continue;
         auto representation=kind=="video"?item.video:item.audio;
         const auto check=[&](const QString& p){return kind=="video"?m_verifier.verifyVideo(p):m_verifier.verifyAudio(p);};
-        if(representation.state=="complete"&&check(representation.path).ok)continue;
+        if(representation.state=="complete"&&verifiedRepresentationUnchanged(m_store.paths(),representation))continue;
+        if(representation.state=="complete"){
+            const auto verified=check(representation.path);
+            if(verified.ok){
+                representation.verifiedAt=nowIso();
+                QString fingerprintError;
+                stampVerifiedRepresentation(m_store.paths(),representation,&fingerprintError);
+                if(!fingerprintError.isEmpty()){errors<<fingerprintError;continue;}
+                QString updateError;
+                if(!m_store.updateRepresentation(item.key,kind,representation,&updateError))errors<<updateError;
+                continue;
+            }
+        }
         // A state flag is not evidence that the file still exists or is readable.
         const auto existing=findExistingById(kind=="video"?"Video":"Audio",item.providerId,kind=="video"?QStringList{"mp4","mkv","webm"}:QStringList{"m4a","mp4"});
         if(!existing.isEmpty()&&check(existing).ok){
             representation.state="complete";representation.path=existing;representation.verifiedAt=nowIso();representation.error.clear();
+            QString fingerprintError;stampVerifiedRepresentation(m_store.paths(),representation,&fingerprintError);
+            if(!fingerprintError.isEmpty()){errors<<fingerprintError;continue;}
             if(representation.origin.isEmpty())representation.origin="existing_archive";
             QString e;if(!m_store.updateRepresentation(item.key,kind,representation,&e))errors<<e;continue;
         }
@@ -1775,6 +1844,8 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* 
         const auto hash=detail::fileDigest(output,error);if(hash.isEmpty())return false;
         moves.append(QJsonObject{{"from",stagedRel},{"to",destRel},{"sha256",hash}});promoted.append(destRel);
         Representation done;done.state="complete";done.path=destRel;done.origin="external_recovery";done.verifiedAt=nowIso();
+        const auto published=Paths(m_config.archiveRoot).absoluteFromRelative(destRel);
+        done.verifiedSha256=hash;done.verifiedSize=QFileInfo(published).exists()?QFileInfo(published).size():QFileInfo(output).size();done.verificationProfile=mediaVerificationProfile;
         if(kind=="video")target.video=done;else target.audio=done;
     }
     updateRecoveryStatus(target);
