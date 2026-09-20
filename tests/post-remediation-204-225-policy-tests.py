@@ -78,6 +78,7 @@ def main():
     # 209: body bytes are delivered by data readiness and drained before terminal callback.
     require("&QIODevice::readyRead" in network_hpp, "209: network body delivery must use readyRead")
     require("bytesAvailable() > 0" in network_hpp and "m_readyReadConn" in network_hpp, "209: final unread tail must be handled")
+    require("h.progress( r,t )" not in network_hpp, "209: downloadProgress must not call a removed/body-consuming progress path")
 
     # 211: production executable ignores qualification-only Archive hooks.
     require("ARCHIVE_GUI_TEST_HOOK" not in main_cpp, "211: production main still contains test mutation hook")
@@ -100,6 +101,9 @@ def main():
             "213: engine version probe is not bounded/guarded")
     require("runContainedProcess" in settings_cpp and "5000" in settings_cpp and "qthread::run( context" in settings_cpp,
             "213: Flatpak VLC probe is not bounded/guarded")
+    updater_probe = utility_cpp[utility_cpp.find("static util::version _get_process_version"):utility_cpp.find("static bool _start_updated")]
+    require("runContainedProcess" in updater_probe and "waitForFinished()" not in updater_probe,
+            "213: staged updater version probe is still unbounded")
 
     # 214/221/222/223: application updater identity and filesystem trust boundary.
     require(".mdps-updater-startup.lock" in utility_cpp, "214: updater startup transaction is not serialized")
