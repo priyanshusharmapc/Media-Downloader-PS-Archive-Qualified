@@ -312,7 +312,7 @@ batchdownloader::batchdownloader( const Context& ctx ) :
 
 void batchdownloader::addClipboardUrl()
 {
-	auto m = utility::clipboardText() ;
+	auto m = utility::clipboardText().trimmed() ;
 
 	if( utility::isHttpUrl( m ) ){
 
@@ -1915,9 +1915,10 @@ void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 
 			for( const auto& it : util::split( list,'\n',true ) ){
 
-				if( utility::isHttpUrl( it ) ){
+				const auto candidate = it.trimmed() ;
+				if( utility::isHttpUrl( candidate ) ){
 
-					items.add( it ) ;
+					items.add( candidate ) ;
 				}
 			}
 		}
