@@ -632,7 +632,17 @@ bool validateStoreGraph(const Paths& paths,const QJsonArray& sources,const QJson
 {
     QSet<QString> sourceKeys,canonicalKeys;
     for(const auto& value:sources)sourceKeys.insert(value.toObject().value("key").toString());
-    for(const auto& value:canonical)canonicalKeys.insert(value.toObject().value("key").toString());
+    for(const auto& value:canonical){
+        const auto object=value.toObject();
+        canonicalKeys.insert(object.value("key").toString());
+        const auto metadataPath=object.value("metadata_path").toString();
+        if(metadataPath.isEmpty())continue;
+        if(!detail::relativeSafe(metadataPath)||!metadataPath.startsWith("Metadata/"))
+            return detail::reject(error,"Canonical item has unsafe metadata path: "+metadataPath);
+        const auto absolute=paths.absoluteFromRelative(metadataPath);
+        if(absolute.isEmpty()||!detail::noLinks(absolute)||!QFileInfo(absolute).isDir())
+            return detail::reject(error,"Canonical item metadata directory is missing or linked: "+metadataPath);
+    }
 
     // Checking only directories that still exist misses complete source-folder
     // loss. Validate all registered owners before any legacy migration writes.
@@ -870,7 +880,7 @@ bool Store::appendHistory(const QString& sourceKey,const QJsonObject& e,QString*
         {"Playlists/"+sourceKey+"/history.jsonl",history}},error);
 }
 
-bool Store::updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error)
+bool Store::updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error,const QString& metadataPath)
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
     QString stateError;
@@ -881,6 +891,14 @@ bool Store::updateRepresentation(const QString& itemKey,const QString& kind,cons
             if(kind=="video") item.video=representation;
             else if(kind=="audio") item.audio=representation;
             else { if(error) *error="Unknown representation kind"; return false; }
+            if(!metadataPath.isEmpty()){
+                if(!m_paths.isSafeRelative(metadataPath)||!metadataPath.startsWith("Metadata/"))
+                    return detail::reject(error,"Unsafe metadata path");
+                const auto absoluteMetadata=m_paths.absoluteFromRelative(metadataPath);
+                if(absoluteMetadata.isEmpty()||!detail::noLinks(absoluteMetadata)||!QFileInfo(absoluteMetadata).isDir())
+                    return detail::reject(error,"Missing or linked metadata directory");
+                item.metadataPath=metadataPath;
+            }
             updateRecoveryStatus(item);
             if(m_representationBatchActive){
                 m_representationBatchItems=std::move(items);
@@ -1717,9 +1735,22 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     }
     if(!verify.ok) return fail("Video verification failed: "+verify.errors.join("; "),rel);
     if(!writeMediaBinding(rel,item,"video",error))return false;
+
+    QString metadataPath;
+    const auto metadataRoot=Paths(m_config.archiveRoot).metadata();
+    for(const auto& info:QDir(metadataRoot).entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
+        if(info.fileName().contains("["+item.providerId+"]")&&detail::noLinks(info.absoluteFilePath())){
+            const auto candidate="Metadata/"+info.fileName();
+            if(Paths(m_config.archiveRoot).isSafeRelative(candidate)){
+                metadataPath=candidate;
+                break;
+            }
+        }
+    }
+
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
     stampVerifiedRepresentation(m_store.paths(),done,error); if(error && !error->isEmpty())return false;
-    if(!m_store.updateRepresentation(item.key,"video",done,error))return false;
+    if(!m_store.updateRepresentation(item.key,"video",done,error,metadataPath))return false;
     m_logger.event("INFO","verification","video_complete",{{"item_key",item.key},{"path",rel}});
     return true;
 }
