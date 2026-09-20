@@ -171,10 +171,19 @@ namespace utils
 				void result( bool timeOut )
 				{
 					QObject::disconnect( m_networkConn ) ;
+					QObject::disconnect( m_readyReadConn ) ;
 					QObject::disconnect( m_timerConn ) ;
 					m_timer.stop() ;
+
+					// A reply may still own readable bytes when finished() is emitted.
+					// Deliver that tail before the terminal callback so download
+					// consumers hash and persist the complete response body.
+					if( m_networkReply.bytesAvailable() > 0 ){
+						m_progress( { false,false,m_networkReply,m_received,m_total } ) ;
+					}
+
 					m_reply( { m_networkReply,timeOut } ) ;
-					m_progress( { true,timeOut,m_networkReply,0,0 } ) ;
+					m_progress( { true,timeOut,m_networkReply,m_received,m_total } ) ;
 				}
 				bool firstSeen()
 				{
@@ -189,9 +198,10 @@ namespace utils
 
 					return s ;
 				}
-				void start( int timeOut,QMetaObject::Connection&& nc,QMetaObject::Connection&& tc )
+				void start( int timeOut,QMetaObject::Connection&& nc,QMetaObject::Connection&& rc,QMetaObject::Connection&& tc )
 				{
 					m_networkConn = std::move( nc ) ;
+					m_readyReadConn = std::move( rc ) ;
 					m_timerConn = std::move( tc ) ;
 					#if QT_VERSION >= QT_VERSION_CHECK( 5,15,0 )
 						Q_UNUSED( timeOut )
@@ -218,11 +228,15 @@ namespace utils
 						}
 					#endif
 				}
-				void progress( qint64 r,qint64 t )
+				void noteProgress( qint64 r,qint64 t )
 				{
-					if( r != 0 ){
-
-						m_progress( { false,false,m_networkReply,r,t } ) ;
+					m_received = r ;
+					m_total = t ;
+				}
+				void dataReady()
+				{
+					if( m_networkReply.bytesAvailable() > 0 ){
+						m_progress( { false,false,m_networkReply,m_received,m_total } ) ;
 					}
 				}
 				~handle()
@@ -237,7 +251,10 @@ namespace utils
 				Progress m_progress ;
 				QMutex& m_mutex ;
 				QNetworkReply& m_networkReply ;
+				qint64 m_received = 0 ;
+				qint64 m_total = -1 ;
 				QMetaObject::Connection m_networkConn ;
+				QMetaObject::Connection m_readyReadConn ;
 				QMetaObject::Connection m_timerConn ;
 			} ;
 			template< typename Reply,typename Progress,typename Function >
@@ -248,7 +265,7 @@ namespace utils
 				QObject::connect( s,&QNetworkReply::downloadProgress,[ &h = *hdl,function = std::move( function ) ]( qint64 r,qint64 t ){
 
 					h.refreshTimer() ;
-
+					h.noteProgress( r,t ) ;
 					function( h,r,t ) ;
 				} ) ;
 
@@ -263,6 +280,9 @@ namespace utils
 							   hdl->result( false ) ;
 						   }
 					#endif
+				} ),QObject::connect( hdl->networkReply(),&QIODevice::readyRead,[ hdl ](){
+					hdl->refreshTimer() ;
+					hdl->dataReady() ;
 				} ),QObject::connect( hdl->timer(),&QTimer::timeout,[ hdl ](){
 
 					if( hdl->firstSeen() ){
