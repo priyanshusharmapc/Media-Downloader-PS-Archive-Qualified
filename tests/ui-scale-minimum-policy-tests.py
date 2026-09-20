@@ -9,11 +9,14 @@ s=(root/"src/settings.cpp").read_text(encoding="utf-8")
 start=c.index("class scaleUi"); end=c.index("pbConfigureScaleDown",start)
 body=c[start:end]
 assert "minimumScaleFactor = 0.05" in body
-assert "interval <= 0.0" in body
-assert "s < minimumScaleFactor" in body
+assert "!std::isfinite( interval ) || interval <= 0.0" in body
+assert "!std::isfinite( s ) || s < minimumScaleFactor" in body
 gstart=s.index("double settings::highDpiScalingFactorValue")
 gend=s.index("double settings::highDpiScalingFactorInterval",gstart)
 g=s[gstart:gend]
-assert "m < minimumScaleFactor ? minimumScaleFactor : m" in g
+assert "!std::isfinite( m ) || m < minimumScaleFactor ? minimumScaleFactor : m" in g
 assert "m == 0.0" not in g
 print("UI scale minimum policy: PASS")
+
+assert "#include <cmath>" in c
+assert "#include <cmath>" in s
