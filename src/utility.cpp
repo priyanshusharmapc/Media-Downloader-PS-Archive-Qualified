@@ -1559,10 +1559,18 @@ void utility::saveDownloadList( const Context& ctx,QMenu& m,tableWidget& tableWi
 
 					auto obj = it.toObject() ;
 
-					auto title = obj.value( "title" ).toString().toUtf8() ;
+					auto title = obj.value( "title" ).toString() ;
+					title.replace( "\r\n","\n" ) ;
+					title.replace( '\r','\n' ) ;
 					auto url   = obj.value( "url" ).toString().toUtf8() ;
 
-					m.append( "#" + title + "\n" + url + "\n\n" ) ;
+					// TXT lists are line-oriented and the importer treats every
+					// http-prefixed non-comment line as a job. Prefix each title
+					// line independently so multiline metadata cannot become input.
+					for( const auto& line : title.split( '\n',Qt::KeepEmptyParts ) ){
+						m.append( "#" + line.toUtf8() + "\n" ) ;
+					}
+					m.append( url + "\n\n" ) ;
 				}
 
 				engines::file( s,ctx.logger() ).write( m ) ;
