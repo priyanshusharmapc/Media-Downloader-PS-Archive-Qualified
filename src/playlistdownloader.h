@@ -168,6 +168,10 @@ private:
 			{
 				this->set( arr[ index ].toObject() ) ;
 			}
+			entry( const QJsonObject& obj )
+			{
+				this->set( obj ) ;
+			}
 			template< typename Iter >
 			entry( const Iter& it )
 			{

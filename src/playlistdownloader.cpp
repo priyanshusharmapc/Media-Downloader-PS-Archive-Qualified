@@ -719,7 +719,9 @@ void playlistdownloader::plSubscription()
 
 	ee.rEach( [ & ]( const subscription::entry& s ){
 
-		m.addAction( s.UiName() )->setObjectName( s.url() ) ;
+		auto ac = m.addAction( s.UiName() ) ;
+		const auto identity = subscription::entry::toObject( s.UiName(),s.url(),s.options() ) ;
+		ac->setData( QJsonDocument( identity ).toJson( QJsonDocument::Compact ) ) ;
 	} ) ;
 
 	m.addSeparator() ;
@@ -769,21 +771,14 @@ void playlistdownloader::plSubscription()
 
 				m_parent.m_subscription.setVisible( true ) ;
 			}else{
-				m_vector.each( [ & ]( const subscription::entry& e ){
+				const auto doc = QJsonDocument::fromJson( ac->data().toByteArray() ) ;
 
-					if( e.url() == s ){
+				if( doc.isObject() ){
 
-						utility::vector< subscription::entry > ss ;
-
-						ss.emplace_back( e ) ;
-
-						m_parent.getListing( ss.move(),engine,false ) ;
-
-						return true ;
-					}else{
-						return false ;
-					}
-				} ) ;
+					utility::vector< subscription::entry > ss ;
+					ss.emplace_back( doc.object() ) ;
+					m_parent.getListing( ss.move(),engine,false ) ;
+				}
 			}
 		}
 	private:
