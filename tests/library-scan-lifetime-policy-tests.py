@@ -73,4 +73,13 @@ assert "utility::archiveData archiveData" in plist
 assert "utils::qthread::run" not in plist
 assert "playlistdownloader& m_parent" not in plist
 
+
+# Linux process-tree termination no longer detaches a QProcess& reference.
+term=utility[utility.index("bool utility::Terminator::terminate"):utility.index("bool utility::platformIsNOTWindows")]
+assert "const auto rootPid = QString::number( exe.processId() )" in term
+assert "utils::qthread::run( &exe,meaw( &exe,rootPid ) )" in term
+term_bg=term[term.index("void bg()"):term.index("void fg()")]
+assert "m_exe" not in term_bg
+assert "QProcess& m_exe" not in term
+
 print("Detached-worker owner lifetime policy: PASS")
