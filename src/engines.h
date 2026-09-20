@@ -324,6 +324,13 @@ public:
 						return current ;
 					}
 
+					// A target can appear between the existence check and rename
+					// (another process/session may complete migration first). Prefer
+					// that now-authoritative current archive before falling back.
+					if( QFile::exists( current ) ){
+						return current ;
+					}
+
 					// Migration is best-effort, but deduplication state is not:
 					// keep using the known-good legacy archive if promotion fails.
 					return legacy ;
