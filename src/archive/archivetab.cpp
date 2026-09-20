@@ -244,7 +244,7 @@ void ArchiveTab::wireUi()
     QObject::connect(m_syncAll,&QPushButton::clicked,this,&ArchiveTab::syncAll);
     QObject::connect(m_retry,&QPushButton::clicked,this,&ArchiveTab::retryFailed);
     QObject::connect(m_stop,&QPushButton::clicked,this,&ArchiveTab::stopAfterCurrent);
-    QObject::connect(m_sources,&QListWidget::currentRowChanged,[this]{refreshTable();refreshDetails();});
+    QObject::connect(m_sources,&QListWidget::currentRowChanged,[this]{updateActionState();refreshTable();refreshDetails();});
     QObject::connect(m_table,&QTableWidget::itemSelectionChanged,this,&ArchiveTab::refreshDetails);
     QObject::connect(m_search,&QLineEdit::textChanged,this,&ArchiveTab::refreshTable);
     QObject::connect(m_filter,QOverload<int>::of(&QComboBox::currentIndexChanged),[this](int){refreshTable();});
@@ -435,6 +435,7 @@ void ArchiveTab::refreshSources()
     const auto current=selectedSourceKey(); archive::Store store{archive::Paths(m_root)}; const auto sources=store.loadSources(); m_sources->blockSignals(true);m_sources->clear();int selected=-1;
     for(int i=0;i<sources.size();++i){auto* item=new QListWidgetItem(sources[i].title.isEmpty()?sources[i].key:sources[i].title,m_sources);item->setData(Qt::UserRole,sources[i].key);item->setToolTip(sources[i].url);if(sources[i].key==current)selected=i;}
     if(selected<0&&m_sources->count()>0)selected=0;if(selected>=0)m_sources->setCurrentRow(selected);m_sources->blockSignals(false);
+    updateActionState();
 }
 
 archive::Source ArchiveTab::selectedSource() const
@@ -651,12 +652,25 @@ void ArchiveTab::refreshActivity()
 
 void ArchiveTab::updateActionState()
 {
-    // Busy state and root readiness are separate: ending a worker must never
-    // re-enable archive mutations after a drive has disappeared. Browse stays
-    // available for recovery when idle, including a fresh installation.
-    const bool ready=m_controlsEnabled&&!m_busy&&m_ready&&archive::ui::rootAvailable(m_root);
-    const QList<QWidget*> controls={m_add,m_remove,m_scan,m_syncSelected,m_syncAll,m_retry,m_more,m_sources,m_search,m_filter};
-    for(auto* widget:controls)widget->setEnabled(ready);
+    // Root/readability and worker ownership are independent gates. Global
+    // controls are available for a healthy Archive, while source-scoped
+    // actions require an actual selected source.
+    const bool ready=m_controlsEnabled&&!m_busy&&m_ready&&m_stateReadable&&archive::ui::rootAvailable(m_root);
+    const bool sourceSelected=ready&&!selectedSourceKey().isEmpty();
+
+    const QList<QWidget*> globalControls={m_add,m_syncAll,m_more,m_sources,m_search,m_filter};
+    for(auto* widget:globalControls)widget->setEnabled(ready);
+
+    const QList<QWidget*> sourceControls={m_remove,m_scan,m_syncSelected,m_retry};
+    for(auto* widget:sourceControls)widget->setEnabled(sourceSelected);
+
+    if(m_openRootAction)m_openRootAction->setEnabled(ready);
+    if(m_openPlaylistAction)m_openPlaylistAction->setEnabled(sourceSelected);
+    if(m_openCatalogAction)m_openCatalogAction->setEnabled(ready);
+    if(m_openMissingAction)m_openMissingAction->setEnabled(ready);
+    if(m_importsAction)m_importsAction->setEnabled(ready);
+    if(m_openLogsAction)m_openLogsAction->setEnabled(ready);
+
     m_browse->setEnabled(m_controlsEnabled&&!m_busy);
     m_stop->setEnabled(m_busy);
 }
@@ -703,12 +717,22 @@ void ArchiveTab::addPlaylist()
     QString error;if(!ensureReady(&error)){QMessageBox::critical(m_page,tr("Archive"),error);return;}
     bool ok=false;const auto url=QInputDialog::getText(m_page,tr("Add Playlist"),tr("YouTube playlist URL:"),QLineEdit::Normal,{},&ok).trimmed();if(!ok||url.isEmpty())return;
     const auto key=archive::sourceKeyFromUrl(url);if(key.isEmpty()){QMessageBox::warning(m_page,tr("Add Playlist"),tr("Enter a valid YouTube playlist URL containing a list ID."));return;}
+    const auto canonicalUrl=QStringLiteral("https://www.youtube.com/playlist?list=")+key;
     const auto title=QInputDialog::getText(m_page,tr("Add Playlist"),tr("Display name:"),QLineEdit::Normal,key,&ok).trimmed();if(!ok)return;
     if(!archive::ui::rootAvailable(m_root)){refreshAll();return;}
     archive::Paths paths(m_root);archive::SyncLock lock(paths);if(!lock.tryLock()){QMessageBox::warning(m_page,tr("Archive"),lock.errorString());return;}
     archive::Store store(paths);auto sources=store.loadSources(&error);if(!error.isEmpty()){QMessageBox::critical(m_page,tr("Archive"),error);return;}
-    for(const auto& source:sources)if(source.key==key){QMessageBox::information(m_page,tr("Add Playlist"),tr("This playlist is already registered."));return;}
-    archive::Source source;source.key=key;source.url=url;source.title=title.isEmpty()?key:title;source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    for(const auto& existing:sources)if(existing.key==key){
+        for(int i=0;i<m_sources->count();++i){
+            if(m_sources->item(i)->data(Qt::UserRole).toString()==key){
+                m_sources->setCurrentRow(i);
+                break;
+            }
+        }
+        QMessageBox::information(m_page,tr("Add Playlist"),tr("This playlist is already registered."));
+        return;
+    }
+    archive::Source source;source.key=key;source.url=canonicalUrl;source.title=title.isEmpty()?key:title;source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
     lock.unlock();
 
     // A syntactically valid URL is only a candidate until provider discovery
@@ -733,7 +757,18 @@ void ArchiveTab::removePlaylist()
 
 void ArchiveTab::scanSelected(){const auto s=selectedSource();if(!s.key.isEmpty())runSources({s},false,tr("Scanning %1").arg(s.title));}
 void ArchiveTab::syncSelected(){const auto s=selectedSource();if(!s.key.isEmpty())runSources({s},true,tr("Syncing %1").arg(s.title));}
-void ArchiveTab::retryFailed(){syncSelected();}
+void ArchiveTab::retryFailed()
+{
+    const auto source=selectedSource();
+    if(source.key.isEmpty()||m_busy)return;
+
+    QString error;
+    if(!ensureReady(&error)){m_statusLabel->setText(error);return;}
+
+    m_stopRequested=false;
+    const auto name=tr("Retrying failed work for %1").arg(source.title.isEmpty()?source.key:source.title);
+    runAsync(name,[this,source]{return operationRetryFailed(source);});
+}
 void ArchiveTab::syncAll()
 {
     if(m_busy)return;
@@ -829,6 +864,79 @@ QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool do
     result["failures"]=QJsonArray::fromStringList(failures);
     result["warning_count"]=warnings.size();result["warnings"]=QJsonArray::fromStringList(warnings);
     logger.event(totalFailures||!warnings.isEmpty()?"WARNING":"INFO","application",doDownloads?"sync_session_completed":"scan_session_completed",result);
+    return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
+}
+
+QString ArchiveTab::operationRetryFailed(const archive::Source& source)
+{
+    QString error;
+    if(!archive::ui::initializeRoot(m_root,&error))return QString("ERROR:")+error;
+
+    archive::Paths paths(m_root);
+    archive::Store store(paths);
+    archive::ActivityLogger logger(paths);
+    archive::SyncLock lock(paths);
+    if(!lock.tryLock())return "ERROR:"+lock.errorString();
+
+    const auto playlist=store.loadPlaylistItems(source.key,&error);
+    if(!error.isEmpty())return "ERROR:"+error;
+    const auto canonical=store.loadCanonicalItems(&error);
+    if(!error.isEmpty())return "ERROR:"+error;
+
+    QHash<QString,archive::CanonicalItem> map;
+    for(const auto& item:canonical)map[item.key]=item;
+
+    const auto retryable=[](const QString& state){
+        return state=="failed"||state=="interrupted";
+    };
+
+    QSet<QString> eligibleKeys;
+    for(const auto& occurrence:playlist){
+        if(occurrence.membership!="active"||!map.contains(occurrence.itemKey))continue;
+        const auto& item=map[occurrence.itemKey];
+        if(retryable(item.video.state)||retryable(item.audio.state))eligibleKeys.insert(occurrence.itemKey);
+    }
+
+    const auto eligible=eligibleKeys.size();
+    int processed=0,failuresCount=0;
+    QStringList failures;
+    logger.event("INFO","application","retry_failed_started",{{"source_key",source.key},{"eligible",eligible}});
+
+    QSet<QString> processedKeys;
+    for(const auto& occurrence:playlist){
+        if(m_stopRequested.load())break;
+        if(occurrence.membership!="active"||!map.contains(occurrence.itemKey)||processedKeys.contains(occurrence.itemKey))continue;
+
+        const auto item=map[occurrence.itemKey];
+        const bool retryVideo=retryable(item.video.state);
+        const bool retryAudio=retryable(item.audio.state);
+        if(!retryVideo&&!retryAudio)continue;
+
+        processedKeys.insert(occurrence.itemKey);
+        ++processed;
+        const auto itemName=occurrence.title.isEmpty()?occurrence.itemKey:occurrence.title;
+        postOperationProgress(tr("Retry failed media"),tr("%1 | item %2/%3").arg(itemName).arg(processed).arg(eligible),processed-1,eligible,failuresCount);
+
+        archive::MediaExecutor executor(runtimeConfig(),store,logger);
+        QString itemError;
+        if(!executor.syncItem(item,retryVideo,retryAudio,&itemError)){
+            ++failuresCount;
+            failures<<occurrence.itemKey+": "+itemError;
+        }
+
+        postOperationProgress(tr("Retry failed media"),tr("Processed %1/%2").arg(processed).arg(eligible),processed,eligible,failuresCount);
+    }
+
+    lock.unlock();
+
+    QJsonObject result;
+    result["observed"]=eligible;
+    result["completed_items"]=processed-failuresCount;
+    result["failure_count"]=failuresCount;
+    result["warning_count"]=0;
+    result["stopped"]=m_stopRequested.load();
+    result["failures"]=QJsonArray::fromStringList(failures);
+    logger.event(failuresCount?"WARNING":"INFO","application","retry_failed_completed",result);
     return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
 }
 
