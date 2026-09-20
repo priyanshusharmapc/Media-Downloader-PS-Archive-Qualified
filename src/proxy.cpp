@@ -145,35 +145,18 @@ void proxy::set( Context& ctx,bool firstTime,const QByteArray& proxyAddress,cons
 {
 	if( utility::platformIsWindows() && m.system() ){
 
-		class meaw
-		{
-		public:
-			meaw( Context& ctx,bool firstTime ) :
-				m_ctx( ctx ),m_firstTime( firstTime )
-			{
+		// Keep Context lifetime explicit. The previous detached worker retained a
+		// raw Context& and could call back after MainWindow/tab teardown.
+		const auto proxies = QNetworkProxyFactory::systemProxyForQuery() ;
+		for( const auto& it : proxies ){
+
+			if( !it.hostName().isEmpty() ){
+
+				ctx.setNetworkProxy( it,firstTime ) ;
+				return ;
 			}
-			QList< QNetworkProxy > bg()
-			{
-				return QNetworkProxyFactory::systemProxyForQuery() ;
-			}
-			void fg( const QList< QNetworkProxy >& m )
-			{
-				for( const auto& it : m ){
-
-					if( !it.hostName().isEmpty() ){
-
-						return m_ctx.setNetworkProxy( it,m_firstTime ) ;
-					}
-				}
-
-				m_ctx.setNetworkProxy( m_firstTime ) ;
-			}
-		private:
-			Context& m_ctx ;
-			bool m_firstTime ;
-		} ;
-
-		utils::qthread::run( meaw( ctx,firstTime ) ) ;
+		}
+		ctx.setNetworkProxy( firstTime ) ;
 
 	}else if( m.none() ){
 
