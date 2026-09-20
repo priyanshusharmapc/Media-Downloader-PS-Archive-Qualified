@@ -35,6 +35,7 @@
 #include <QClipboard>
 #include <QSaveFile>
 #include <QMessageBox>
+#include <QLockFile>
 
 configure::configure( const Context& ctx ) :
 	m_ctx( ctx ),
@@ -1855,58 +1856,81 @@ configure::presetOptions::presetOptions( const Context& ctx,settings& ) :
 	QByteArray data ;
 
 	if( QFile::exists( m_path ) ){
-
 		QFile f( m_path ) ;
-
-		if( f.open( QIODevice::ReadOnly ) ){
-
-			data = f.readAll() ;
+		if( !f.open( QIODevice::ReadOnly ) ){
+			m_storeValid = false ;
+			return ;
 		}
+		m_baseline = f.readAll() ;
+		data = m_baseline ;
 	}else{
+		m_baseline.clear() ;
 		data = this->defaultData() ;
 	}
 
+	// Apply the existing compatibility migrations only to the in-memory
+	// representation. The raw baseline remains unchanged so save() can detect
+	// another process replacing the file after this instance loaded it.
 	std::array< const char *,8 > resolutions{ "144","240","360","480","720","1080","1440","2160" } ;
-
 	QByteArray a = "bestvideo[height=" ;
 	QByteArray b = "bestvideo[format_note*=" ;
-
 	for( const auto& it : resolutions ){
-
-		auto x = a + it + "]" ;
-		auto y = b + it + "p]" ;
-
-		data.replace( x,y ) ;
+		data.replace( a + it + "]",b + it + "p]" ) ;
 	}
+	data.replace(
+		"bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best",
+		"bestvideo[ext=mp4][vcodec^=av]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best" ) ;
 
-	auto aa = "bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best" ;
-	auto bb = "bestvideo[ext=mp4][vcodec^=av]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best" ;
-
-	data.replace( aa,bb ) ;
-
-	auto json = utility::jsonDoc( data ) ;
-
-	if( json.valid() ){
-
-		m_array = json.toArray() ;
+	QJsonParseError error ;
+	const auto doc = QJsonDocument::fromJson( data,&error ) ;
+	if( error.error == QJsonParseError::NoError && doc.isArray() ){
+		m_array = doc.array() ;
+	}else{
+		// Malformed persisted configuration is recovery evidence. Keep it
+		// immutable until the user explicitly resets this store.
+		m_storeValid = false ;
 	}
 }
 
 bool configure::presetOptions::save()
 {
-	QSaveFile f( m_path ) ;
+	if( !m_storeValid ){
+		return false ;
+	}
 
-	if( !f.open( QIODevice::WriteOnly ) ){
+	QLockFile lock( m_path + ".lock" ) ;
+	lock.setStaleLockTime( 30000 ) ;
+	if( !lock.tryLock( 10000 ) ){
+		return false ;
+	}
+
+	QByteArray current ;
+	if( QFile::exists( m_path ) ){
+		QFile existing( m_path ) ;
+		if( !existing.open( QIODevice::ReadOnly ) ){
+			return false ;
+		}
+		current = existing.readAll() ;
+	}
+
+	// Atomic replacement alone is not a transaction. Refuse a stale snapshot
+	// instead of silently erasing a valid edit committed by another instance.
+	if( current != m_baseline ){
 		return false ;
 	}
 
 	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
-	if( f.write( data ) != data.size() ){
+	QSaveFile f( m_path ) ;
+	f.setDirectWriteFallback( false ) ;
+	if( !f.open( QIODevice::WriteOnly ) ||
+	    f.write( data ) != data.size() ||
+	    !f.commit() ){
 		f.cancelWriting() ;
 		return false ;
 	}
 
-	return f.commit() ;
+	m_baseline = data ;
+	return true ;
 }
 
 void configure::presetOptions::clear()
@@ -1921,13 +1945,22 @@ void configure::presetOptions::clear()
 
 void configure::presetOptions::setDefaults()
 {
-	this->clear() ;
+	QByteArray current ;
+	if( QFile::exists( m_path ) ){
+		QFile existing( m_path ) ;
+		if( !existing.open( QIODevice::ReadOnly ) ){
+			m_storeValid = false ;
+			return ;
+		}
+		current = existing.readAll() ;
+	}
 
-	auto json = utility::jsonDoc( this->defaultData() ) ;
-
-	if( json.valid() ){
-
-		m_array = json.toArray() ;
+	QJsonParseError error ;
+	const auto doc = QJsonDocument::fromJson( this->defaultData(),&error ) ;
+	if( error.error == QJsonParseError::NoError && doc.isArray() ){
+		m_array = doc.array() ;
+		m_baseline = current ;
+		m_storeValid = true ;
 	}
 }
 
@@ -2094,37 +2127,63 @@ configure::presetEntry::presetEntry( const QString& ui,const QString& op,const Q
 configure::downloadDefaultOptions::downloadDefaultOptions( const Context& ctx,const QString& name ) :
 	m_path( ctx.Engines().engineDirPaths().dataPath( name ) )
 {
-	if( QFile::exists( m_path ) ){
+	if( !QFile::exists( m_path ) ){
+		m_baseline.clear() ;
+		return ;
+	}
 
-		QFile f( m_path ) ;
+	QFile f( m_path ) ;
+	if( !f.open( QIODevice::ReadOnly ) ){
+		m_storeValid = false ;
+		return ;
+	}
 
-		if( f.open( QIODevice::ReadOnly ) ){
-
-			auto json = utility::jsonDoc( f.readAll() ) ;
-
-			if( json.valid() ){
-
-				m_array = json.toArray() ;
-			}
-		}
+	m_baseline = f.readAll() ;
+	QJsonParseError error ;
+	const auto doc = QJsonDocument::fromJson( m_baseline,&error ) ;
+	if( error.error == QJsonParseError::NoError && doc.isArray() ){
+		m_array = doc.array() ;
+	}else{
+		m_storeValid = false ;
 	}
 }
 
 bool configure::downloadDefaultOptions::save()
 {
-	QSaveFile f( m_path ) ;
+	if( !m_storeValid ){
+		return false ;
+	}
 
-	if( !f.open( QIODevice::WriteOnly ) ){
+	QLockFile lock( m_path + ".lock" ) ;
+	lock.setStaleLockTime( 30000 ) ;
+	if( !lock.tryLock( 10000 ) ){
+		return false ;
+	}
+
+	QByteArray current ;
+	if( QFile::exists( m_path ) ){
+		QFile existing( m_path ) ;
+		if( !existing.open( QIODevice::ReadOnly ) ){
+			return false ;
+		}
+		current = existing.readAll() ;
+	}
+	if( current != m_baseline ){
 		return false ;
 	}
 
 	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
-	if( f.write( data ) != data.size() ){
+	QSaveFile f( m_path ) ;
+	f.setDirectWriteFallback( false ) ;
+	if( !f.open( QIODevice::WriteOnly ) ||
+	    f.write( data ) != data.size() ||
+	    !f.commit() ){
 		f.cancelWriting() ;
 		return false ;
 	}
 
-	return f.commit() ;
+	m_baseline = data ;
+	return true ;
 }
 
 void configure::setVisibilityEditConfigFeature( bool e )
