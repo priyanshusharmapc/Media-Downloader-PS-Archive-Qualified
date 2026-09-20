@@ -46,9 +46,15 @@ bool pathWithinLibraryRoot( const QString& root,const QString& candidate )
 		return false ;
 	}
 
+#ifdef Q_OS_WIN
+	if( rootCanonical.compare( candidateCanonical,Qt::CaseInsensitive ) == 0 ){
+		return true ;
+	}
+#else
 	if( rootCanonical == candidateCanonical ){
 		return true ;
 	}
+#endif
 
 	const auto prefix = rootCanonical.endsWith( '/' ) ? rootCanonical : rootCanonical + "/" ;
 #ifdef Q_OS_WIN
