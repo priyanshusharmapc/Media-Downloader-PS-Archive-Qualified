@@ -518,15 +518,38 @@ std::vector< utility::PlayerOpts > _getMediaPlayers( REGSAM wow )
 		{
 			auto N = nullptr ;
 
-			buffer subKey ;
+			// RegGetValueW reports pcbData in bytes, unlike RegEnumKeyExW's
+			// character-count contract. Keep a dedicated zeroed buffer here so
+			// byte counts can never be mistaken for wchar_t counts.
+			std::array< wchar_t,4096 > value{} ;
+			DWORD bytes = static_cast< DWORD >( sizeof( value ) ) ;
 
 			auto path = L"shell\\open\\command" ;
 
-			auto st = RegGetValueW( m_key,path,N,RRF_RT_REG_SZ,N,subKey.data(),subKey.size() ) ;
+			auto st = RegGetValueW( m_key,path,N,RRF_RT_REG_SZ,N,value.data(),&bytes ) ;
 
 			if( st == ERROR_SUCCESS ){
 
-				return subKey.qdata() ;
+				// RegGetValueW reports a byte count. Reject impossible or partial
+				// wchar_t payloads before converting so a malformed registry value
+				// can never make the decoder read past the initialized data.
+				if( bytes == 0 || bytes > sizeof( value ) || bytes % sizeof( wchar_t ) != 0 ){
+
+					return {} ;
+				}
+
+				auto chars = static_cast< qsizetype >( bytes / sizeof( wchar_t ) ) ;
+
+				// REG_SZ is a string contract. Require the terminator and exclude it
+				// from the explicit QString length rather than accepting truncation.
+				if( chars <= 0 || value[ static_cast< std::size_t >( chars - 1 ) ] != L'\0' ){
+
+					return {} ;
+				}
+
+				chars-- ;
+
+				return QString::fromWCharArray( value.data(),chars ) ;
 			}else{
 				return {} ;
 			}
