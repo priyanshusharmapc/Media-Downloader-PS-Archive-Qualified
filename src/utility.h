@@ -473,6 +473,7 @@ namespace utility
 	{
 	public:
 		static QByteArray logHistoryData( const Context& ) ;
+		static QByteArray logHistoryData( const QString& filePath ) ;
 		archiveData( QStringList opts,const engines::engine& engine,const Context& ctx ) ;
 		void addToHistory( QJsonObject ) ;
 		const QStringList& options() const
