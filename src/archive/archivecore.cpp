@@ -1372,12 +1372,26 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
         p.providerId=e.value("id").toString();
         if(!p.providerId.isEmpty()&&!detail::videoIdSafe(p.providerId)){malformed=true;continue;}
         if(p.position<1){malformed=true;continue;}
-        p.title=e.value("title").toString();
+
+        const auto rawTitle=e.value("title").toString();
+        auto rawUrl=e.value("webpage_url").toString();
+        if(rawUrl.isEmpty()) rawUrl=e.value("url").toString();
+        const auto observedAvailability=availabilityFromEntry(e);
+
+        // A provider-less observation needs stable provider evidence. A URL is
+        // usable occurrence evidence, as is an explicit unavailable/private/
+        // deleted state. A free-form title by itself is not strong enough to
+        // authorize destructive removal inference for historical entries.
+        if(p.providerId.isEmpty()&&rawUrl.isEmpty()&&!isUnavailable(observedAvailability)){
+            malformed=true;
+            continue;
+        }
+
+        p.title=rawTitle;
         if(p.title.isEmpty()) p.title="[Unavailable item]";
-        p.url=e.value("webpage_url").toString();
-        if(p.url.isEmpty()) p.url=e.value("url").toString();
+        p.url=rawUrl;
         if(!p.providerId.isEmpty()) p.url="https://www.youtube.com/watch?v="+p.providerId;
-        p.availability=availabilityFromEntry(e);
+        p.availability=observedAvailability;
         p.itemKey=p.providerId.isEmpty()?placeholderBaseKey(source.key,p.title,p.url):canonicalKey(p.providerId,source.key,p.position,p.title);
         s.items.append(p);
     }
