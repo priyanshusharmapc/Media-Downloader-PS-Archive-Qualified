@@ -293,16 +293,14 @@ void basicdownloader::retranslateUi()
 	this->resetMenu() ;
 }
 
-void basicdownloader::listRequested( const QByteArray& a,int id )
+void basicdownloader::listRequested( const QByteArray& a,const engines::engine& engine,int id )
 {
 	if( a.isEmpty() ){
 
 		m_tableList.setVisible( false ) ;
 	}else{
-		auto m = m_ui.cbEngineType->currentText() ;
-
-		const auto& engine = m_ctx.Engines().defaultEngine( m,id ) ;
-
+		// Parse list output with the exact backend that produced it. URL-manager
+		// routing may intentionally differ from the visible global engine combo.
 		auto ee = engine.mediaProperties( m_ctx.logger(),a ) ;
 
 		if( ee.size() ){
@@ -331,7 +329,7 @@ void basicdownloader::list()
 
 	auto url = m_ui.lineEditURL->text() ;
 
-	const auto& backend = this->defaultEngine() ;
+	const auto& backend = this->defaultEngine( url ) ;
 
 	const auto& engine = backend.engine ;
 
@@ -526,7 +524,7 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 
 			if( m_getList ){
 
-				m_parent.listRequested( m_listData,m_id ) ;
+				m_parent.listRequested( m_listData,m_engine,m_id ) ;
 			}else{
 				auto e = reportFinished::finishedStatus::state::done ;
 
