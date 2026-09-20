@@ -359,6 +359,14 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 
 		md.file.close() ;
 
+		if( md.file.writeFailed() ){
+			md.status.done() ;
+			this->post( m_appName,QObject::tr( "Download Failed: could not persist complete payload: %1" ).arg( md.file.writeError() ),md.id ) ;
+			utility::removeFile( md.tmpFile ) ;
+			m_tabManager.enableAll() ;
+			return ;
+		}
+
 		if( p.success() ){			
 
 			if( md.hash.isEmpty() ){
@@ -397,9 +405,11 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 	}else{
 		auto data = p.data() ;
 
-		md.hashCalculator->addData( data ) ;
-
-		md.file.write( data ) ;
+		if( md.file.write( data ) ){
+			// The digest must describe bytes accepted by the file device, not
+			// merely bytes delivered by the network stack.
+			md.hashCalculator->addData( data ) ;
+		}
 
 		auto speed = md.speed.calculate( p ) ;
 
@@ -776,7 +786,10 @@ void networkAccess::downloadP( networkAccess::Opts& opts,const utils::network::p
 
 		opts.file.close() ;
 
-		if( p.success() ){
+		if( opts.file.writeFailed() ){
+			opts.reportFailed() ;
+			opts.networkError.add( QObject::tr( "Download Failed: could not persist complete payload: %1" ).arg( opts.file.writeError() ) ) ;
+		}else if( p.success() ){
 
 			if( opts.metadata.hash().isEmpty() ){
 
@@ -805,9 +818,9 @@ void networkAccess::downloadP( networkAccess::Opts& opts,const utils::network::p
 	}else{
 		auto data = p.data() ;
 
-		opts.hashCalculator->addData( data ) ;
-
-		opts.file.write( data ) ;
+		if( opts.file.write( data ) ){
+			opts.hashCalculator->addData( data ) ;
+		}
 
 		auto speed = opts.speed.calculate( p ) ;
 
