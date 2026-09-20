@@ -3201,27 +3201,38 @@ void utility::archiveData::addToHistory( QJsonObject obj )
 		{
 			QFile file( path ) ;
 
-			if( file.open( QIODevice::ReadOnly ) ){
-
-				auto m = file.map( 0,file.size() ) ;
-
-				if( m ){
-
-					auto t = reinterpret_cast< char * >( m ) ;
-
-					auto s = QByteArray::fromRawData( t,file.size() ) ;
-
-					bool e = s.contains( url.toUtf8() ) ;
-
-					file.unmap( m ) ;
-
-					return e ;
-				}else{
-					return false ;
-				}
-			}else{
+			if( !file.open( QIODevice::ReadOnly ) ){
 				return false ;
 			}
+
+			auto data = file.readAll().trimmed() ;
+
+			if( data.isEmpty() ){
+				return false ;
+			}
+
+			// History is append-only JSON objects. Convert the object stream into
+			// a temporary array and compare only the semantic Url field. A raw
+			// substring match can confuse URL prefixes or text in unrelated fields.
+			data.replace( "}\n{","},{") ;
+			data.prepend( '[' ) ;
+			data.append( ']' ) ;
+
+			QJsonParseError error ;
+			const auto doc = QJsonDocument::fromJson( data,&error ) ;
+
+			if( error.error != QJsonParseError::NoError || !doc.isArray() ){
+				return false ;
+			}
+
+			for( const auto& value : doc.array() ){
+
+				if( value.toObject().value( "Url" ).toString() == url ){
+					return true ;
+				}
+			}
+
+			return false ;
 		}
 		void updateHistory()
 		{
