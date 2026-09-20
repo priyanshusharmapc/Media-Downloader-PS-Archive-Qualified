@@ -1487,7 +1487,7 @@ void playlistdownloader::reportFinishedStatus( const reportFinished& f,
 
 		this->enableAll() ;
 
-		if( m_table.allFinishedWithSuccess() ){
+		if( m_table.allFinishedWithSuccess( 1 ) ){
 
 			this->resizeTable( playlistdownloader::size::small ) ;
 		}

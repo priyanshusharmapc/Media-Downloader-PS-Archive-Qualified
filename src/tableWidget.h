@@ -359,7 +359,7 @@ public:
 	bool isRowHidden( int ) ;
 	bool rowIsSelected( int ) ;
 	bool containsHiddenRows() ;
-	bool allFinishedWithSuccess() ;
+	bool allFinishedWithSuccess( int firstRow = 0 ) ;
 	int finishWithSuccess() ;
 
 	tableWidget( QTableWidget& t,const QFont& font,int init,Qt::Alignment textAlignment ) ;
