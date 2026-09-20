@@ -592,38 +592,29 @@ QSettings& settings::bk()
 
 void settings::init_done()
 {
-	class meaw
-	{
-	public:
-		meaw( settings& s ) : m_parent( s )
-		{
-		}
-		void bg()
-		{
-			if( utility::platformIsWindows() ){
+	if( utility::platformIsWindows() ){
 
-				const auto& m = m_parent.m_options.pathToOldUpdatedVersion() ;
+		const auto candidate = m_options.pathToOldUpdatedVersion() ;
+		const auto configPath = m_options.dataPath() ;
+		const auto runningUpdated = m_options.runningUpdated() ;
 
-				if( !m.isEmpty() ){
-
-					QDir( m ).removeRecursively() ;
-				}
-
-			}else if( utility::platformisFlatPak() ){
-
-				m_parent.clearFlatPakTemps() ;
-
-				m_parent.flatpakIntance().getVLC().checkAvailability() ;
+		// Cleanup runs in the background, but captures only immutable values.
+		// Never retain settings& beyond MainWindow shutdown.
+		utils::qthread::run( [ candidate,configPath,runningUpdated ](){
+			if( utility::isOwnedUpdateCleanupPath( configPath,candidate,runningUpdated ) ){
+				QDir( candidate ).removeRecursively() ;
 			}
-		}
-		void fg()
-		{
-		}
-	private:
-		settings& m_parent ;
-	} ;
+		} ) ;
+		return ;
+	}
 
-	utils::qthread::run( meaw( *this ) ) ;
+	if( utility::platformisFlatPak() ){
+
+		// These operations depend on live settings/runtime objects, so keep them
+		// within the owning settings lifetime instead of detaching raw references.
+		this->clearFlatPakTemps() ;
+		this->flatpakIntance().getVLC().checkAvailability() ;
+	}
 }
 
 void settings::setTabNumber( int s )
