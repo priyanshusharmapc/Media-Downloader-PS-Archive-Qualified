@@ -1714,6 +1714,9 @@ namespace utility
 				} ) ;
 
 				m_events.done( state,{} ) ;
+				// FailedToStart has no later finished() callback. Mark the process
+				// log terminal here so retention/eviction remains bounded.
+				m_logger.registerDone() ;
 			}
 		}
 		void withData( QProcess::ProcessChannel channel,const QByteArray& data )
