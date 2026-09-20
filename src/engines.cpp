@@ -1040,30 +1040,25 @@ engines::engine::cmd engines::engine::getCommands( const QString& engineName,con
 		url = obj.value( "DownloadUrl" ).toString() ;
 	}
 
+	QJsonObject selected ;
+
 	if( cpu.x86_32() ){
-
-		auto m = this->getCmd( cmd,"x86" ) ;
-
-		if( !m.isEmpty() ){
-
-			return { m,url,*this } ;
-		}
-
+		selected = this->getCmd( cmd,"x86" ) ;
 	}else if( cpu.x86_64() ){
-
-		return { this->getCmd( cmd,"amd64" ),url,*this } ;
-
+		selected = this->getCmd( cmd,"amd64" ) ;
 	}else if( cpu.aarch64() ){
-
-		auto m = this->getCmd( cmd,"aarch64" ) ;
-
-		if( !m.isEmpty() ){
-
-			return { m,url,*this } ;
-		}
+		selected = this->getCmd( cmd,"aarch64" ) ;
+	}else if( cpu.aarch32() ){
+		// ARM32 is an explicitly recognized host architecture. Never silently
+		// reinterpret it as amd64 when an engine has no ARM32 payload.
+		selected = this->getCmd( cmd,"aarch32" ) ;
+		if( selected.isEmpty() )selected = this->getCmd( cmd,"arm" ) ;
 	}
 
-	return { this->getCmd( cmd,"amd64" ),url,*this } ;
+	// Unknown or unsupported architectures fail closed. Individual engines
+	// that intentionally support emulation must declare that mapping explicitly
+	// in their command metadata (for example QuickJS-ng Windows ARM64).
+	return { selected,url,*this } ;
 }
 
 engines::engine::cmd::cmd( const QJsonObject& obj,
@@ -1445,12 +1440,12 @@ QString engines::engine::versionString( const QString& data ) const
 {
 	auto a = util::split( data,'\n',true ) ;
 
-	if( m_line < a.size() ){
+	if( m_line >= 0 && m_line < a.size() ){
 
 		auto b = a[ m_line ] ;
 		auto c = util::split( b,' ',true ) ;
 
-		if( m_position < c.size() ){
+		if( m_position >= 0 && m_position < c.size() ){
 
 			auto m = c[ m_position ] ;
 
