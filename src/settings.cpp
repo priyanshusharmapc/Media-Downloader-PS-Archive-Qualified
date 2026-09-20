@@ -1338,7 +1338,7 @@ void settings::clearFlatPakTemps()
 {
 	if( utility::platformisFlatPak() ){
 
-		auto ee = m_appDataPath + "tmp" ;
+		auto ee = QDir( m_appDataPath ).filePath( "tmp" ) ;
 
 		directoryManager::readAll( ee ).forEachFile( [ & ]( const QString& e ){
 
