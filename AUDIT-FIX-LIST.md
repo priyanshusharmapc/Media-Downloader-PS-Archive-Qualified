@@ -30,3 +30,15 @@ Issue #2 remains the immutable discovery ledger. Issue #3 is the living coordina
 Batch evidence: 58/58 normal CTest entries and 58/58 ASan/UBSan entries passed in the restored local environment. Exact-head Linux and Windows qualification has not executed because both GitHub Actions jobs failed before acquiring a runner and returned no executable steps. Therefore these entries remain `PR-OPEN`, not `FIXED` or `INTEGRATED` under issue #3's status vocabulary.
 
 Detailed implementation, compatibility boundaries, reproduction commands and retained log digests: `docs/remediation/033-036-archive-integrity.md`.
+
+## Final AUDIT2 source-integration checkpoint
+
+The older AUDIT2 table above is preserved as a historical PR #203 checkpoint and is **superseded for current status**.
+
+- All **199 non-retracted technical finding records** now have source remediation integrated on `audit2-remediation`, including the two retained historical ID-collision records.
+- There are **0 open remediation PRs**.
+- Retracted findings `068`, `146`, and `163` are not counted as legitimate remediation. The previously merged 068 source/test change was removed from the final integration tree; PR #123 for retracted 163 was closed unmerged.
+- The authoritative row-by-row reconciliation is `docs/remediation/FINAL-AUDIT2-RECONCILIATION.md`.
+- Final GitHub Actions qualification remains externally blocked because Linux and Windows jobs fail before any workflow step executes (`steps: null`). No CI gate is waived.
+
+Under issue #3's strict vocabulary, **source integration is complete, final qualification is blocked pending executable exact-head CI**.
