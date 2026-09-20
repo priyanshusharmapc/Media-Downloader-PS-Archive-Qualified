@@ -211,7 +211,7 @@ public:
 			playlist_id( media.playlist_id() ),
 			playlist_title( media.playlist_title() ),
 			playlist_uploader( media.playlist_uploader() ),
-			playlist_uploader_id( media.playlist_id() ),
+			playlist_uploader_id( media.playlist_uploader_id() ),
 			n_entries( media.n_entries() ),
 			mediaProperties( media.formats() ),
 			uiJson( media.uiJson() ),
