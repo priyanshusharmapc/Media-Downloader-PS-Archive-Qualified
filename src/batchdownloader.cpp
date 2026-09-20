@@ -1265,10 +1265,13 @@ bool _commentInt64( const QJsonValue& value,qint64& out )
 		return false ;
 	}
 
-	const auto min = static_cast< double >( std::numeric_limits< qint64 >::min() ) ;
-	const auto max = static_cast< double >( std::numeric_limits< qint64 >::max() ) ;
+	// qint64::max() cannot be represented exactly as a double. The nearest
+	// double is 2^63, which is already outside qint64, so use an exclusive
+	// upper limit rather than rounding max upward and casting out of range.
+	constexpr double min = -9223372036854775808.0 ;
+	constexpr double upperExclusive = 9223372036854775808.0 ;
 
-	if( number < min || number > max ){
+	if( number < min || number >= upperExclusive ){
 		return false ;
 	}
 
