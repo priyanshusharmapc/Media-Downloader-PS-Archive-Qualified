@@ -90,8 +90,9 @@ private:
 	bool m_initDoneNotCalled = true ;
 	void clipboardEvent( QClipboard::Mode ) ;
 	void mainThreadClipboardHandler() ;
-	void bgThreadClipboardHandler() ;
+	void bgThreadClipboardHandler( quint64 generation ) ;
 	QClipboard * m_clipboard ;
+	quint64 m_clipboardGeneration = 0 ;
 	bool m_firstTimeSettingProxy = true ;
 	bool m_firstTime = true ;
 	int m_currentTab ;
