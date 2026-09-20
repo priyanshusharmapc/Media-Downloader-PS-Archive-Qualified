@@ -280,6 +280,7 @@ public:
     // warnings separately, so callers never label an Accepted package Pending.
     int ingestPending(QStringList* failures = nullptr,const std::function<bool()>& shouldStop = {},QStringList* warnings = nullptr);
 private:
+    ValidationResult validateSnapshot(const QString& packageDir,const QByteArray& manifestBytes) const;
     bool normalizeVideo(const QString& input,const QString& output,QString* error) const;
     bool normalizeAudio(const QString& input,const QString& output,QString* error) const;
     RuntimeConfig m_config;
