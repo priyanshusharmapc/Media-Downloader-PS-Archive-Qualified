@@ -1981,7 +1981,12 @@ void batchdownloader::parseDataFromObject( Items& items,const QJsonObject& obj,c
 		auto function = []( const QJsonValue& e ){
 
 			using tt = engines::engine::baseEngine::timer ;
-			return tt::duration( e.toInt() * 1000 ) ;
+			if( !e.isDouble() )return QString() ;
+			const auto seconds = e.toDouble() ;
+			const double maxSeconds = static_cast< double >( std::numeric_limits< qint64 >::max() / 1000LL ) ;
+			if( !std::isfinite( seconds ) || seconds < 0.0 || seconds > maxSeconds )return QString() ;
+			const auto wholeSeconds = static_cast< qint64 >( std::floor( seconds ) ) ;
+			return tt::duration( wholeSeconds * 1000LL ) ;
 		} ;
 
 		if( !array.isEmpty() ){
@@ -1996,7 +2001,7 @@ void batchdownloader::parseDataFromObject( Items& items,const QJsonObject& obj,c
 
 void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 {
-	engines::file::readAll( e,m_ctx.logger(),[ this,deleteFile,e ]( bool readOk,QByteArray list ){
+	engines::file::readAll( this,e,m_ctx.logger(),[ this,deleteFile,e ]( bool readOk,QByteArray list ){
 
 		if( !readOk || list.isEmpty() ){
 
