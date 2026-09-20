@@ -27,6 +27,7 @@
 #include "versionInfo.h"
 
 #include <array>
+#include <cmath>
 
 #include <QFileDialog>
 #include <QFile>
@@ -186,7 +187,7 @@ configure::configure( const Context& ctx ) :
 			auto interval = m_parent.m_settings.highDpiScalingFactorInterval() ;
 			constexpr double minimumScaleFactor = 0.05 ;
 
-			if( interval <= 0.0 ){
+			if( !std::isfinite( interval ) || interval <= 0.0 ){
 				interval = minimumScaleFactor ;
 			}
 
@@ -201,7 +202,7 @@ configure::configure( const Context& ctx ) :
 				s = 1.0 ;
 			}
 
-			if( s < minimumScaleFactor ){
+			if( !std::isfinite( s ) || s < minimumScaleFactor ){
 				s = minimumScaleFactor ;
 			}
 
