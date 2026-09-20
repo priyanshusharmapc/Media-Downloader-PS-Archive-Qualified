@@ -1997,6 +1997,44 @@ static bool _start_updated( QProcess& exe )
 #endif
 }
 
+bool utility::isOwnedUpdateCleanupPath( const QString& configPath,const QString& candidate,bool runningUpdated )
+{
+	if( !runningUpdated || configPath.trimmed().isEmpty() || candidate.trimmed().isEmpty() ){
+		return false ;
+	}
+
+	const QFileInfo rootInfo( QDir::cleanPath( QFileInfo( configPath ).absoluteFilePath() ) ) ;
+	const QFileInfo candidateInfo( QDir::cleanPath( QFileInfo( candidate ).absoluteFilePath() ) ) ;
+
+	if( !rootInfo.exists() || !rootInfo.isDir() || !candidateInfo.exists() ||
+		!candidateInfo.isDir() || candidateInfo.isSymLink() ){
+		return false ;
+	}
+
+	const auto name = candidateInfo.fileName() ;
+	if( !name.startsWith( "update-" ) || name.size() <= 7 ){
+		return false ;
+	}
+	for( const auto ch : name.mid( 7 ) ){
+		if( ch < QLatin1Char( '0' ) || ch > QLatin1Char( '9' ) ){
+			return false ;
+		}
+	}
+
+	const auto rootCanonical = QDir::fromNativeSeparators( rootInfo.canonicalFilePath() ) ;
+	const auto candidateCanonical = QDir::fromNativeSeparators( candidateInfo.canonicalFilePath() ) ;
+	if( rootCanonical.isEmpty() || candidateCanonical.isEmpty() ){
+		return false ;
+	}
+
+	const auto expected = QDir::fromNativeSeparators( QDir( rootCanonical ).absoluteFilePath( name ) ) ;
+#ifdef Q_OS_WIN
+	return candidateCanonical.compare( expected,Qt::CaseInsensitive ) == 0 ;
+#else
+	return candidateCanonical == expected ;
+#endif
+}
+
 bool utility::startedUpdatedVersion( settings& s,const utility::cliArguments& cargs )
 {
 	if( utility::platformIsNOTWindows() ){
