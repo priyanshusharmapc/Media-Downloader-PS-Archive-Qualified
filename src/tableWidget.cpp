@@ -657,10 +657,11 @@ QString tableWidget::completeProgress( int firstRow )
 		}
 	}
 
-	auto z = completed + errored + cancelled ;
+	const qint64 z = static_cast< qint64 >( completed ) + errored + cancelled ;
 
 	auto m = QString::number( z ) + "/" + QString::number( rowCount ) ;
-	const auto percentage = rowCount > 0 ? z * 100 / rowCount : 0 ;
+	const qint64 rawPercentage = rowCount > 0 ? z * 100 / rowCount : 0 ;
+	const auto percentage = rawPercentage < 0 ? 0 : ( rawPercentage > 100 ? 100 : rawPercentage ) ;
 
 	auto a = m + "(" + QString::number( percentage ) + "%)" ;
 	auto b = QString::number( running ) ;
