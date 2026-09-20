@@ -34,6 +34,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QUrl>
+#include <QLockFile>
 #include <QUuid>
 #include <QPointer>
 #include <QWidget>
@@ -489,7 +490,9 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 
 void networkAccess::updateMediaDownloader( networkAccess::updateMDOptions md ) const
 {
-	auto e = m_ctx.Engines().engineDirPaths().tmp( md.name ) ;
+	const auto attemptName = ".mdps-app-update-" +
+		QUuid::createUuid().toString( QUuid::WithoutBraces ) + "-" + md.name ;
+	auto e = m_ctx.Engines().engineDirPaths().tmp( attemptName ) ;
 
 	md.tmpFile = QDir::fromNativeSeparators( e ) ;
 
@@ -554,6 +557,23 @@ void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils:
 		if( !utility::updaterTreeIsSafe( extractedPath,&treeError ) ){
 			md.status.done() ;
 			this->post( m_appName,QObject::tr( "Failed To Extract: unsafe updater filesystem tree: %1" ).arg( treeError ),md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
+
+		QLockFile updaterLock( QDir( md.tmpPath ).filePath( ".mdps-updater-startup.lock" ) ) ;
+		updaterLock.setStaleLockTime( 30000 ) ;
+		if( !updaterLock.tryLock( 10000 ) ){
+			md.status.done() ;
+			this->post( m_appName,QObject::tr( "Application update is busy in another instance" ),md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
+
+		const auto oldStage = utility::removeFolder( md.finalPath ) ;
+		if( !oldStage.isEmpty() ){
+			md.status.done() ;
+			this->failedToRemove( m_appName,md.finalPath,oldStage,md.id ) ;
 			cleanupStage() ;
 			return ;
 		}
@@ -661,13 +681,9 @@ void networkAccess::extractMediaDownloader( networkAccess::updateMDOptions md ) 
 		}
 		QString bg()
 		{
-			// Background work owns only update paths. It must not dereference the
-			// networkAccess/Context owner while application shutdown can tear it down.
-			const auto oldStage = utility::removeFolder( m_md.finalPath ) ;
-			if( !oldStage.isEmpty() ){
-				return oldStage ;
-			}
-
+			// Background work touches only this attempt's private extraction path.
+			// Shared update_new replacement happens later under the same updater
+			// lock used by restart-time promotion.
 			const QFileInfo attemptInfo( m_md.extractStagePath ) ;
 			if( attemptInfo.exists() || attemptInfo.isSymLink() ){
 				return QObject::tr( "Updater extraction path unexpectedly already exists: %1" ).arg( m_md.extractStagePath ) ;
@@ -925,20 +941,26 @@ void networkAccess::downloadP( networkAccess::Opts& opts,const utils::network::p
 			opts.networkError.add( QObject::tr( "Download Failed: persisted payload integrity check failed: %1" ).arg( opts.file.writeError() ) ) ;
 		}else if( p.success() ){
 
-			if( opts.metadata.hash().isEmpty() ){
+			const auto expected = opts.metadata.hash().trimmed().toLower() ;
+			bool digestValid = expected.size() == 64 ;
+			for( const auto ch : expected ){
+				const auto lc = ch.toLower() ;
+				if( !( ( lc >= QLatin1Char( '0' ) && lc <= QLatin1Char( '9' ) ) ||
+				       ( lc >= QLatin1Char( 'a' ) && lc <= QLatin1Char( 'f' ) ) ) ){
+					digestValid = false ;
+					break ;
+				}
+			}
 
-				auto m = QObject::tr( "Skipping Remote Download Hash Check" ) ;
-
-				this->post( m_appName,m,opts.id ) ;
+			if( !digestValid ){
+				opts.reportFailed() ;
+				opts.networkError.add( QObject::tr(
+					"Download Failed: release asset is missing a valid trusted SHA-256 digest" ) ) ;
 			}else{
-				auto m = receivedHash.toHex().toLower() ;
-
-				if( opts.metadata.hash() != m ){
-
-					this->hashDoNotMatch( opts.metadata.hash(),m,opts.id ) ;
-
+				const auto actual = receivedHash.toHex().toLower() ;
+				if( expected != actual ){
+					this->hashDoNotMatch( expected,actual,opts.id ) ;
 					opts.reportFailed() ;
-
 					opts.networkError.setbadDownload() ;
 				}
 			}
@@ -997,6 +1019,16 @@ void networkAccess::finished( networkAccess::Opts opts ) const
 			auto mm = QObject::tr( "Renaming file to: %1" ).arg( opts.exeBinPath ) ;
 
 			this->post( engine.name(),mm,opts.id ) ;
+
+            QLockFile updateLock( QDir( opts.tempPath ).filePath( ".mdps-component-update.lock" ) ) ;
+            updateLock.setStaleLockTime( 30000 ) ;
+            if( !updateLock.tryLock( 10000 ) ){
+                opts.reportFailed() ;
+                opts.networkError.add( QObject::tr( "Component update is busy in another application instance" ) ) ;
+                engine.setBroken() ;
+                this->printVersion( opts.move(),true ) ;
+                return ;
+            }
 
             QString cleanupWarning ;
             const auto m = promoteUpdatePath( opts.file.src(),opts.exeBinPath,&cleanupWarning ) ;
@@ -1059,6 +1091,27 @@ void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
         removeUpdatePath( opts.updateStagePath ) ;
         this->post( engine.name(),QObject::tr( "Extracted update is missing the expected executable: %1" ).arg( expectedRelative ),opts.id ) ;
         engine.setBroken() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
+
+    QString treeError ;
+    if( !utility::updaterTreeIsSafe( opts.updateStagePath,&treeError ) ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Extracted component tree is unsafe: %1" ).arg( treeError ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
+
+    QLockFile updateLock( QDir( opts.tempPath ).filePath( ".mdps-component-update.lock" ) ) ;
+    updateLock.setStaleLockTime( 30000 ) ;
+    if( !updateLock.tryLock( 10000 ) ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Component update is busy in another application instance" ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
         this->printVersion( opts.move(),true ) ;
         return ;
     }
@@ -1192,7 +1245,15 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 
 		opts.exeArgs = { exe,args } ;
 
-		utils::qprocess::run( exe,args,opts.move(),this,&networkAccess::extractArchiveOuput ) ;
+		QPointer< QWidget > guard( &m_ctx.mainWidget() ) ;
+		const auto * parent = this ;
+		auto moved = opts.move() ;
+		utils::qprocess::run( exe,args,QProcess::SeparateChannels,
+			[ guard,parent,opts = std::move( moved ) ]( const utils::qprocess::outPut& output ) mutable {
+				if( guard ){
+					parent->extractArchiveOuput( std::move( opts ),output ) ;
+				}
+			} ) ;
 	}
 }
 
