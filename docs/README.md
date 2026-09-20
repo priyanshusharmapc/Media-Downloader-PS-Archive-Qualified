@@ -41,6 +41,7 @@ If those sources disagree, stop and resolve the identity mismatch before using t
 | [ARCHIVE_RECOVERY.md](ARCHIVE_RECOVERY.md) | Recovery Package creation, validation, provenance, retry, acceptance, rejection |
 | [ARCHIVE_TESTING.md](ARCHIVE_TESTING.md) | Regression, integration, sanitizers, Windows qualification, package sealing, local acceptance |
 | [DOCUMENTATION_CHECKLIST.md](DOCUMENTATION_CHECKLIST.md) | Contract-change checklist to keep documentation synchronized with implementation |
+| [remediation/FINAL-AUDIT2-RECONCILIATION.md](remediation/FINAL-AUDIT2-RECONCILIATION.md) | Final 199-record AUDIT2 source-remediation reconciliation and qualification blocker |
 | [../resources/archive/ARCHIVE_AGENT.md](../resources/archive/ARCHIVE_AGENT.md) | Runtime materialized contract for external agents and recovery automation |
 
 ## Authority hierarchy
