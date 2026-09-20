@@ -1428,9 +1428,15 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
     const bool transient=isTransientText(stderrText);
     bool truncated=false;
     for(const auto& key:QStringList{"playlist_count","n_entries"}){const auto v=root.value(key);if(v.isDouble()&&v.toDouble()>entries.size())truncated=true;}
-    const bool reportedError=stderrText.contains(QRegularExpression("(?im)^\\s*(?:ERROR|WARNING):"));
-    s.complete=!transient && !malformed && !truncated && !reportedError && exitCode==0;
-    if(malformed||truncated||reportedError)s.error="Incomplete or suspect discovery output; removal inference disabled";
+    // A generic yt-dlp WARNING is diagnostic, not proof that playlist
+    // enumeration is incomplete. Structural damage, truncation, transient
+    // failures, explicit ERROR lines and a nonzero exit remain conservative
+    // removal-confidence gates.
+    const bool reportedError=stderrText.contains(QRegularExpression("(?im)^\\s*ERROR:"));
+    const bool incompleteWarning=stderrText.contains(QRegularExpression(
+        "(?im)^\\s*WARNING:.*(?:incomplete|truncat(?:ed|ion)?|failed\\s+to\\s+(?:download|extract)|unable\\s+to\\s+(?:download|extract)|playlist.*unavailable)"));
+    s.complete=!transient && !malformed && !truncated && !reportedError && !incompleteWarning && exitCode==0;
+    if(malformed||truncated||reportedError||incompleteWarning)s.error="Incomplete or suspect discovery output; removal inference disabled";
     if(transient) s.error="Transient discovery failure detected; removal inference disabled";
     else if(exitCode!=0) s.error=QString("yt-dlp exit %1; partial observations retained but removal inference disabled").arg(exitCode);
     return s;
