@@ -18,6 +18,7 @@
  */
 
 #include "getsauce.h"
+#include "json_media_size.hpp"
 #include "../utility.h"
 
 const char * getsauce::testData()
@@ -827,7 +828,7 @@ std::vector<engines::engine::baseEngine::mediaInfo> getsauce::mediaProperties( L
 
 		auto resolution = obj.value( "quality" ).toString() ;
 		auto id         = obj.value( "id" ).toString() ;
-		auto sizeRaw    = obj.value( "size" ).toInt() ;
+		const qint64 sizeRaw = engineJson::nonNegativeByteCount( obj.value( "size" ) ) ;
 		auto size       = locale.formattedDataSize( sizeRaw ) ;
 		auto notes      = obj.value( "info" ).toString() ;
 		auto extension  = obj.value( "ext" ).toString() ;
