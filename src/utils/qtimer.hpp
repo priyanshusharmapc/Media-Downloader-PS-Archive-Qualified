@@ -88,16 +88,30 @@ namespace utils{
 		{
 			if( !context )return ;
 
-			auto timer = new QTimer( context ) ;
-			timer->setSingleShot( true ) ;
+			// Store the callback directly in a QObject-owned timer rather than in
+			// a Qt functor slot. This preserves move-only callback support on the
+			// Qt 5.10 compatibility floor while still making owner destruction an
+			// unconditional cancellation boundary.
+			class Timer : public QTimer
+			{
+			public:
+				Timer( QObject * owner,int timeout,Function&& callback ) :
+					QTimer( owner ),m_function( std::move( callback ) )
+				{
+					this->setSingleShot( true ) ;
+					QObject::connect( this,&QTimer::timeout,this,&Timer::fire ) ;
+					this->start( timeout ) ;
+				}
+			private:
+				void fire()
+				{
+					m_function() ;
+					this->deleteLater() ;
+				}
+				Function m_function ;
+			} ;
 
-			QObject::connect( timer,&QTimer::timeout,context,
-				[ timer,function = std::forward< Function >( function ) ]() mutable {
-					function() ;
-					timer->deleteLater() ;
-				} ) ;
-
-			timer->start( interval ) ;
+			new Timer( context,interval,std::forward< Function >( function ) ) ;
 		}
 
 		/*
