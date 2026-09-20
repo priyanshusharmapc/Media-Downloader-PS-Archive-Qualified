@@ -1162,13 +1162,16 @@ QString networkAccess::downloadSpeed::calculate( const utils::network::progress&
 		}
 	}
 
-	if( totalSize == 0 ){
+	if( totalSize <= 0 ){
 
 		auto current = m_locale.formattedDataSize( received ) ;
 
 		return QString( "%1 at %2" ).arg( current,m_dataSpeed ) ;
 	}else{
-		auto perc       = double( received ) * 100 / double( totalSize ) ;
+		// Keep diagnostic byte counts exact, but never present an impossible
+		// progress percentage above 100 when a server revises/misreports length.
+		const auto rawPerc = double( received ) * 100 / double( totalSize ) ;
+		const auto perc = rawPerc > 100.0 ? 100.0 : rawPerc ;
 		auto size       = m_locale.formattedDataSize( totalSize ) ;
 		auto current    = m_locale.formattedDataSize( received ) ;
 		auto percentage = QString::number( perc,'f',2 ) ;
