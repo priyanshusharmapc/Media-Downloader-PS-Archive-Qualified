@@ -358,9 +358,53 @@ private:
 			m_file->remove() ;
 			return m_file->open( QIODevice::WriteOnly ) ;
 		}
-		void close()
+		bool close()
 		{
+			if( m_file.get() == nullptr ){
+				m_writeFailed = true ;
+				m_writeError = QStringLiteral( "Download file is not open" ) ;
+				return false ;
+			}
+
+			if( m_file->isOpen() && !m_file->flush() ){
+				m_writeFailed = true ;
+				m_writeError = m_file->errorString() ;
+			}
+
 			m_file->close() ;
+			if( m_file->error() != QFileDevice::NoError ){
+				m_writeFailed = true ;
+				m_writeError = m_file->errorString() ;
+			}
+
+			return !m_writeFailed ;
+		}
+		bool verifyPersistedHash( const QByteArray& expected )
+		{
+			if( m_writeFailed || expected.isEmpty() ){
+				return false ;
+			}
+
+			QFile persisted( m_path ) ;
+			if( !persisted.open( QIODevice::ReadOnly ) ){
+				m_writeFailed = true ;
+				m_writeError = persisted.errorString() ;
+				return false ;
+			}
+
+			QCryptographicHash hash( QCryptographicHash::Sha256 ) ;
+			if( !hash.addData( &persisted ) || persisted.error() != QFileDevice::NoError ){
+				m_writeFailed = true ;
+				m_writeError = persisted.errorString() ;
+				return false ;
+			}
+
+			if( hash.result() != expected ){
+				m_writeFailed = true ;
+				m_writeError = QStringLiteral( "Persisted download hash differs from received bytes" ) ;
+				return false ;
+			}
+			return true ;
 		}
 		QString rename( const QString& e ) ;
 		bool write( const QByteArray& e )
