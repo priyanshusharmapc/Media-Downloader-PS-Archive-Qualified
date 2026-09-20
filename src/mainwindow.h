@@ -28,6 +28,8 @@
 #include <QMenu>
 #include <QShortcut>
 
+#include <csignal>
+
 #include "tabmanager.h"
 #include "engines.h"
 #include "logger.h"
@@ -64,12 +66,12 @@ private:
 	void processEventSlot( const QByteArray& ) ;
 
 	static void signalHandler( int ) ;
-	static void setUpSignal( int ) ;
+	static bool setUpSignal( int ) ;
 	template< typename Int,typename ... INTS >
-	static void setUpSignal( Int sig,INTS ... sigs )
+	static bool setUpSignal( Int sig,INTS ... sigs )
 	{
-		MainWindow::setUpSignal( sig ) ;
-		MainWindow::setUpSignal( sigs ... ) ;
+		const auto current = MainWindow::setUpSignal( static_cast< int >( sig ) ) ;
+		return MainWindow::setUpSignal( sigs ... ) && current ;
 	}
 	static void setUpSignals( MainWindow * ) ;
 
@@ -111,6 +113,7 @@ private:
 	tabManager m_tabManager ;
 	settings& m_settings ;
 	static MainWindow * m_mainWindow ;
+	static volatile std::sig_atomic_t m_signalPending ;
 	bool m_showTrayIcon ;
 	QShortcut m_shortcut ;
 	void closeEvent( QCloseEvent * ) override ;
