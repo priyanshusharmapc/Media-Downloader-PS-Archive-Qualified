@@ -1290,6 +1290,12 @@ void settings::runCommandOnSuccessfulDownload( const QString& s,
 
 		auto args = util::splitPreserveQuotes( m ) ;
 
+		// Legacy/manual settings may contain only whitespace. Validate the
+		// tokenized command, not the raw QString, before indexing element 0.
+		if( args.isEmpty() || args.at( 0 ).trimmed().isEmpty() ){
+			return ;
+		}
+
 		auto exe = args.at( 0 ) ;
 
 		args.replace( 0,s ) ;
