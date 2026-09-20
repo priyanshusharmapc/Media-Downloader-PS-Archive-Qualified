@@ -84,7 +84,7 @@ void bun::remove( Logger&,const engines::enginePaths& enginePath )
 		QFile::remove( m ) ;
 	}
 
-	m = enginePath.binPath( "bun" ) ;
+	m = enginePath.binPath( utility::platformIsWindows() ? "bun.exe" : "bun" ) ;
 
 	if( QFile::exists( m ) ){
 
