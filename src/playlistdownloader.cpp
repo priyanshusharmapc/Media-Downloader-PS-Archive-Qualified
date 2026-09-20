@@ -665,11 +665,20 @@ void playlistdownloader::customContextMenuRequested()
 		}
 	}
 
-	connect( mm,&QMenu::triggered,[ this ]( QAction * ac ){
+	const auto engineTargetUrl = row >= 0 && row < m_table.rowCount() ? m_table.url( row ) : QString() ;
+	const auto engineTargetText = row >= 0 && row < m_table.rowCount() ? m_table.entryAt( row ).uiText : QString() ;
+
+	connect( mm,&QMenu::triggered,[ this,row,engineTargetUrl,engineTargetText ]( QAction * ac ){
+
+		if( row < 0 || row >= m_table.rowCount() ||
+		    m_table.url( row ) != engineTargetUrl ||
+		    m_table.entryAt( row ).uiText != engineTargetText ){
+			return ;
+		}
 
 		auto u = tableWidget::type::EngineName ;
 
-		m_table.setDownloadingOptions( u,m_table.currentRow(),ac->objectName() ) ;
+		m_table.setDownloadingOptions( u,row,ac->objectName() ) ;
 	} ) ;
 
 	auto subMenu = utility::setUpMenu( m_ctx,{},false,false,true,&m ) ;
