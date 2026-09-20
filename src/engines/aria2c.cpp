@@ -268,11 +268,18 @@ const QByteArray& aria2c::aria2c_dlFilter::operator()( Logger::Data& s )
 
 		if( e.contains( " Download complete: " ) ){
 
-			m_fileName = e.mid( e.indexOf( " Download complete: " ) + 20 ) ;
+			const auto fileName = e.mid( e.indexOf( " Download complete: " ) + 20 ).trimmed() ;
 
-			s.addFileName( m_fileName ) ;
+			if( !fileName.isEmpty() ){
 
-			break ;
+				m_fileName = fileName ;
+				s.addFileName( fileName ) ;
+			}
+
+			// The logger contains the whole process lifetime. Keep scanning so a
+			// later URL completed by the same aria2c process is also registered.
+			// Logger::Data::addFileName() makes repeated filter passes idempotent.
+			continue ;
 
 		}else if( e.contains( "Unrecognized URI or unsupported protocol" ) ){
 
