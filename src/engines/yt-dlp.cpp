@@ -1527,27 +1527,32 @@ void yt_dlp::updateDownLoadCmdOptions( const engines::engine::baseEngine::update
 
 	for( int m = s.ourOptions.size() - 1 ; m > -1 ; m-- ){
 
-		if( s.ourOptions[ m ] == "-o" ){
+		QString outputTemplate ;
+		const auto& option = s.ourOptions[ m ] ;
 
-			if( m + 1 < s.ourOptions.size() ){
+		if( option == "-o" || option == "--output" ){
 
-				auto& e = s.ourOptions[ m + 1 ] ;
+			if( m + 1 < s.ourOptions.size() ) outputTemplate = s.ourOptions[ m + 1 ] ;
+		}else if( option.startsWith( "--output=" ) ){
 
-				auto w = s.uiIndex.toString( true,s.ourOptions ) ;
-				auto ww = s.uiIndex.toString( false,s.ourOptions ) ;
+			outputTemplate = option.mid( 9 ) ;
+		}
 
-				this->parseMetadata( mm,e,"%(autonumber)s",ww ) ;
-				this->parseMetadata( mm,e,"%(playlist_index)s",w ) ;
-				this->parseMetadata( mm,e,"%(playlist_autonumber)s",w ) ;
-				this->parseMetadata( mm,e,"%(playlist_id)s",s.playlist_id ) ;
-				this->parseMetadata( mm,e,"%(playlist_title)s",s.playlist_title ) ;
-				this->parseMetadata( mm,e,"%(playlist)s",s.playlist ) ;
-				this->parseMetadata( mm,e,"%(playlist_count)s",s.playlist_count ) ;
-				this->parseMetadata( mm,e,"%(playlist_uploader)s",s.playlist_uploader ) ;
-				this->parseMetadata( mm,e,"%(playlist_uploader_id)s",s.playlist_uploader_id ) ;
-				this->parseMetadata( mm,e,"%(n_entries)s",s.uiIndex.total() ) ;
-			}
+		if( !outputTemplate.isEmpty() ){
 
+			auto w = s.uiIndex.toString( true,s.ourOptions ) ;
+			auto ww = s.uiIndex.toString( false,s.ourOptions ) ;
+
+			this->parseMetadata( mm,outputTemplate,"%(autonumber)s",ww ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_index)s",w ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_autonumber)s",w ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_id)s",s.playlist_id ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_title)s",s.playlist_title ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist)s",s.playlist ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_count)s",s.playlist_count ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_uploader)s",s.playlist_uploader ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_uploader_id)s",s.playlist_uploader_id ) ;
+			this->parseMetadata( mm,outputTemplate,"%(n_entries)s",s.uiIndex.total() ) ;
 			break ;
 		}
 	}
