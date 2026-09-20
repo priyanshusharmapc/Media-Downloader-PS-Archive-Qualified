@@ -80,7 +80,7 @@ MainWindow::MainWindow( QApplication& app,
 
 		// Context-menu, middle-click and platform-specific activations must not
 		// unexpectedly change main-window visibility.
-		if( reason != QSystemTrayIcon::Trigger ){
+		if( !m_showTrayIcon || reason != QSystemTrayIcon::Trigger ){
 			return ;
 		}
 
