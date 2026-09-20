@@ -122,10 +122,10 @@ configure::configure( const Context& ctx ) :
 
 	connect( m_ui.pbConfigureSaveEditOption,&QPushButton::clicked,[ this ](){
 
-		if( !m_editOptionEngine.isEmpty() && !m_editOptionOldValue.isEmpty() ){
+		if( !m_editOptionEngine.isEmpty() && !m_editOptionIdentity.isEmpty() ){
 
 			const auto New = m_ui.textEditConfigureEditOption->toPlainText() ;
-			m_downloadEngineDefaultOptions.replace( m_editOptionEngine,m_editOptionOldValue,New ) ;
+			m_downloadEngineDefaultOptions.replace( m_editOptionIdentity,New ) ;
 
 			// Refresh only when the user is still viewing the captured engine.
 			// A switch to another backend must never redirect or repaint the edit
@@ -138,14 +138,14 @@ configure::configure( const Context& ctx ) :
 		}
 
 		m_editOptionEngine.clear() ;
-		m_editOptionOldValue.clear() ;
+		m_editOptionIdentity = {} ;
 		this->setVisibilityEditConfigFeature( false ) ;
 	} ) ;
 
 	connect( m_ui.pbConfigureSaveEditOptionCancel,&QPushButton::clicked,[ this ](){
 
 		m_editOptionEngine.clear() ;
-		m_editOptionOldValue.clear() ;
+		m_editOptionIdentity = {} ;
 		this->setVisibilityEditConfigFeature( false ) ;
 	} ) ;
 
@@ -393,8 +393,8 @@ configure::configure( const Context& ctx ) :
 			if( row != -1 ){
 
 				m_editOptionEngine = m_ui.cbConfigureEngines->currentText() ;
-				m_editOptionOldValue = m_tableDefaultDownloadOptions.item( row,1 ).text() ;
-				m_ui.textEditConfigureEditOption->setText( m_editOptionOldValue ) ;
+				m_editOptionIdentity = m_tableDefaultDownloadOptions.stuffAt( row ) ;
+				m_ui.textEditConfigureEditOption->setText( m_editOptionIdentity.value( "options" ).toString() ) ;
 
 				this->setVisibilityEditConfigFeature( true ) ;
 			}
@@ -1100,7 +1100,9 @@ void configure::populateOptionsTable( const engines::engine& s,int selectRow )
 
 void configure::tabExited()
 {
-	//this->saveOptions() ;
+	if( !m_textEncodingEngine.isEmpty() ){
+		m_settings.setTextEncoding( m_ui.lineEditConfigureTextEncoding->text(),m_textEncodingEngine ) ;
+	}
 }
 
 void configure::updateEnginesList( const QStringList& e )
@@ -2106,6 +2108,20 @@ void configure::downloadDefaultOptions::replace( const QString& engineName,
 		if( obj.engineName() == engineName && obj.opts() == oldOptions ){
 
 			m_array[ i ] = obj.replaceOptions( newOptions ) ;
+		}
+	}
+}
+
+void configure::downloadDefaultOptions::replace( const QJsonObject& oldObject,
+						 const QString& newOptions )
+{
+	for( int i = 0 ; i < m_array.size() ; i++ ){
+
+		const auto current = m_array[ i ].toObject() ;
+		if( current == oldObject ){
+
+			m_array[ i ] = qOpts( current ).replaceOptions( newOptions ) ;
+			break ;
 		}
 	}
 }
