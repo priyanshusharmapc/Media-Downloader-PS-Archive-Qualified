@@ -200,8 +200,10 @@ static QString _WindowsBinaryName()
 		return _Windows32BitBinaryName() ;
 	}else if( cpu.aarch64() ){
 		return _WindowsArm64BinaryName() ;
-	}else{
+	}else if( cpu.x86_64() ){
 		return _Windows64BitBinaryName() ;
+	}else{
+		return {} ;
 	}
 }
 
@@ -243,6 +245,9 @@ void yt_dlp::checkIfBinaryExist( const QString& runTimeBinPath,const QString& th
 			// left on purpose
 		}else{
 			const auto binaryName = _WindowsBinaryName() ;
+			if( binaryName.isEmpty() ){
+				return ;
+			}
 			destPath += "/" + binaryName ;
 
 			if( !QFile::exists( destPath ) ){
