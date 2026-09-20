@@ -2068,7 +2068,7 @@ namespace utility
 			return m_formats ;
 		}
 		QJsonObject uiJson() const ;
-		int intDuration() const
+		qint64 intDuration() const
 		{
 			return m_intDuration ;
 		}
@@ -2132,7 +2132,7 @@ namespace utility
 		QString m_n_entries ;
 
 		QJsonArray m_formats ;
-		int m_intDuration = 0 ;
+		qint64 m_intDuration = 0 ;
 		util::Json m_json ;
 
 		bool m_showFirst = false ;
