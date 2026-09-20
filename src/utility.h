@@ -427,27 +427,33 @@ namespace utility
 	QJsonObject parseJsonDataFromGitHub( const QJsonDocument& doc,Function function )
 	{
 		const auto array = doc.object().value( "assets" ).toArray() ;
+		QJsonObject match ;
+		int matches = 0 ;
 
 		for( const auto& it : array ){
-
+			if( !it.isObject() )continue ;
 			auto obj = it.toObject() ;
 
 			if( function( obj ) ){
-
-				auto hash = obj.value( "digest" ).toString() ;
-
-				if( hash.startsWith( "sha256:" ) ){
-
-					hash.replace( "sha256:","" ) ;
-
-					obj.insert( "digest",hash.toLower() ) ;
+				match = std::move( obj ) ;
+				if( ++matches > 1 ){
+					// Asset predicates are not ordering rules. An ambiguous release
+					// must fail closed rather than installing whichever asset GitHub
+					// happened to serialize first.
+					return {} ;
 				}
-
-				return obj ;
 			}
 		}
 
-		return {} ;
+		if( matches != 1 )return {} ;
+
+		auto hash = match.value( "digest" ).toString() ;
+		if( hash.startsWith( "sha256:",Qt::CaseInsensitive ) ){
+			hash = hash.mid( 7 ).trimmed().toLower() ;
+			match.insert( "digest",hash ) ;
+		}
+
+		return match ;
 	}
 	class cliArguments
 	{
