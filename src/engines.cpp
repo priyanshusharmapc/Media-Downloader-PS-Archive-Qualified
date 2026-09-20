@@ -41,6 +41,7 @@
 #include "context.hpp"
 #include "networkAccess.h"
 
+#include <limits>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -2794,7 +2795,9 @@ int engines::engine::baseEngine::timer::toSeconds( const QString& e )
 
 		int minutes = 0 ;
 
-		return _toNumber( s,minutes ) ? 60 * minutes : 0 ;
+		if( !_toNumber( s,minutes ) ) return 0 ;
+		const qint64 total = 60LL * minutes ;
+		return total <= std::numeric_limits< int >::max() ? static_cast< int >( total ) : 0 ;
 	}
 
 	// Keep empty fields so malformed text such as "1::2" cannot be silently
@@ -2815,7 +2818,8 @@ int engines::engine::baseEngine::timer::toSeconds( const QString& e )
 			return 0 ;
 		}
 
-		return 3600 * hours + 60 * minutes + seconds ;
+		const qint64 total = 3600LL * hours + 60LL * minutes + seconds ;
+		return total <= std::numeric_limits< int >::max() ? static_cast< int >( total ) : 0 ;
 
 	}else if( parts.size() == 2 ){
 
@@ -2829,13 +2833,16 @@ int engines::engine::baseEngine::timer::toSeconds( const QString& e )
 			return 0 ;
 		}
 
-		return 60 * minutes + seconds ;
+		const qint64 total = 60LL * minutes + seconds ;
+		return total <= std::numeric_limits< int >::max() ? static_cast< int >( total ) : 0 ;
 
 	}else if( parts.size() == 1 ){
 
 		// Preserve the historical one-component interpretation as hours.
 		int hours = 0 ;
-		return _toNumber( parts[ 0 ],hours ) ? 3600 * hours : 0 ;
+		if( !_toNumber( parts[ 0 ],hours ) ) return 0 ;
+		const qint64 total = 3600LL * hours ;
+		return total <= std::numeric_limits< int >::max() ? static_cast< int >( total ) : 0 ;
 	}else{
 		return 0 ;
 	}
