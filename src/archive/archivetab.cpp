@@ -142,17 +142,17 @@ void ArchiveTab::buildUi()
     rootLayout->setContentsMargins(8,8,8,8); rootLayout->setSpacing(7);
 
     auto* rootRow=new QHBoxLayout;
-    auto* rootTitle=new QLabel(tr("Archive root:"),m_page); m_rootLabel=new QLabel(m_page); m_rootLabel->setObjectName("archiveRootPath"); m_rootLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_rootTitle=new QLabel(tr("Archive root:"),m_page); m_rootLabel=new QLabel(m_page); m_rootLabel->setObjectName("archiveRootPath"); m_rootLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_browse=new QPushButton(tr("Browse…"),m_page); m_browse->setObjectName("archiveBrowseRoot");
-    rootRow->addWidget(rootTitle); rootRow->addWidget(m_rootLabel,1); rootRow->addWidget(m_browse); rootLayout->addLayout(rootRow);
+    rootRow->addWidget(m_rootTitle); rootRow->addWidget(m_rootLabel,1); rootRow->addWidget(m_browse); rootLayout->addLayout(rootRow);
     QObject::connect(m_browse,&QPushButton::clicked,this,&ArchiveTab::browseRoot);
 
     auto* overviewRow=new QHBoxLayout;
-    auto* systemGroup=new QGroupBox(tr("SYSTEM HEALTH"),m_page);
-    auto* systemGrid=new QGridLayout(systemGroup);
+    m_systemGroup=new QGroupBox(tr("SYSTEM HEALTH"),m_page);
+    auto* systemGrid=new QGridLayout(m_systemGroup);
     systemGrid->setColumnStretch(1,1);
     auto addSystemRow=[&](int row,const QString& name,QLabel*& value){
-        auto* label=new QLabel(name,systemGroup); value=new QLabel(tr("Not checked"),systemGroup); value->setTextInteractionFlags(Qt::TextSelectableByMouse); value->setWordWrap(true);
+        auto* label=new QLabel(name,m_systemGroup); m_systemNameLabels.append(label); value=new QLabel(tr("Not checked"),m_systemGroup); value->setTextInteractionFlags(Qt::TextSelectableByMouse); value->setWordWrap(true);
         systemGrid->addWidget(label,row,0);systemGrid->addWidget(value,row,1);
     };
     addSystemRow(0,tr("Overall"),m_systemOverall);
@@ -164,19 +164,19 @@ void ArchiveTab::buildUi()
     addSystemRow(6,tr("Recovery imports"),m_systemImports);
     addSystemRow(7,tr("Latest scan"),m_systemLastScan);
     QFont overallFont=m_systemOverall->font();overallFont.setBold(true);m_systemOverall->setFont(overallFont);
-    m_systemAttention=new QLabel(tr("Attention: Not checked"),systemGroup);m_systemAttention->setWordWrap(true);
-    m_systemWorkload=new QLabel(tr("Archive workload: Not checked"),systemGroup);m_systemWorkload->setWordWrap(true);
+    m_systemAttention=new QLabel(tr("Attention: Not checked"),m_systemGroup);m_systemAttention->setWordWrap(true);
+    m_systemWorkload=new QLabel(tr("Archive workload: Not checked"),m_systemGroup);m_systemWorkload->setWordWrap(true);
     systemGrid->addWidget(m_systemAttention,8,0,1,2);systemGrid->addWidget(m_systemWorkload,9,0,1,2);
 
-    auto* operationGroup=new QGroupBox(tr("CURRENT OPERATION"),m_page);
-    auto* operationLayout=new QVBoxLayout(operationGroup);
-    m_operationName=new QLabel(tr("Idle"),operationGroup);QFont opFont=m_operationName->font();opFont.setBold(true);m_operationName->setFont(opFont);
-    m_operationStage=new QLabel(tr("No operation running"),operationGroup);
-    m_operationDetail=new QLabel(tr("Archive Mode is idle."),operationGroup);m_operationDetail->setWordWrap(true);
-    m_operationProgress=new QProgressBar(operationGroup);m_operationProgress->setRange(0,1);m_operationProgress->setValue(0);m_operationProgress->setFormat(tr("Idle"));
-    m_operationFailures=new QLabel(tr("Failures: 0"),operationGroup);
+    m_operationGroup=new QGroupBox(tr("CURRENT OPERATION"),m_page);
+    auto* operationLayout=new QVBoxLayout(m_operationGroup);
+    m_operationName=new QLabel(tr("Idle"),m_operationGroup);QFont opFont=m_operationName->font();opFont.setBold(true);m_operationName->setFont(opFont);
+    m_operationStage=new QLabel(tr("No operation running"),m_operationGroup);
+    m_operationDetail=new QLabel(tr("Archive Mode is idle."),m_operationGroup);m_operationDetail->setWordWrap(true);
+    m_operationProgress=new QProgressBar(m_operationGroup);m_operationProgress->setRange(0,1);m_operationProgress->setValue(0);m_operationProgress->setFormat(tr("Idle"));
+    m_operationFailures=new QLabel(tr("Failures: 0"),m_operationGroup);
     operationLayout->addWidget(m_operationName);operationLayout->addWidget(m_operationStage);operationLayout->addWidget(m_operationDetail);operationLayout->addWidget(m_operationProgress);operationLayout->addWidget(m_operationFailures);operationLayout->addStretch();
-    overviewRow->addWidget(systemGroup,3);overviewRow->addWidget(operationGroup,2);rootLayout->addLayout(overviewRow);
+    overviewRow->addWidget(m_systemGroup,3);overviewRow->addWidget(m_operationGroup,2);rootLayout->addLayout(overviewRow);
 
     auto* actions=new QHBoxLayout;
     m_add=new QPushButton(tr("Add Playlist"),m_page); m_remove=new QPushButton(tr("Remove"),m_page); m_scan=new QPushButton(tr("Scan"),m_page);
@@ -188,8 +188,8 @@ void ArchiveTab::buildUi()
 
     auto* splitter=new QSplitter(Qt::Horizontal,m_page);
     auto* left=new QWidget(splitter); auto* leftLayout=new QVBoxLayout(left); leftLayout->setContentsMargins(0,0,0,0);
-    auto* playlistLabel=new QLabel(tr("PLAYLISTS"),left); m_sources=new QListWidget(left); m_sources->setMinimumWidth(210);
-    leftLayout->addWidget(playlistLabel); leftLayout->addWidget(m_sources,1);
+    m_playlistLabel=new QLabel(tr("PLAYLISTS"),left); m_sources=new QListWidget(left); m_sources->setMinimumWidth(210);
+    leftLayout->addWidget(m_playlistLabel); leftLayout->addWidget(m_sources,1);
 
     auto* right=new QWidget(splitter); auto* rightLayout=new QVBoxLayout(right); rightLayout->setContentsMargins(0,0,0,0);
     m_healthLabel=new QLabel(tr("No playlist selected"),right); m_healthLabel->setWordWrap(true); rightLayout->addWidget(m_healthLabel);
@@ -213,16 +213,16 @@ void ArchiveTab::buildUi()
     m_activity=new QPlainTextEdit(m_page); m_activity->setReadOnly(true); m_activity->setMaximumBlockCount(1000); m_activity->setMaximumHeight(180); m_activity->hide(); rootLayout->addWidget(m_activity);
 
     auto* menu=new QMenu(m_more);
-    auto* openRoot=menu->addAction(tr("Open Archive Folder")); auto* openPlaylist=menu->addAction(tr("Open Playlist Folder"));
-    menu->addSeparator(); auto* openCatalog=menu->addAction(tr("Open Catalog")); auto* openMissing=menu->addAction(tr("Open Missing Report"));
-    menu->addSeparator(); auto* imports=menu->addAction(tr("Process External Imports")); auto* openLogs=menu->addAction(tr("Open Logs"));
+    m_openRootAction=menu->addAction(tr("Open Archive Folder")); m_openPlaylistAction=menu->addAction(tr("Open Playlist Folder"));
+    menu->addSeparator(); m_openCatalogAction=menu->addAction(tr("Open Catalog")); m_openMissingAction=menu->addAction(tr("Open Missing Report"));
+    menu->addSeparator(); m_importsAction=menu->addAction(tr("Process External Imports")); m_openLogsAction=menu->addAction(tr("Open Logs"));
     m_more->setMenu(menu);
-    QObject::connect(openRoot,&QAction::triggered,[this]{openPath(m_root);});
-    QObject::connect(openPlaylist,&QAction::triggered,this,&ArchiveTab::openSelectedPlaylistFolder);
-    QObject::connect(openCatalog,&QAction::triggered,[this]{openProjection("catalog.csv");});
-    QObject::connect(openMissing,&QAction::triggered,[this]{openProjection("missing.csv");});
-    QObject::connect(imports,&QAction::triggered,this,&ArchiveTab::processImports);
-    QObject::connect(openLogs,&QAction::triggered,[this]{if(!m_root.isEmpty())openPath(archive::Paths(m_root).activityLogs());});
+    QObject::connect(m_openRootAction,&QAction::triggered,[this]{openPath(m_root);});
+    QObject::connect(m_openPlaylistAction,&QAction::triggered,this,&ArchiveTab::openSelectedPlaylistFolder);
+    QObject::connect(m_openCatalogAction,&QAction::triggered,[this]{openProjection("catalog.csv");});
+    QObject::connect(m_openMissingAction,&QAction::triggered,[this]{openProjection("missing.csv");});
+    QObject::connect(m_importsAction,&QAction::triggered,this,&ArchiveTab::processImports);
+    QObject::connect(m_openLogsAction,&QAction::triggered,[this]{if(!m_root.isEmpty())openPath(archive::Paths(m_root).activityLogs());});
 
     m_hostTabs.addTab(m_page,tr("Archive"));
 }
@@ -270,7 +270,56 @@ void ArchiveTab::enableAll(){m_controlsEnabled=true;updateActionState();}
 void ArchiveTab::disableAll(){m_controlsEnabled=false;updateActionState();}
 void ArchiveTab::resetMenu(){}
 void ArchiveTab::exiting(){m_stopRequested=true;if(m_watcher&&m_watcher->isRunning())m_watcher->waitForFinished();}
-void ArchiveTab::retranslateUi(){}
+void ArchiveTab::retranslateUi()
+{
+    if(!m_page)return;
+
+    m_rootTitle->setText(tr("Archive root:"));
+    m_systemGroup->setTitle(tr("SYSTEM HEALTH"));
+    m_operationGroup->setTitle(tr("CURRENT OPERATION"));
+    m_playlistLabel->setText(tr("PLAYLISTS"));
+
+    const QStringList systemNames={tr("Overall"),tr("Archive root"),tr("Canonical state"),tr("Runtime tools"),
+                                   tr("Disk"),tr("Writer lock"),tr("Recovery imports"),tr("Latest scan")};
+    for(int i=0;i<m_systemNameLabels.size()&&i<systemNames.size();++i)
+        m_systemNameLabels[i]->setText(systemNames[i]);
+
+    m_browse->setText(tr("Browse…"));
+    m_add->setText(tr("Add Playlist"));
+    m_remove->setText(tr("Remove"));
+    m_scan->setText(tr("Scan"));
+    m_syncSelected->setText(tr("Sync Selected"));
+    m_syncAll->setText(tr("Sync All"));
+    m_stop->setText(tr("Stop After Current"));
+    m_retry->setText(tr("Retry Failed"));
+    m_more->setText(tr("More"));
+    m_search->setPlaceholderText(tr("Search archive items…"));
+
+    const QStringList filters={tr("All"),tr("Protected"),tr("Needs Sync"),tr("Missing"),tr("Unavailable"),tr("Removed"),tr("Failed"),tr("Interrupted")};
+    for(int i=0;i<m_filter->count()&&i<filters.size();++i)m_filter->setItemText(i,filters[i]);
+
+    m_table->setHorizontalHeaderLabels({tr("#"),tr("Title"),tr("Availability"),tr("Video"),tr("Audio"),tr("Status")});
+    m_detailsTabs->setTabText(0,tr("Source"));
+    m_detailsTabs->setTabText(1,tr("Archive"));
+    m_detailsTabs->setTabText(2,tr("History"));
+    m_detailsTabs->setTabText(3,tr("Recovery"));
+    m_activityToggle->setText(m_activityToggle->isChecked()?tr("▾ Activity"):tr("▸ Activity"));
+
+    m_openRootAction->setText(tr("Open Archive Folder"));
+    m_openPlaylistAction->setText(tr("Open Playlist Folder"));
+    m_openCatalogAction->setText(tr("Open Catalog"));
+    m_openMissingAction->setText(tr("Open Missing Report"));
+    m_importsAction->setText(tr("Process External Imports"));
+    m_openLogsAction->setText(tr("Open Logs"));
+
+    const int tabIndex=m_hostTabs.indexOf(m_page);
+    if(tabIndex>=0)m_hostTabs.setTabText(tabIndex,tr("Archive"));
+
+    // Dynamic health text is also translated presentation state. Recompute it
+    // under the newly installed translator instead of leaving old-language
+    // status values beside freshly translated static labels.
+    refreshSystemHealth();
+}
 void ArchiveTab::tabEntered(){refreshAll();}
 void ArchiveTab::tabExited(){}
 void ArchiveTab::keyPressed(utility::mainWindowKeyCombo){}
