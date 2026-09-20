@@ -142,6 +142,10 @@ private:
     bool m_stateReadable=true;
     bool m_controlsEnabled=true;
     std::atomic_bool m_stopRequested{false};
+    // Separate shutdown cancellation from the user-facing "Stop After Current"
+    // queue flag. Only application teardown is allowed to terminate an active
+    // external tool in the middle of the current item.
+    std::atomic_bool m_cancelActiveProcess{false};
 };
 
 #endif

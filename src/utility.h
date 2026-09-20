@@ -473,6 +473,7 @@ namespace utility
 	{
 	public:
 		static QByteArray logHistoryData( const Context& ) ;
+		static QByteArray logHistoryData( const QString& filePath ) ;
 		archiveData( QStringList opts,const engines::engine& engine,const Context& ctx ) ;
 		void addToHistory( QJsonObject ) ;
 		const QStringList& options() const
@@ -788,6 +789,7 @@ namespace utility
 	bool fileIsInvalidForGettingThumbnail( const QByteArray& ) ;
 	QString downloadFolder( const Context& ctx ) ;
 	bool onlyWantedVersionInfo( const utility::cliArguments& ) ;
+	bool isOwnedUpdateCleanupPath( const QString& configPath,const QString& candidate,bool runningUpdated,const QString& currentExecutable ) ;
 	bool startedUpdatedVersion( settings&,const utility::cliArguments& ) ;
 	void hideUnhideEntries( QMenu&,tableWidget&,int,bool ) ;
 	quint64 simpleRandomNumber() ;

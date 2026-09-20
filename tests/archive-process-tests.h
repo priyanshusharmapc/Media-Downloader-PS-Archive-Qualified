@@ -118,7 +118,31 @@ inline bool run(QString* error)
             lock.unlock();archive::SyncLock next(paths);require(next.tryLock(),"subsequent writer remained blocked");
             QThread::msleep(100);require(read(heartbeat)==after,"descendant wrote after next writer started");
         }
-        QTextStream(stdout)<<"process-containment: timeout/overflow descendants terminated before next writer; exit/channel cases passed\n";
+        {
+            QTemporaryDir temp;require(temp.isValid(),"process cancellation fixture directory");
+            archive::Paths paths(temp.path());archive::SyncLock lock(paths);require(lock.tryLock(),"acquire writer ownership for cancellation");
+            const auto pidPath=QDir(temp.path()).filePath("descendant.pid");
+            std::atomic_bool cancelRequested{false};
+            std::thread trigger([&]{
+                QElapsedTimer ready;ready.start();
+                while(!QFileInfo::exists(pidPath)&&ready.elapsed()<3000)QThread::msleep(10);
+                cancelRequested.store(true);
+            });
+            QElapsedTimer elapsed;elapsed.start();
+            const auto result=archive::detail::runContainedProcess(
+                executable,{"--archive-parent-fixture",temp.path(),"cancel"},temp.path(),10000,&cancelRequested);
+            trigger.join();
+            require(QFileInfo::exists(pidPath),"cancellation fixture never started its descendant");
+            DescendantCleanup cleanup;cleanup.pid=read(pidPath).trimmed().toLongLong();
+            require(cleanup.pid>1,"invalid cancellation descendant identity");
+            require(!result.ok&&result.error.contains("cancelled",Qt::CaseInsensitive),
+                    "active process cancellation returned wrong result: "+result.error);
+            require(elapsed.elapsed()<5000,"shutdown cancellation waited for the child timeout");
+            require(stopped(cleanup.pid),"descendant survived explicit Archive process cancellation");
+            cleanup.pid=0;
+            lock.unlock();archive::SyncLock next(paths);require(next.tryLock(),"writer lock not reusable after cancellation");
+        }
+        QTextStream(stdout)<<"process-containment: timeout/overflow/cancellation descendants terminated before next writer; exit/channel cases passed\n";
         return true;
     }catch(const std::exception& ex){if(error)*error=QString::fromUtf8(ex.what());return false;}
 }

@@ -1997,6 +1997,58 @@ static bool _start_updated( QProcess& exe )
 #endif
 }
 
+bool utility::isOwnedUpdateCleanupPath( const QString& configPath,const QString& candidate,bool runningUpdated,const QString& currentExecutable )
+{
+	if( !runningUpdated || configPath.trimmed().isEmpty() || candidate.trimmed().isEmpty() ||
+		currentExecutable.trimmed().isEmpty() ){
+		return false ;
+	}
+
+	const QFileInfo rootInfo( QDir::cleanPath( QFileInfo( configPath ).absoluteFilePath() ) ) ;
+	const QFileInfo candidateInfo( QDir::cleanPath( QFileInfo( candidate ).absoluteFilePath() ) ) ;
+
+	if( !rootInfo.exists() || !rootInfo.isDir() || !candidateInfo.exists() ||
+		!candidateInfo.isDir() || candidateInfo.isSymLink() ){
+		return false ;
+	}
+
+	const auto name = candidateInfo.fileName() ;
+	if( !name.startsWith( "update-" ) || name.size() <= 7 ){
+		return false ;
+	}
+	for( const auto ch : name.mid( 7 ) ){
+		if( ch < QLatin1Char( '0' ) || ch > QLatin1Char( '9' ) ){
+			return false ;
+		}
+	}
+
+	const auto rootCanonical = QDir::fromNativeSeparators( rootInfo.canonicalFilePath() ) ;
+	const auto candidateCanonical = QDir::fromNativeSeparators( candidateInfo.canonicalFilePath() ) ;
+	if( rootCanonical.isEmpty() || candidateCanonical.isEmpty() ){
+		return false ;
+	}
+
+	const auto expected = QDir::fromNativeSeparators( QDir( rootCanonical ).absoluteFilePath( name ) ) ;
+	const QFileInfo executableInfo( QDir::cleanPath( QFileInfo( currentExecutable ).absoluteFilePath() ) ) ;
+	if( !executableInfo.exists() || !executableInfo.isFile() || executableInfo.isSymLink() ){
+		return false ;
+	}
+	const auto executableCanonical = QDir::fromNativeSeparators( executableInfo.canonicalFilePath() ) ;
+	const QFileInfo updateDirInfo( QDir( rootCanonical ).filePath( "update" ) ) ;
+	const auto updateDirCanonical = QDir::fromNativeSeparators( updateDirInfo.canonicalFilePath() ) ;
+	if( executableCanonical.isEmpty() || updateDirCanonical.isEmpty() ){
+		return false ;
+	}
+	const auto expectedExecutable = QDir::fromNativeSeparators(
+		QDir( updateDirCanonical ).absoluteFilePath( "media-downloader.exe" ) ) ;
+#ifdef Q_OS_WIN
+	return candidateCanonical.compare( expected,Qt::CaseInsensitive ) == 0 &&
+		executableCanonical.compare( expectedExecutable,Qt::CaseInsensitive ) == 0 ;
+#else
+	return candidateCanonical == expected && executableCanonical == expectedExecutable ;
+#endif
+}
+
 bool utility::startedUpdatedVersion( settings& s,const utility::cliArguments& cargs )
 {
 	if( utility::platformIsNOTWindows() ){
@@ -3305,7 +3357,12 @@ void utility::archiveData::addToHistory( QJsonObject obj )
 
 QByteArray utility::archiveData::logHistoryData( const Context& ctx )
 {
-	QFile file( ctx.Engines().engineDirPaths().downloadHistoryFilePath() ) ;
+	return utility::archiveData::logHistoryData( ctx.Engines().engineDirPaths().downloadHistoryFilePath() ) ;
+}
+
+QByteArray utility::archiveData::logHistoryData( const QString& filePath )
+{
+	QFile file( filePath ) ;
 
 	utility::archiveData::guardHistoryFile() ;
 

@@ -95,31 +95,37 @@ void Logger::showLogWindow( int id )
 
 void Logger::showDownloadHistoryWindow()
 {
+	if( !m_ctx ){
+		return ;
+	}
+
+	const auto historyPath = m_ctx->Engines().engineDirPaths().downloadHistoryFilePath() ;
+
 	class meaw
 	{
 	public:
-		meaw( Logger& p ) : m_parent( p )
+		meaw( Logger& p,QString path ) : m_parent( &p ),m_path( std::move( path ) )
 		{
 		}
-		void bg()
+		QByteArray bg()
 		{
-			m_data = utility::archiveData::logHistoryData( *m_parent.m_ctx ) ;
+			// Background work owns only immutable path data. It must never retain
+			// Context/Logger references past application shutdown.
+			return utility::archiveData::logHistoryData( m_path ) ;
 		}
-		void fg()
+		void fg( QByteArray&& data )
 		{
-			m_parent.m_logWindow.setText( m_data ) ;
-
-			m_parent.m_logWindow.Show( true ) ;
+			m_parent->m_logWindow.setText( data ) ;
+			m_parent->m_logWindow.Show( true ) ;
 		}
 	private:
-		QByteArray m_data ;
-		Logger& m_parent ;
+		Logger * m_parent ;
+		QString m_path ;
 	} ;
 
-	if( m_ctx ){
-
-		utils::qthread::run( meaw( *this ) ) ;
-	}
+	// The foreground callback is suppressed automatically once the log window
+	// (and therefore its owning Logger/MainWindow lifetime) has ended.
+	utils::qthread::run( &m_logWindow,meaw( *this,historyPath ) ) ;
 }
 
 void Logger::showAllLogs()

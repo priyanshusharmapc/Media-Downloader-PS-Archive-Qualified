@@ -256,7 +256,7 @@ QString ArchiveTab::configuredRoot() const
     return archive::ui::configuredRoot(QCoreApplication::applicationDirPath(),{});
 }
 
-archive::RuntimeConfig ArchiveTab::runtimeConfig() const{return {m_root,QCoreApplication::applicationDirPath()};}
+archive::RuntimeConfig ArchiveTab::runtimeConfig() const{return {m_root,QCoreApplication::applicationDirPath(),false,&m_cancelActiveProcess};}
 
 bool ArchiveTab::ensureReady(QString* error)
 {
@@ -277,7 +277,12 @@ void ArchiveTab::init_done(){m_root=configuredRoot();refreshAll();}
 void ArchiveTab::enableAll(){m_controlsEnabled=true;updateActionState();}
 void ArchiveTab::disableAll(){m_controlsEnabled=false;updateActionState();}
 void ArchiveTab::resetMenu(){}
-void ArchiveTab::exiting(){m_stopRequested=true;if(m_watcher&&m_watcher->isRunning())m_watcher->waitForFinished();}
+void ArchiveTab::exiting()
+{
+    m_stopRequested=true;
+    m_cancelActiveProcess=true;
+    if(m_watcher&&m_watcher->isRunning())m_watcher->waitForFinished();
+}
 void ArchiveTab::retranslateUi()
 {
     if(!m_page)return;
@@ -943,6 +948,7 @@ QString ArchiveTab::operationRetryFailed(const archive::Source& source)
 void ArchiveTab::runAsync(const QString& operationName,const std::function<QString()>& fn)
 {
     if(m_busy)return;
+    m_cancelActiveProcess=false;
     m_operationName->setText(operationName);
     m_operationStage->setText(tr("Starting"));
     m_operationDetail->setText(tr("Preparing Archive Mode operation"));
