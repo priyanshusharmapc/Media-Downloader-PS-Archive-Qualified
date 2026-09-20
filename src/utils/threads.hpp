@@ -100,6 +100,48 @@ namespace utils
 		}
 
 		template< typename T,
+			 typename std::enable_if< std::is_void< decltype( std::declval< T >().bg() ) >::value,int >::type = 0 >
+		void run( T bgt )
+		{
+			struct meaw
+			{
+				T m_task ;
+
+				int bg()
+				{
+					m_task.bg() ;
+					return 0 ;
+				}
+				void fg( int )
+				{
+					m_task.fg() ;
+				}
+			} ;
+
+			run( meaw{ std::move( bgt ) } ) ;
+		}
+
+		template< typename T,
+			 typename std::enable_if< std::is_same< decltype( std::declval< T >().operator()() ),decltype( std::declval< T >().operator()() ) >::value,int >::type = 0 >
+		void run( T bgt )
+		{
+			struct meaw
+			{
+				T m_bg ;
+
+				void bg()
+				{
+					m_bg() ;
+				}
+				void fg()
+				{
+				}
+			} ;
+
+			run( meaw{ std::move( bgt ) } ) ;
+		}
+
+		template< typename T,
 			  typename std::enable_if< !std::is_void< decltype( std::declval< T >().bg() ) >::value,int >::type = 0 >
 		void run( QObject * context,T bgt )
 		{
@@ -144,47 +186,6 @@ namespace utils
 			run( guarded{ context,std::move( bgt ) } ) ;
 		}
 
-		template< typename T,
-			 typename std::enable_if< std::is_void< decltype( std::declval< T >().bg() ) >::value,int >::type = 0 >
-		void run( T bgt )
-		{
-			struct meaw
-			{
-				T m_task ;
-
-				int bg()
-				{
-					m_task.bg() ;
-					return 0 ;
-				}
-				void fg( int )
-				{
-					m_task.fg() ;
-				}
-			} ;
-
-			run( meaw{ std::move( bgt ) } ) ;
-		}
-
-		template< typename T,
-			 typename std::enable_if< std::is_same< decltype( std::declval< T >().operator()() ),decltype( std::declval< T >().operator()() ) >::value,int >::type = 0 >
-		void run( T bgt )
-		{
-			struct meaw
-			{
-				T m_bg ;
-
-				void bg()
-				{
-					m_bg() ;
-				}
-				void fg()
-				{
-				}
-			} ;
-
-			run( meaw{ std::move( bgt ) } ) ;
-		}
 
 		template< typename BackGroundTask,
 			 typename UiThreadResult,
