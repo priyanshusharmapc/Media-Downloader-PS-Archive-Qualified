@@ -807,7 +807,19 @@ private:
 					const auto& a = this->getId( s ) ;
 					const auto& b = this->getId( e ) ;
 
-					return tableWidget::compare( a,b,m_ascending ) ;
+					bool aNumber = false ;
+					bool bNumber = false ;
+					const auto an = a.toLongLong( &aNumber ) ;
+					const auto bn = b.toLongLong( &bNumber ) ;
+
+					if( aNumber && bNumber ){
+						if( an != bn ) return m_ascending ? an < bn : an > bn ;
+						const auto tie = QString::compare( a,b,Qt::CaseSensitive ) ;
+						return m_ascending ? tie < 0 : tie > 0 ;
+					}
+
+					const auto order = QString::compare( a,b,Qt::CaseInsensitive ) ;
+					return m_ascending ? order < 0 : order > 0 ;
 				}else{
 					const auto& a = this->getSize( s ) ;
 					const auto& b = this->getSize( e ) ;
