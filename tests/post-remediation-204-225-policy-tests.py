@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Full remediation checkpoint: source fixes through the final 085/220 lifetime pass.
 import argparse
 import pathlib
 import re
