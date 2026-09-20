@@ -156,6 +156,9 @@ inline bool arrayShape(const QJsonArray& array,const QString& kind,QString* erro
                 for(const auto& field:QStringList{"key","provider","provider_id","title","uploader","original_url","availability","first_seen","last_seen","recovery_status","metadata_path"})
                     if(!stringField(o,field,field=="key"||field=="provider_id",error,kind))return false;
                 if(!stringArrayField(o,"user_tags",error,kind))return false;
+                const auto metadataPath=o.value("metadata_path").toString();
+                if(!metadataPath.isEmpty()&&(!relativeSafe(metadataPath)||!metadataPath.startsWith("Metadata/")))
+                    return reject(error,"Invalid canonical metadata path");
                 for(const auto& kindName:QStringList{"video","audio"}){
                     if(!o.value(kindName).isObject())return reject(error,"Missing representation: "+kindName);
                     const auto r=o.value(kindName).toObject();
