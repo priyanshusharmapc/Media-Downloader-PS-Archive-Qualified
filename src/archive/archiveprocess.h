@@ -94,7 +94,8 @@ inline bool terminateProcessGroup(ContainedProcess& process,qint64 processId,QSt
 }
 #endif
 
-inline ProcessResult runContainedProcess(const QString& program,const QStringList& args,const QString& cwd,int timeoutMs)
+inline ProcessResult runContainedProcess(const QString& program,const QStringList& args,const QString& cwd,int timeoutMs,
+                                         const std::atomic_bool* cancelRequested=nullptr)
 {
     ProcessResult r;
     if(program.isEmpty()){r.error="Required executable was not found";return r;}
@@ -103,7 +104,7 @@ inline ProcessResult runContainedProcess(const QString& program,const QStringLis
     if(!process.waitForStarted(10000)){r.error=process.errorString();return r;}
     const auto childId=process.processId();
     process.closeWriteChannel();
-    QByteArray output,errors;QElapsedTimer timer;timer.start();bool overflow=false,timedOut=false;QString terminationError;
+    QByteArray output,errors;QElapsedTimer timer;timer.start();bool overflow=false,timedOut=false,cancelled=false;QString terminationError;
     const auto drain=[&]{
         const auto chunk=process.readAllStandardOutput();
         if(output.size()+chunk.size()>64*1024*1024)overflow=true;else output+=chunk;
@@ -113,7 +114,8 @@ inline ProcessResult runContainedProcess(const QString& program,const QStringLis
     while(process.state()!=QProcess::NotRunning){
         process.waitForReadyRead(100);drain();
         timedOut=timer.elapsed()>timeoutMs;
-        if(overflow||timedOut){
+        cancelled=cancelRequested&&cancelRequested->load();
+        if(overflow||timedOut||cancelled){
 #ifdef Q_OS_WIN
             const auto pid=process.processId();
             if(pid>0){
@@ -129,7 +131,8 @@ inline ProcessResult runContainedProcess(const QString& program,const QStringLis
         }
     }
     drain();r.standardOutput=QString::fromUtf8(output);r.standardError=QString::fromUtf8(errors);
-    if(overflow||timedOut){r.error=overflow?"Process output exceeded the safety limit":"Process timed out";
+    if(overflow||timedOut||cancelled){
+        r.error=cancelled?"Process cancelled":overflow?"Process output exceeded the safety limit":"Process timed out";
         if(!terminationError.isEmpty())r.error+="; "+terminationError;return r;}
     r.exitCode=process.exitCode();r.ok=process.exitStatus()==QProcess::NormalExit&&r.exitCode==0;
     if(!r.ok)r.error=QString("Process exited with code %1").arg(r.exitCode);return r;
