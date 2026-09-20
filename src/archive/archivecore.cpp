@@ -873,7 +873,8 @@ bool Store::appendHistory(const QString& sourceKey,const QJsonObject& e,QString*
 bool Store::updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error)
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
-    QString stateError;auto items=loadCanonicalItems(&stateError);
+    QString stateError;
+    auto items=m_representationBatchActive?m_representationBatchItems:loadCanonicalItems(&stateError);
     if(!stateError.isEmpty())return detail::reject(error,stateError);
     for(auto& item:items){
         if(item.key==itemKey){
@@ -881,11 +882,45 @@ bool Store::updateRepresentation(const QString& itemKey,const QString& kind,cons
             else if(kind=="audio") item.audio=representation;
             else { if(error) *error="Unknown representation kind"; return false; }
             updateRecoveryStatus(item);
+            if(m_representationBatchActive){
+                m_representationBatchItems=std::move(items);
+                return true;
+            }
             return saveCanonicalItems(items,error);
         }
     }
     if(error) *error="Canonical item not found";
     return false;
+}
+
+
+bool Store::beginRepresentationBatch(QString* error)
+{
+    SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
+    if(m_representationBatchActive)return detail::reject(error,"Representation batch is already active");
+    QString stateError;
+    auto items=loadCanonicalItems(&stateError);
+    if(!stateError.isEmpty())return detail::reject(error,stateError);
+    m_representationBatchItems=std::move(items);
+    m_representationBatchActive=true;
+    return true;
+}
+
+bool Store::commitRepresentationBatch(QString* error)
+{
+    SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
+    if(!m_representationBatchActive)return true;
+    const auto items=m_representationBatchItems;
+    if(!saveCanonicalItems(items,error))return false;
+    m_representationBatchItems.clear();
+    m_representationBatchActive=false;
+    return true;
+}
+
+void Store::cancelRepresentationBatch()
+{
+    m_representationBatchItems.clear();
+    m_representationBatchActive=false;
 }
 
 bool Store::updateCanonicalMetadata(const QString& itemKey,const QString& title,const QString& uploader,const QString& availability,const QString& originalUrl,QString* error)
@@ -1756,7 +1791,7 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
     return true;
 }
 
-bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool wantAudio,QString* error)
+bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool wantAudio,QString* error,bool rebuildProjections)
 {
     SyncLock lock(m_store.paths());if(!lock.tryLock())return detail::reject(error,lock.errorString());
     if(!m_store.initialize(error,lock.acquiredFreshly()))return false;
@@ -1806,17 +1841,41 @@ bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool 
         }
         QString e;const bool ok=kind=="video"?downloadVideo(item,&e):downloadAudio(item,&e);if(!ok)errors<<kind+": "+e;
     }
-    if(!m_store.writeAllProjections(&stateError))errors<<stateError;
+    if(rebuildProjections&&!m_store.writeAllProjections(&stateError))errors<<stateError;
     if(error)*error=errors.join(" | ");return errors.isEmpty();
 }
 
 bool MediaExecutor::syncItems(const QVector<CanonicalItem>& items,const std::function<bool()>& shouldStop,QStringList* failures)
 {
+    QString batchError;
+    if(!m_store.beginRepresentationBatch(&batchError)){
+        if(failures)failures->append(batchError);
+        return false;
+    }
     bool all=true;
+    QSet<QString> processedKeys;
     for(const auto& item:items){
-        if(shouldStop && shouldStop()){all=false;if(failures)failures->append("Stopped before all items completed");break;}
+        if(processedKeys.contains(item.key))continue;
+        processedKeys.insert(item.key);
+        if(shouldStop && shouldStop()){
+            all=false;
+            if(failures)failures->append("Stopped before all items completed");
+            break;
+        }
         QString e;
-        if(!syncItem(item,true,true,&e)){ all=false; if(failures) failures->append(item.key+": "+e); }
+        if(!syncItem(item,true,true,&e,false)){
+            all=false;
+            if(failures)failures->append(item.key+": "+e);
+        }
+    }
+    if(!m_store.commitRepresentationBatch(&batchError)){
+        m_store.cancelRepresentationBatch();
+        if(failures)failures->append(batchError);
+        return false;
+    }
+    if(!m_store.writeAllProjections(&batchError)){
+        if(failures)failures->append(batchError);
+        all=false;
     }
     return all;
 }
