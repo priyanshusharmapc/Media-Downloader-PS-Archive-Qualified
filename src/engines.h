@@ -304,19 +304,40 @@ public:
 	private:
 		QString archiveFilePathByName( const QString& name,const QString& ext = ".txt" ) const
 		{
-			auto o = this->add( m_dataPath,"archiveFile-" + name + ext ) ;
+			const auto current = this->add( m_dataPath,"archiveFile-" + name + ext ) ;
 
 			if( name == "yt-dlp" ){
 
-				auto m = this->add( m_dataPath,"subscriptions_archive_file.txt" ) ;
+				const auto legacy = this->add( m_dataPath,"subscriptions_archive_file.txt" ) ;
 
-				if( QFile::exists( m ) ){
+				// A pre-existing current archive is already authoritative. Do
+				// not let an obsolete legacy file displace or merge into it.
+				if( QFile::exists( current ) ){
 
-					QFile::rename( m,o ) ;
+					return current ;
+				}
+
+				if( QFile::exists( legacy ) ){
+
+					if( QFile::rename( legacy,current ) ){
+
+						return current ;
+					}
+
+					// A target can appear between the existence check and rename
+					// (another process/session may complete migration first). Prefer
+					// that now-authoritative current archive before falling back.
+					if( QFile::exists( current ) ){
+						return current ;
+					}
+
+					// Migration is best-effort, but deduplication state is not:
+					// keep using the known-good legacy archive if promotion fails.
+					return legacy ;
 				}
 			}
 
-			return o ;
+			return current ;
 		}
 		QString add( const QString& basePath,const QString& toAdd ) const
 		{
