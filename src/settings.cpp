@@ -27,6 +27,8 @@
 
 #include <QDir>
 #include <QFile>
+#include <QGuiApplication>
+#include <QScreen>
 
 #include <cstring>
 #include <algorithm>
@@ -589,7 +591,35 @@ void settings::setMainWindowDimensions( QWidget * s )
 			auto w = m[ 2 ].toInt() ;
 			auto h = m[ 3 ].toInt() ;
 
-			s->setGeometry( { x,y,w,h } ) ;
+			QRect restored( x,y,w,h ) ;
+			bool visible = false ;
+
+			for( auto * screen : QGuiApplication::screens() ){
+
+				const auto intersection = screen->availableGeometry().intersected( restored ) ;
+
+				if( intersection.width() >= 50 && intersection.height() >= 50 ){
+					visible = true ;
+					break ;
+				}
+			}
+
+			if( !visible ){
+
+				if( auto * screen = QGuiApplication::primaryScreen() ){
+
+					const auto available = screen->availableGeometry() ;
+					restored.setSize( restored.size().boundedTo( available.size() ) ) ;
+
+					if( restored.width() <= 0 || restored.height() <= 0 ){
+						restored.setSize( s->size().boundedTo( available.size() ) ) ;
+					}
+
+					restored.moveCenter( available.center() ) ;
+				}
+			}
+
+			s->setGeometry( restored ) ;
 
 			// Restored geometry is only a starting rectangle. Do not convert it
 		// into equal minimum/maximum bounds; the main window must remain resizable.
