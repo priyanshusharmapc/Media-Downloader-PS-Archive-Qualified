@@ -187,6 +187,26 @@ static QString _Windows64BitBinaryName()
 	return "yt-dlp.exe" ;
 }
 
+static QString _WindowsArm64BinaryName()
+{
+	return "yt-dlp_arm64.exe" ;
+}
+
+static QString _WindowsBinaryName()
+{
+	const utility::CPU cpu ;
+
+	if( cpu.x86_32() ){
+		return _Windows32BitBinaryName() ;
+	}else if( cpu.aarch64() ){
+		return _WindowsArm64BinaryName() ;
+	}else if( cpu.x86_64() ){
+		return _Windows64BitBinaryName() ;
+	}else{
+		return {} ;
+	}
+}
+
 static QString _NicolaasjanYtdlpFor32BitWin7()
 {
 	return "yt-dlp_x86_win7.exe" ;
@@ -224,16 +244,15 @@ void yt_dlp::checkIfBinaryExist( const QString& runTimeBinPath,const QString& th
 
 			// left on purpose
 		}else{
-			if( utility::CPU().x86_32() ){
-
-				destPath += "/" + _Windows32BitBinaryName() ;
-			}else{
-				destPath += "/" + _Windows64BitBinaryName() ;
+			const auto binaryName = _WindowsBinaryName() ;
+			if( binaryName.isEmpty() ){
+				return ;
 			}
+			destPath += "/" + binaryName ;
 
 			if( !QFile::exists( destPath ) ){
 
-				auto srcPath = thirdPartyBinPath + "/ytdlp/" + _Windows32BitBinaryName() ;
+				const auto srcPath = thirdPartyBinPath + "/ytdlp/" + binaryName ;
 
 				utility::copyFile( srcPath,destPath ) ;
 			}
@@ -300,6 +319,7 @@ utility::addJsonCmd::entry::args yt_dlp::entryCmd( const QString& e )
 		data.emplace_back( "win7amd64",_NicolaasjanYtdlpFor64BitWin7() ) ;
 		data.emplace_back( "x86",_Windows32BitBinaryName() ) ;
 		data.emplace_back( "amd64",_Windows64BitBinaryName() ) ;
+		data.emplace_back( "aarch64",_WindowsArm64BinaryName() ) ;
 
 	}else if( e == "MacOS" ){
 
