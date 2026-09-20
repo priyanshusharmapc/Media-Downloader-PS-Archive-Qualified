@@ -1418,6 +1418,25 @@ void batchdownloader::setVisibleWidgetOverMainTable( bool e )
 	}else{
 		if( e ){
 
+			const auto row = m_widgetOverMainTable.row() ;
+			m_ui.lineEditStartTimeInterval->clear() ;
+			m_ui.lineEditEndTimeInterval->clear() ;
+			m_ui.lineEditChapters->clear() ;
+			m_ui.cbSplitByChapters->setChecked( false ) ;
+
+			if( row >= 0 && row < m_table.rowCount() ){
+				const auto interval = m_table.timeInterval( row ) ;
+				const auto separator = interval.indexOf( '-' ) ;
+
+				if( separator >= 0 ){
+					m_ui.lineEditStartTimeInterval->setText( interval.left( separator ) ) ;
+					m_ui.lineEditEndTimeInterval->setText( interval.mid( separator + 1 ) ) ;
+				}
+
+				m_ui.lineEditChapters->setText( m_table.chapters( row ) ) ;
+				m_ui.cbSplitByChapters->setChecked( m_table.splitByChapters( row ) ) ;
+			}
+
 			m_ui.lineEditStartTimeInterval->setFocus() ;
 		}else{
 			m_ui.lineEditBDUrl->setFocus() ;
@@ -1463,40 +1482,46 @@ void batchdownloader::setTimeIntervals( int row )
 {
 	if( row != -1 ){
 
-		auto a = m_ui.lineEditStartTimeInterval->text() ;
-		auto b = m_ui.lineEditEndTimeInterval->text() ;
-		auto c = m_ui.lineEditChapters->text() ;
+		const auto a = m_ui.lineEditStartTimeInterval->text().trimmed() ;
+		const auto b = m_ui.lineEditEndTimeInterval->text().trimmed() ;
+		const auto chapters = m_ui.lineEditChapters->text().trimmed() ;
 
-		if( !a.isEmpty() && !b.isEmpty() ){
-
-			auto u = tableWidget::type::DownloadTimeInterval ;
-
-			m_table.setDownloadingOptions( u,row,a + "-" + b ) ;
-
-		}else if( a.isEmpty() && b.isEmpty() ){
-
-			//Left empty on purpose
-		}else{
+		if( a.isEmpty() != b.isEmpty() ){
 			return ;
 		}
 
-		if( !c.isEmpty() ){
+		auto removeUiOption = [ this,row ]( const QString& optionName ){
+			auto remove = [ & ]( QString value ){
+				auto lines = util::split( value,'\n',true ) ;
+				for( int i = lines.size() - 1 ; i >= 0 ; --i ){
+					if( lines[ i ].startsWith( optionName ) ){
+						lines.removeAt( i ) ;
+					}
+				}
+				return lines.join( '\n' ) ;
+			} ;
 
-			auto u = tableWidget::type::DownloadChapters ;
+			m_table.setUiText( remove( m_table.uiText( row ) ),row ) ;
+			m_table.setDownloadingOptionsUi( remove( m_table.downloadingOptionsUi( row ) ),row ) ;
+		} ;
 
-			m_table.setDownloadingOptions( u,row,c ) ;
-		}
-
-		if( m_ui.cbSplitByChapters->isChecked() ){
-
-			auto u = tableWidget::type::SplitByChapters ;
-
-			m_table.setDownloadingOptions( u,row,"Yes" ) ;
+		if( a.isEmpty() ){
+			m_table.setTimeInterval( {},row ) ;
+			removeUiOption( utility::stringConstants::downloadTimeInterval() + ": " ) ;
 		}else{
-			auto u = tableWidget::type::SplitByChapters ;
-
-			m_table.setDownloadingOptions( u,row,"No" ) ;
+			m_table.setDownloadingOptions( tableWidget::type::DownloadTimeInterval,row,a + "-" + b ) ;
 		}
+
+		if( chapters.isEmpty() ){
+			m_table.setChapters( {},row ) ;
+			removeUiOption( utility::stringConstants::downloadChapters() + ": " ) ;
+		}else{
+			m_table.setDownloadingOptions( tableWidget::type::DownloadChapters,row,chapters ) ;
+		}
+
+		m_table.setDownloadingOptions( tableWidget::type::SplitByChapters,
+						 row,
+						 m_ui.cbSplitByChapters->isChecked() ? "Yes" : "No" ) ;
 	}
 }
 
