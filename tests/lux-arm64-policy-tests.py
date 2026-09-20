@@ -13,6 +13,8 @@ body=source[start:end]
 for asset in ["Windows_arm64","Linux_arm64","Darwin_arm64.tar.gz"]:
     assert asset in body
 assert "cpu.aarch64()" in body
+assert body.count("cpu.x86_64()") >= 3
+assert body.count("return false ;") >= 3
 assert "aarch64" in meta["Cmd"]["Generic"]
 assert "aarch64" in meta["Cmd"]["Windows"]
 print("Lux ARM64 selection policy: PASS")
