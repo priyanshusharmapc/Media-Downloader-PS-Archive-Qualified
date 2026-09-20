@@ -396,7 +396,7 @@ private:
 		       tableWidget& table,
 		       Ui::MainWindow& ui,
 		       const utility::MediaEntry& media ) ;
-	void showThumbnail( const engines::engine&,int,const QString& url ) ;
+	void showThumbnail( const engines::engine&,int,const QString& url,const QString& identity ) ;
 	class networkCtx ;
 	void networkResult( const networkCtx&,const utils::network::reply& ) ;
 	void showMetaDataSlot( ItemEntries ) ;
@@ -725,8 +725,8 @@ private:
 	class networkCtx
 	{
 	public:
-		networkCtx( const utility::MediaEntry& e,int index ) :
-			m_media( e ),m_index( index ),m_identity( e.url() )
+		networkCtx( const utility::MediaEntry& e,int index,QString identity ) :
+			m_media( e ),m_index( index ),m_identity( std::move( identity ) )
 		{
 		}
 		networkCtx move()
