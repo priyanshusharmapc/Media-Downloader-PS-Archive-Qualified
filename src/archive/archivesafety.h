@@ -22,6 +22,9 @@
 #endif
 #endif
 
+#include <cmath>
+#include <limits>
+
 namespace archive { namespace detail {
 inline bool reject(QString* error,const QString& message){if(error)*error=message;return false;}
 inline bool sourceKeySafe(const QString& s){return QRegularExpression("^[A-Za-z0-9_-]{1,160}$").match(s).hasMatch();}
@@ -94,6 +97,34 @@ inline QString fileDigest(const QString& path,QString* error){
     if(!hash.addData(&f)||f.error()!=QFileDevice::NoError){reject(error,"Unable to hash "+path);return {};}
     return QString::fromLatin1(hash.result().toHex());
 }
+inline bool stringField(const QJsonObject& o,const QString& key,bool required,QString* error,const QString& kind){
+    if(!o.contains(key))return required?reject(error,kind+" is missing string field: "+key):true;
+    if(!o.value(key).isString())return reject(error,kind+" has non-string field: "+key);
+    return true;
+}
+inline bool integerField(const QJsonObject& o,const QString& key,bool required,QString* error,const QString& kind){
+    if(!o.contains(key))return required?reject(error,kind+" is missing integer field: "+key):true;
+    const auto value=o.value(key);
+    if(!value.isDouble())return reject(error,kind+" has non-numeric integer field: "+key);
+    const auto number=value.toDouble();
+    if(!std::isfinite(number)||std::floor(number)!=number||
+       number<std::numeric_limits<int>::min()||number>std::numeric_limits<int>::max())
+        return reject(error,kind+" has invalid integer field: "+key);
+    return true;
+}
+inline bool stringArrayField(const QJsonObject& o,const QString& key,QString* error,const QString& kind){
+    if(!o.contains(key))return true;
+    if(!o.value(key).isArray())return reject(error,kind+" has non-array field: "+key);
+    for(const auto& value:o.value(key).toArray())
+        if(!value.isString())return reject(error,kind+" has non-string array member: "+key);
+    return true;
+}
+inline bool representationShape(const QJsonObject& r,const QString& name,QString* error){
+    for(const auto& key:QStringList{"state","path","origin","verified_at","error"})
+        if(!stringField(r,key,key=="state",error,"representation "+name))return false;
+    return true;
+}
+
 inline bool arrayShape(const QJsonArray& array,const QString& kind,QString* error){
     QSet<QString> keys;
     const QStringList states={"missing","complete","failed","interrupted","running","blocked_unavailable"};
@@ -115,18 +146,35 @@ inline bool arrayShape(const QJsonArray& array,const QString& kind,QString* erro
             keys.insert(unique);
         }
         if(kind=="source"){
+            for(const auto& field:QStringList{"key","url","title","added_at","last_scan_at","last_scan_status","last_error"})
+                if(!stringField(o,field,field=="key"||field=="url",error,kind))return false;
             if(!sourceKeySafe(key)||o.value("url").toString().isEmpty())return reject(error,"Invalid source identity or URL");
         }else{
             const QString id=o.value("provider_id").toString();
             if((!id.isEmpty()&&!videoIdSafe(id))||(!key.startsWith("placeholder:")&&key!="youtube:"+id))return reject(error,"Invalid canonical identity: "+key);
             if(kind=="canonical"){
+                for(const auto& field:QStringList{"key","provider","provider_id","title","uploader","original_url","availability","first_seen","last_seen","recovery_status","metadata_path"})
+                    if(!stringField(o,field,field=="key"||field=="provider_id",error,kind))return false;
+                if(!stringArrayField(o,"user_tags",error,kind))return false;
                 for(const auto& kindName:QStringList{"video","audio"}){
                     if(!o.value(kindName).isObject())return reject(error,"Missing representation: "+kindName);
-                    const auto r=o.value(kindName).toObject();const auto path=r.value("path").toString();
+                    const auto r=o.value(kindName).toObject();
+                    if(!representationShape(r,kindName,error))return false;
+                    const auto path=r.value("path").toString();
                     if(!states.contains(r.value("state").toString())||(!path.isEmpty()&&!relativeSafe(path))||(r.value("state")=="complete"&&path.isEmpty()))return reject(error,"Invalid representation: "+kindName);
                     if(!path.isEmpty() && !path.startsWith(kindName=="video"?"Video/":"Audio/"))return reject(error,"Representation outside canonical media directory");
                 }
-            }else if(o.value("membership")!="active"&&o.value("membership")!="removed")return reject(error,"Invalid playlist membership");
+            }else{
+                for(const auto& field:QStringList{"item_key","entry_key","provider_id","title","url","availability","membership","first_seen","last_seen"})
+                    if(!stringField(o,field,field=="item_key"||field=="entry_key",error,kind))return false;
+                if(!integerField(o,"position",false,error,kind)||!integerField(o,"last_position",false,error,kind))return false;
+                // -1 is the only sentinel used by the model. Other negative
+                // positions are semantically corrupt even though they fit int.
+                if((o.contains("position")&&o.value("position").toInt() < -1)||
+                   (o.contains("last_position")&&o.value("last_position").toInt() < -1))
+                    return reject(error,"Invalid playlist position range");
+                if(o.value("membership")!="active"&&o.value("membership")!="removed")return reject(error,"Invalid playlist membership");
+            }
         }
     }
     return true;
