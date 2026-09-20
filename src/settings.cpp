@@ -18,6 +18,7 @@
  */
 
 #include "settings.h"
+#include <QCoreApplication>
 #include "utility.h"
 #include "locale_path.h"
 #include "translator.h"
@@ -597,11 +598,12 @@ void settings::init_done()
 		const auto candidate = m_options.pathToOldUpdatedVersion() ;
 		const auto configPath = m_options.dataPath() ;
 		const auto runningUpdated = m_options.runningUpdated() ;
+		const auto currentExecutable = QCoreApplication::applicationFilePath() ;
 
 		// Cleanup runs in the background, but captures only immutable values.
 		// Never retain settings& beyond MainWindow shutdown.
-		utils::qthread::run( [ candidate,configPath,runningUpdated ](){
-			if( utility::isOwnedUpdateCleanupPath( configPath,candidate,runningUpdated ) ){
+		utils::qthread::run( [ candidate,configPath,runningUpdated,currentExecutable ](){
+			if( utility::isOwnedUpdateCleanupPath( configPath,candidate,runningUpdated,currentExecutable ) ){
 				QDir( candidate ).removeRecursively() ;
 			}
 		} ) ;
