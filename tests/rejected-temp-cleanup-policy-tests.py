@@ -9,7 +9,9 @@ assert u.count("utility::removeFile( md.tmpFile )") >= 2
 assert "failedToRemove( m_appName,md.tmpFile" in u
 
 f=source[source.index("void networkAccess::finished( networkAccess::Opts opts )"):source.index("void networkAccess::extractArchiveOuput",source.index("void networkAccess::finished( networkAccess::Opts opts )"))]
+assert "QFileInfo rejectedPayload( opts.filePath )" in f
+assert "rejectedPayload.exists() && rejectedPayload.isFile()" in f
 assert "utility::removeFile( opts.filePath )" in f
 assert "failedToRemove( engine.name(),opts.filePath" in f
-assert f.index("utility::removeFile( opts.filePath )") < f.index("this->printVersion( opts.move(),opts.networkError.badDownload() )")
+assert f.index("rejectedPayload.exists() && rejectedPayload.isFile()") < f.index("utility::removeFile( opts.filePath )") < f.index("this->printVersion( opts.move(),opts.networkError.badDownload() )")
 print("rejected temp cleanup policy: PASS")
