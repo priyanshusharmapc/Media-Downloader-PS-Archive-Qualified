@@ -41,6 +41,7 @@
 #include "utils/threads.hpp"
 #include "utils/qprocess.hpp"
 #include "utils/miscellaneous.hpp"
+#include "archive/archiveprocess.h"
 
 class tableWidget ;
 class settings ;
@@ -1254,31 +1255,45 @@ public:
 		public:
 			uvic( const engines::engine& engine,
 			      const Context& ctx,
-			      Function function ) :
+			      Function function,
+			      QString executable,
+			      QStringList arguments,
+			      QProcessEnvironment environment,
+			      std::shared_ptr< std::atomic_bool > cancel ) :
 				m_engine( engine ),
 				m_ctx( ctx ),
-				m_function( std::move( function ) )
+				m_function( std::move( function ) ),
+				m_executable( std::move( executable ) ),
+				m_arguments( std::move( arguments ) ),
+				m_environment( std::move( environment ) ),
+				m_cancel( std::move( cancel ) )
 			{
 			}
-			void operator()( const utils::qprocess::outPut& e )
+			archive::ProcessResult bg()
 			{
-				if( e.success() ){
-
-					m_engine.setVersionString( e.stdOut ) ;
+				// Version probes are external processes too. Run them off the GUI
+				// thread with the same finite deadline, bounded output and complete
+				// process-tree cancellation contract used by Archive operations.
+				return archive::detail::runContainedProcess(
+					m_executable,m_arguments,QString(),10000,m_cancel.get(),&m_environment ) ;
+			}
+			void fg( archive::ProcessResult result )
+			{
+				if( result.ok ){
+					m_engine.setVersionString( result.standardOutput ) ;
 				}
 
 				m_ctx.TabManager().enableAll() ;
-
 				m_function() ;
-			}
-			uvic< Context,Function > move()
-			{
-				return std::move( *this ) ;
 			}
 		private:
 			const engines::engine& m_engine ;
 			const Context& m_ctx ;
 			Function m_function ;
+			QString m_executable ;
+			QStringList m_arguments ;
+			QProcessEnvironment m_environment ;
+			std::shared_ptr< std::atomic_bool > m_cancel ;
 		} ;
 
 		template< typename Context,typename Function >
@@ -1289,23 +1304,23 @@ public:
 				const auto& engine = *this ;
 
 				if( engine.versionInfo().valid() ){
-
 					ff() ;
 				}else{
 					ctx.TabManager().disableAll() ;
 
-					const auto& exe = engine.exePath() ;
+					const auto exe = engine.exePath() ;
 					QStringList args{ engine.versionArgument() } ;
+					this->setPermissions( exe ) ;
 
-					engines::engine::exeArgs::cmd cmd( exe,args ) ;
+					auto cancel = std::make_shared< std::atomic_bool >( false ) ;
+					QObject::connect( &ctx.mainWidget(),&QObject::destroyed,
+						[ cancel ](){ cancel->store( true ) ; } ) ;
 
-					this->setPermissions( cmd.exe() ) ;
-
-					uvic< Context,Function > meaw( engine,ctx,std::move( ff ) ) ;
-
-					auto m = QProcess::SeparateChannels ;
-
-					utils::qprocess::run( cmd.exe(),cmd.args(),m,meaw.move() ) ;
+					utils::qthread::run(
+						&ctx.mainWidget(),
+						uvic< Context,Function >(
+							engine,ctx,std::move( ff ),exe,args,
+							engine.processEnvironment(),std::move( cancel ) ) ) ;
 				}
 			}else{
 				ff() ;
