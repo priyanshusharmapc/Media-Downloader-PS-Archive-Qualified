@@ -8,6 +8,6 @@ start=s.index("QSystemTrayIcon::activated")
 end=s.index("if( m_showTrayIcon )",start)
 body=s[start:end]
 assert "ActivationReason reason" in body
-assert "reason != QSystemTrayIcon::Trigger" in body
-assert body.index("reason != QSystemTrayIcon::Trigger") < body.index("this->isVisible()")
+assert "!m_showTrayIcon || reason != QSystemTrayIcon::Trigger" in body
+assert body.index("!m_showTrayIcon || reason != QSystemTrayIcon::Trigger") < body.index("this->isVisible()")
 print("Tray activation reason policy: PASS")
