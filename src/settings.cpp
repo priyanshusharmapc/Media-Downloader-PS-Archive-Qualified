@@ -25,6 +25,7 @@
 #include "themes.h"
 #include "directoryEntries.h"
 
+#include <cmath>
 #include <QDir>
 #include <QFile>
 
@@ -1071,7 +1072,7 @@ double settings::highDpiScalingFactorValue()
 	// Zero/negative persisted values are invalid scale factors. Reset is an
 	// explicit UI action that stores 1.0, so invalid values clamp to the
 	// supported minimum instead of masquerading as a reset.
-	return m < minimumScaleFactor ? minimumScaleFactor : m ;
+	return !std::isfinite( m ) || m < minimumScaleFactor ? minimumScaleFactor : m ;
 }
 
 double settings::highDpiScalingFactorInterval()
