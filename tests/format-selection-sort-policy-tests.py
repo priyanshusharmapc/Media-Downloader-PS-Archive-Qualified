@@ -8,9 +8,14 @@ assert "#include <QSignalBlocker>" in s
 start=s.index("void arrangeTable( bool ascending,int column )")
 end=s.index("template< typename Rows >",start)
 body=s[start:end]
-assert "QStringList selectedIds" in body
-assert "this->isSelected( row )" in body
+assert "struct sortableItem" in body
+assert "bool wasSelected" in body
+assert "this->isSelected( static_cast< int >( row ) )" in body
 assert "QSignalBlocker blocker( m_table )" in body
-assert "selectedIds.contains( m_table.item( row,0 )->text() )" in body
+assert "if( item.wasSelected )" in body
+assert "selectedIds.contains" not in body
 assert "setSelected( true )" in body
 print("Format selection preservation policy: PASS")
+
+assert "std::sort( rows.begin(),rows.end()" in body
+assert "comparer( a.stuff,b.stuff )" in body
