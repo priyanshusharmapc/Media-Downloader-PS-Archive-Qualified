@@ -13,6 +13,8 @@ end=source.index("void yt_dlp::yt_dlplFilter::setFileName",start)
 body=source[start:end]
 assert 'if( e.contains( " Merging formats into \\"" ) )' in body
 assert "m_mergeSeen" not in body
+assert "closingQuote <= 0" in body
+assert "m.trimmed().isEmpty()" in body
 assert "this->setFileName( m )" in body
 setbody=source[end:source.index("\n}",end)+2]
 assert "if( it == fn )" in setbody
