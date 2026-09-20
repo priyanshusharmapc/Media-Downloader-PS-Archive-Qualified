@@ -218,6 +218,7 @@ private:
 		tableMiniWidget< int,2 >& m_table ;
 		QWidget& m_ui ;
 		QJsonArray m_array ;
+		QByteArray m_baseline ;
 		bool m_loaded = false ;
 		bool m_storeValid = true ;
 	};
