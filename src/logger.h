@@ -325,11 +325,17 @@ public:
 		}
 		const QByteArray& lastText() const
 		{
+			static const QByteArray empty ;
+			if( m_processOutputs.empty() || m_processOutputs.rbegin()->entries().empty() ){
+				return empty ;
+			}
 			return m_processOutputs.rbegin()->entries().rbegin()->text() ;
 		}
 		bool lastLineIsProgressLine() const
 		{
-			return m_processOutputs.rbegin()->entries().rbegin()->progressLine() ;
+			return !m_processOutputs.empty() &&
+			       !m_processOutputs.rbegin()->entries().empty() &&
+			       m_processOutputs.rbegin()->entries().rbegin()->progressLine() ;
 		}
 		QByteArray debugOutPut() const ;
 		QByteArray join( const QByteArray& joiner ) const ;
@@ -364,29 +370,31 @@ public:
 			}
 			void replaceLast( const QByteArray& e )
 			{
-				m_entries->rbegin()->replace( e ) ;
+				if( m_entries && !m_entries->empty() )m_entries->rbegin()->replace( e ) ;
 			}
 			void removeLast()
 			{
-				m_entries->pop_back() ;
+				if( m_entries && !m_entries->empty() )m_entries->pop_back() ;
 			}
 			QByteArray takeLast()
 			{
+				if( !m_entries || m_entries->empty() )return {} ;
 				auto m = this->lastText() ;
 				this->removeLast() ;
 				return m ;
 			}
 			size_t size() const
 			{
-				return m_entries->size() ;
+				return m_entries ? m_entries->size() : 0 ;
 			}
 			operator bool() const
 			{
-				return m_entries != nullptr ;
+				return m_entries != nullptr && !m_entries->empty() ;
 			}
 			const QByteArray& lastText() const
 			{
-				return m_entries->rbegin()->text() ;
+				static const QByteArray empty ;
+				return m_entries && !m_entries->empty() ? m_entries->rbegin()->text() : empty ;
 			}
 		private:
 			std::vector< Logger::Data::processOutput::outputEntry > * m_entries = nullptr ;
@@ -417,7 +425,7 @@ public:
 		}
 		bool doneDownloading() const
 		{
-			return m_processOutputs.rbegin()->doneDownloading() ;
+			return !m_processOutputs.empty() && m_processOutputs.rbegin()->doneDownloading() ;
 		}
 		template< typename Filter >
 		void replaceOrAdd( const Filter& filter )
