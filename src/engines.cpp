@@ -764,6 +764,27 @@ const QProcessEnvironment& engines::processEnvironment() const
 	return m_processEnvironment ;
 }
 
+static bool safePluginIdentity( const QString& name,const QString& definitionFile )
+{
+	if( name.isEmpty() || name == "." || name == ".." ||
+	    name.contains( '/' ) || name.contains( '\\' ) ||
+	    name.contains( ':' ) || QDir::isAbsolutePath( name ) ){
+		return false ;
+	}
+
+	for( const auto ch : name ){
+		if( ch.unicode() < 0x20 || ch.unicode() == 0x7f ){
+			return false ;
+		}
+	}
+
+	const QFileInfo defInfo( definitionFile ) ;
+	return !definitionFile.isEmpty() &&
+	       !QDir::isAbsolutePath( definitionFile ) &&
+	       defInfo.fileName() == definitionFile &&
+	       definitionFile == name + ".json" ;
+}
+
 QString engines::addEngine( const QByteArray& data,const QString& extensionFileName,int id )
 {
 	util::Json json( data ) ;
@@ -772,7 +793,10 @@ QString engines::addEngine( const QByteArray& data,const QString& extensionFileN
 		auto object = json.toObject() ;
 		auto name = object.value( "Name" ).toString() ;
 
-		if( !name.isEmpty() ){
+		if( safePluginIdentity( name,extensionFileName ) ){
+			// The logical plugin name is also the persisted definition identity.
+			// Reject traversal, alternate filenames and special path syntax before
+			// either the definition or payload can become removal authority.
 			// Validate exactly the engine object that would be loaded after
 			// publication. Derived yt-dlp definitions are overlays on top of
 			// yt-dlp.json, so compose those in memory before touching disk.
@@ -875,9 +899,14 @@ void engines::removeEngine( const QString& ee,int id )
 
 			if( folder.exists() && folder.isDir() ){
 
-				const auto removeError = utility::removeFolder( folder.filePath() ) ;
-				if( !removeError.isEmpty() ){
-					m_logger.add( QObject::tr( "Plugin payload cleanup failed: %1: %2" ).arg( folder.filePath(),removeError ),id ) ;
+				QString treeError ;
+				if( !utility::updaterTreeIsSafe( folder.filePath(),&treeError ) ){
+					m_logger.add( QObject::tr( "Plugin payload cleanup refused: %1: %2" ).arg( folder.filePath(),treeError ),id ) ;
+				}else{
+					const auto removeError = utility::removeFolder( folder.filePath() ) ;
+					if( !removeError.isEmpty() ){
+						m_logger.add( QObject::tr( "Plugin payload cleanup failed: %1: %2" ).arg( folder.filePath(),removeError ),id ) ;
+					}
 				}
 			}
 		}else if( engines::executableOwnedByBinRoot( exe,binPath ) ){
