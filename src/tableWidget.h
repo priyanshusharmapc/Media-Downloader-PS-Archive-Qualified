@@ -802,11 +802,13 @@ private:
 
 					bool aNumber = false ;
 					bool bNumber = false ;
-					const auto an = a.toDouble( &aNumber ) ;
-					const auto bn = b.toDouble( &bNumber ) ;
+					const auto an = a.toLongLong( &aNumber ) ;
+					const auto bn = b.toLongLong( &bNumber ) ;
 
 					if( aNumber && bNumber ){
-						return m_ascending ? an < bn : an > bn ;
+						if( an != bn ) return m_ascending ? an < bn : an > bn ;
+						const auto tie = QString::compare( a,b,Qt::CaseSensitive ) ;
+						return m_ascending ? tie < 0 : tie > 0 ;
 					}
 
 					const auto order = QString::compare( a,b,Qt::CaseInsensitive ) ;
