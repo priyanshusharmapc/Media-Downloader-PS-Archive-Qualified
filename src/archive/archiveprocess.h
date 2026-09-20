@@ -95,11 +95,13 @@ inline bool terminateProcessGroup(ContainedProcess& process,qint64 processId,QSt
 #endif
 
 inline ProcessResult runContainedProcess(const QString& program,const QStringList& args,const QString& cwd,int timeoutMs,
-                                         const std::atomic_bool* cancelRequested=nullptr)
+                                         const std::atomic_bool* cancelRequested=nullptr,
+                                         const QProcessEnvironment* environment=nullptr)
 {
     ProcessResult r;
     if(program.isEmpty()){r.error="Required executable was not found";return r;}
     ContainedProcess process;if(!cwd.isEmpty())process.setWorkingDirectory(cwd);
+    if(environment)process.setProcessEnvironment(*environment);
     process.setProcessChannelMode(QProcess::SeparateChannels);process.start(program,args);
     if(!process.waitForStarted(10000)){r.error=process.errorString();return r;}
     const auto childId=process.processId();
