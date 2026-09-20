@@ -11,7 +11,8 @@ source=(root/"src/engines/deno.cpp").read_text(encoding="utf-8")
 shipped=json.loads((root/"extensions/deno.json").read_text(encoding="utf-8"))
 
 assert shipped["VersionArgument"] == "--version"
-assert 'cmd.start( m,{ "--version" } )' in source
-assert 'mainObj.insert( "VersionArgument","--version" )' in source
+assert 'const QString denoVersionArgument = QStringLiteral( "--version" )' in source
+assert 'cmd.start( m,{ denoVersionArgument } )' in source
+assert 'mainObj.insert( "VersionArgument",denoVersionArgument )' in source
 assert '"-version"' not in source
 print("Deno version-argument parity policy: PASS")
