@@ -194,12 +194,36 @@ namespace utils
 				QObject::connect( &m_localServer,&QLocalServer::newConnection,[ this ](){
 
 					auto s = m_localServer.nextPendingConnection() ;
+					auto data = std::make_shared< QByteArray >() ;
+					auto overflow = std::make_shared< bool >( false ) ;
+					const qint64 maxEventBytes = 1024 * 1024 ;
 
-					QObject::connect( s,&QLocalSocket::readyRead,[ this,s ]{
+					// QLocalSocket is a byte stream. readyRead is not a message
+					// boundary, so accumulate every fragment and deliver the event
+					// only after the secondary instance closes its write side. Bound
+					// the local IPC payload so a stuck/rogue peer cannot grow memory
+					// indefinitely while keeping the connection open.
+					QObject::connect( s,&QLocalSocket::readyRead,[ s,data,overflow,maxEventBytes ](){
 
-						if( m_mainApp ){
-							m_mainApp->hasEvent( s->readAll() ) ;
+						const auto chunk = s->readAll() ;
+						if( data->size() + chunk.size() > maxEventBytes ){
+							*overflow = true ;
+							s->abort() ;
+							return ;
 						}
+						data->append( chunk ) ;
+					} ) ;
+
+					QObject::connect( s,&QLocalSocket::disconnected,[ this,s,data,overflow,maxEventBytes ](){
+
+						const auto tail = s->readAll() ;
+						if( data->size() + tail.size() > maxEventBytes )*overflow = true ;
+						else data->append( tail ) ;
+
+						if( !*overflow && !data->isEmpty() && m_mainApp ){
+							m_mainApp->hasEvent( *data ) ;
+						}
+
 						s->deleteLater() ;
 					} ) ;
 				} ) ;
