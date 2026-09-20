@@ -47,6 +47,9 @@ MainWindow::MainWindow( QApplication& app,
 	m_showTrayIcon( s.showTrayIcon() ),
 	m_shortcut( this )
 {
+	// Tray residency is explicit so close-to-tray cannot trigger implicit Qt shutdown.
+	m_qApp.setQuitOnLastWindowClosed( !m_showTrayIcon ) ;
+
 	m_logger.setContext( m_tabManager.ctx() ) ;
 
 	MainWindow::setUpSignals( this ) ;
@@ -147,6 +150,7 @@ MainWindow::MainWindow( QApplication& app,
 void MainWindow::showTrayIcon( bool e )
 {
 	m_showTrayIcon = e ;
+	m_qApp.setQuitOnLastWindowClosed( !e ) ;
 
 	if( e ){
 
@@ -283,10 +287,11 @@ bool MainWindow::setUpSignal( int sig )
 	return std::signal( sig,MainWindow::signalHandler ) != SIG_ERR ;
 }
 
-void MainWindow::closeEvent( QCloseEvent * )
+void MainWindow::closeEvent( QCloseEvent * event )
 {
 	if( m_showTrayIcon ){
 
+		event->ignore() ;
 		this->hide() ;
 	}else{
 		this->quitApp() ;
