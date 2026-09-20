@@ -1871,7 +1871,7 @@ void batchdownloader::parseDataFromObject( Items& items,const QJsonObject& obj,c
 		} ;
 
 		auto a = "url" ;
-		auto b = "uploadDate" ;
+		auto b = "upload_date" ;
 
 		this->dataFromFile( items,{ array,a,b },function ) ;
 	}else{
@@ -2296,6 +2296,12 @@ void batchdownloader::dataFromFile( Items& items,
 
 	auto title    = obj.value( "title" ).toString() ;
 	auto date     = obj.value( dFileopts.uploadDate ).toString() ;
+
+	// Application-created lists historically used uploadDate while current
+	// export uses the canonical yt-dlp-compatible upload_date key.
+	if( date.isEmpty() && dFileopts.uploadDate == "upload_date" ){
+		date = obj.value( "uploadDate" ).toString() ;
+	}
 
 	auto engineName      = obj.value( "engineName" ).toString() ;
 	auto downloadOpts    = obj.value( "downloadOptions" ).toString() ;
