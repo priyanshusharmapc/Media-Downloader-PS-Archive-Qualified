@@ -12,6 +12,7 @@
 
 #include <functional>
 #include <memory>
+#include <atomic>
 
 namespace archive
 {
@@ -22,6 +23,10 @@ struct RuntimeConfig
     // Qualified/default execution is sealed to package-owned tools. System PATH
     // is available only to callers that explicitly opt into development mode.
     bool allowSystemTools = false;
+    // Optional operation-lifetime cancellation. ArchiveTab sets this only for
+    // application shutdown; the user-facing "Stop After Current" contract
+    // remains queue-level and does not tear down a healthy current item.
+    const std::atomic_bool* cancelRequested = nullptr;
 };
 
 struct Representation
