@@ -12,6 +12,7 @@ header=(root/"src/networkAccess.h").read_text(encoding="utf-8")
 assert "QString extractStagePath" in header
 extract=network[network.index("void networkAccess::extractMediaDownloader"):network.index("QNetworkRequest networkAccess::networkRequest")]
 assert '".mdps-app-update-extract-" + QUuid::createUuid().toString' in extract
+assert "attemptInfo.exists() || attemptInfo.isSymLink()" in extract
 assert "QDir().mkpath( m_md.extractStagePath )" in extract
 assert '"-C",m_md.extractStagePath' in extract
 assert '"-C",m_md.tmpPath' not in extract
