@@ -26,6 +26,8 @@
 #include <QFileDialog>
 #include <QClipboard>
 #include <QMetaObject>
+#include <QSaveFile>
+#include <QMessageBox>
 
 playlistdownloader::playlistdownloader( Context& ctx ) :
 	m_ctx( ctx ),
@@ -1616,6 +1618,8 @@ void playlistdownloader::subscription::add( const QString& uiName,const QString&
 		return ;
 	}
 
+	const auto previous = m_array ;
+
 	for( const auto& it : util::asConst( m_array ) ){
 
 		subscription::entry m( it )  ;
@@ -1632,19 +1636,35 @@ void playlistdownloader::subscription::add( const QString& uiName,const QString&
 
 	m_table.selectLast() ;
 
-	this->save() ;
+	if( !this->save() ){
+		m_array = previous ;
+		this->setVisible( true ) ;
+
+		QMessageBox::warning( &m_ui,
+				      QObject::tr( "Save Failed" ),
+				      QObject::tr( "The subscription change could not be saved. The previous file and visible subscription list were restored." ) ) ;
+	}
 }
 
 void playlistdownloader::subscription::remove( int s )
 {
-	if( !this->load() ){
+	if( !this->load() || s < 0 || s >= m_array.size() ){
 		return ;
 	}
+
+	const auto previous = m_array ;
 
 	m_array.removeAt( s ) ;
 	m_table.removeRow( s ) ;
 
-	this->save() ;
+	if( !this->save() ){
+		m_array = previous ;
+		this->setVisible( true ) ;
+
+		QMessageBox::warning( &m_ui,
+				      QObject::tr( "Save Failed" ),
+				      QObject::tr( "The subscription change could not be saved. The previous file and visible subscription list were restored." ) ) ;
+	}
 }
 
 void playlistdownloader::subscription::setVisible( bool e )
@@ -1727,9 +1747,10 @@ bool playlistdownloader::subscription::load()
 
 utility::vector< playlistdownloader::subscription::entry > playlistdownloader::subscription::entries()
 {
-	this->load() ;
-
 	utility::vector< subscription::entry > e ;
+	if( !this->load() ){
+		return e ;
+	}
 
 	for( int i = m_array.size() - 1 ; i >= 0 ; i-- ){
 
@@ -1739,18 +1760,24 @@ utility::vector< playlistdownloader::subscription::entry > playlistdownloader::s
 	return e ;
 }
 
-void playlistdownloader::subscription::save()
+bool playlistdownloader::subscription::save()
 {
 	if( !m_storeValid ){
-		return ;
+		return false ;
 	}
 
-	QFile f( m_path ) ;
-
-	if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-		f.write( QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ) ;
+	QSaveFile f( m_path ) ;
+	if( !f.open( QIODevice::WriteOnly ) ){
+		return false ;
 	}
+
+	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
+	if( f.write( data ) != data.size() ){
+		f.cancelWriting() ;
+		return false ;
+	}
+
+	return f.commit() ;
 }
 
 void playlistdownloader::banner::updateProgress( const QString& progress )
