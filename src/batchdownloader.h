@@ -718,7 +718,7 @@ private:
 	{
 	public:
 		networkCtx( const utility::MediaEntry& e,int index ) :
-			m_media( e ),m_index( index )
+			m_media( e ),m_index( index ),m_identity( e.url() )
 		{
 		}
 		networkCtx move()
@@ -733,9 +733,14 @@ private:
 		{
 			return std::move( m_media ) ;
 		}
+		const QString& identity() const
+		{
+			return m_identity ;
+		}
 	private:
 		mutable utility::MediaEntry m_media ;
 		int m_index ;
+		QString m_identity ;
 	} ;
 
 	const Context& m_ctx ;

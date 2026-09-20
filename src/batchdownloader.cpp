@@ -975,9 +975,13 @@ void batchdownloader::getMetaData( const engines::engine& eng,const Items::entry
 		m_table.replace( e.move(),row ) ;
 	}
 
-	util::Timer( 1000,[ this,row,uiText ]( int counter ){
+	util::Timer( 1000,[ this,url,uiText ]( int counter ){
 
 		using ff = reportFinished::finishedStatus ;
+		const auto row = m_table.rowWithUrl( url ) ;
+		if( row < 0 ){
+			return true ;
+		}
 
 		if( ff::running( m_table.runningState( row ) ) ){
 
@@ -2090,6 +2094,11 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 		}
 		void done( engines::ProcessExitState,const std::vector< QByteArray >& )
 		{
+			const auto row = m_parent.m_table.rowWithUrl( m_url ) ;
+			if( row < 0 ){
+				return ;
+			}
+
 			auto enableAll = false ;
 
 			auto data = m_logger.data() ;
@@ -2110,9 +2119,9 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 					m.setUrl( m_url ) ;
 				}
 
-				m_parent.addItem( this->index(),enableAll,m.move() ) ;
+				m_parent.addItem( row,enableAll,m.move() ) ;
 			}else{
-				m_parent.addItem( this->index(),enableAll,m_url ) ;
+				m_parent.addItem( row,enableAll,m_url ) ;
 			}
 		}
 		void disableAll()
@@ -2759,6 +2768,11 @@ void batchdownloader::addItemUi( int index,bool enableAll,const utility::MediaEn
 
 void batchdownloader::networkData( utility::networkReply m )
 {
+	const auto row = m_table.rowWithUrl( m.identity() ) ;
+	if( row < 0 ){
+		return ;
+	}
+
 	QPixmap pixmap ;
 
 	if( m.success() && pixmap.loadFromData( m.data() ) ){
@@ -2770,14 +2784,14 @@ void batchdownloader::networkData( utility::networkReply m )
 
 		auto p = pixmap.scaled( w,h ) ;
 
-		this->addItemUi( p,m.index(),m_table,m_ui,m.media() ) ;
+		this->addItemUi( p,row,m_table,m_ui,m.media() ) ;
 	}else{
 		auto& p = m_defaultVideoThumbnail ;
 
-		this->addItemUi( p,m.index(),m_table,m_ui,m.media() ) ;
+		this->addItemUi( p,row,m_table,m_ui,m.media() ) ;
 	}
 
-	this->setDownloadingOptions( m.index(),m_table ) ;
+	this->setDownloadingOptions( row,m_table ) ;
 
 	if( m_table.noneAreRunning() ){
 
@@ -2813,7 +2827,7 @@ void batchdownloader::addItem( int index,bool enableAll,const utility::MediaEntr
 
 void batchdownloader::networkResult( const networkCtx& d,const utils::network::reply& reply )
 {
-	emit this->networkDataSignal( { m_ctx,reply,d.index(),d.media() } ) ;
+	emit this->networkDataSignal( { m_ctx,reply,d.index(),d.media(),d.identity() } ) ;
 }
 
 void batchdownloader::addToList( const QString& u,const batchdownloader::downloadOpts& opts )

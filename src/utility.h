@@ -2158,6 +2158,17 @@ namespace utility
 		{
 			this->getData( ctx,reply ) ;
 		}
+		networkReply( const Context& ctx,
+			      const utils::network::reply& reply,
+			      int id,
+			      utility::MediaEntry m,
+			      QString identity ) :
+			m_id( id ),
+			m_mediaEntry( m.move() ),
+			m_identity( std::move( identity ) )
+		{
+			this->getData( ctx,reply ) ;
+		}
 		const QByteArray& data() const
 		{
 			return m_data ;
@@ -2174,11 +2185,16 @@ namespace utility
 		{
 			return m_mediaEntry ;
 		}
+		const QString& identity() const
+		{
+			return m_identity ;
+		}
 	private:
 		void getData( const Context& ctx,const utils::network::reply& ) ;
 		QByteArray m_data ;
 		int m_id ;
 		utility::MediaEntry m_mediaEntry ;
+		QString m_identity ;
 	};
 
 	template< typename FinishedState >
