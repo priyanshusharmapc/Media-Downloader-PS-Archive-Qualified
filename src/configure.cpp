@@ -443,7 +443,13 @@ configure::configure( const Context& ctx ) :
 		}
 	} ) ;
 
-	m_tablePresetOptions.connect( &QTableWidget::customContextMenuRequested,[ this ]( QPoint ){
+	m_tablePresetOptions.connect( &QTableWidget::customContextMenuRequested,[ this ]( QPoint point ){
+
+		// A context-menu request does not have to change QTableWidget's current
+		// item. Make the hit-tested cell authoritative before Copy/Edit actions.
+		if( auto * target = m_tablePresetOptions.get().itemAt( point ) ){
+			m_tablePresetOptions.get().setCurrentItem( target ) ;
+		}
 
 		QMenu m ;
 

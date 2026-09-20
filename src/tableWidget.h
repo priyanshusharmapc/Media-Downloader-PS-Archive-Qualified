@@ -498,10 +498,9 @@ public:
 	}
 	void selectRow( QTableWidgetItem * current,QTableWidgetItem * previous,int s )
 	{
-		if( previous ){
-
-			m_columnClicked = previous->column() ;
-		}
+		// Clipboard/context actions must follow the cell that is current now,
+		// not the cell that was current before the selection changed.
+		m_columnClicked = current ? current->column() : -1 ;
 		tableWidget::selectRow( current,previous,s ) ;
 	}
 	bool isSelected( int row ) const
