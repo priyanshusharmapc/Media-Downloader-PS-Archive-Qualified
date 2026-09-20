@@ -3275,10 +3275,14 @@ void utility::impl::qJsonArrJoin( QJsonArray& )
 
 void utility::archiveData::addToHistory( QJsonObject obj )
 {
+	// Resolve the only Context-dependent value before detaching. The worker
+	// then owns immutable path/JSON state and cannot outlive Context/engines.
+	const auto historyPath = m_ctx.Engines().engineDirPaths().downloadHistoryFilePath() ;
+
 	class meaw
 	{
 	public:
-		meaw( const Context& ctx,QJsonObject obj ) : m_ctx( ctx ),m_obj( std::move( obj ) )
+		meaw( QString path,QJsonObject obj ) : m_path( std::move( path ) ),m_obj( std::move( obj ) )
 		{
 		}
 		void bg()
@@ -3305,10 +3309,7 @@ void utility::archiveData::addToHistory( QJsonObject obj )
 				return false ;
 			}
 
-			// History is append-only JSON objects. Convert the object stream into
-			// a temporary array and compare only the semantic Url field. A raw
-			// substring match can confuse URL prefixes or text in unrelated fields.
-			data.replace( "}\n{","},{") ;
+			data.replace( "}\n{","},{" ) ;
 			data.prepend( '[' ) ;
 			data.append( ']' ) ;
 
@@ -3320,39 +3321,30 @@ void utility::archiveData::addToHistory( QJsonObject obj )
 			}
 
 			for( const auto& value : doc.array() ){
-
 				if( value.toObject().value( "Url" ).toString() == url ){
 					return true ;
 				}
 			}
-
 			return false ;
 		}
 		void updateHistory()
 		{
-			const auto& e = m_ctx.Engines().engineDirPaths().downloadHistoryFilePath() ;
+			const auto url = m_obj.value( "Url" ).toString() ;
 
-			auto url = m_obj.value( "Url" ).toString() ;
-
-			if( !this->historyFound( e,url ) ){
-
-				QFile file( e ) ;
+			if( !this->historyFound( m_path,url ) ){
+				QFile file( m_path ) ;
 
 				if( file.open( QIODevice::WriteOnly | QIODevice::Append ) ){
-
-					auto s = QJsonDocument::JsonFormat::Indented ;
-
-					auto m = QJsonDocument( m_obj ).toJson( s ) ;
-
-					file.write( m ) ;
+					const auto format = QJsonDocument::JsonFormat::Indented ;
+					file.write( QJsonDocument( m_obj ).toJson( format ) ) ;
 				}
 			}
 		}
-		const Context& m_ctx ;
+		QString m_path ;
 		QJsonObject m_obj ;
 	} ;
 
-	utils::qthread::run( meaw( m_ctx,std::move( obj ) ) ) ;
+	utils::qthread::run( meaw( historyPath,std::move( obj ) ) ) ;
 }
 
 QByteArray utility::archiveData::logHistoryData( const Context& ctx )
