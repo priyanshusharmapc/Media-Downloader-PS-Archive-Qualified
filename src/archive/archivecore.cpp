@@ -1002,7 +1002,59 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
     const auto scanTime=snapshot.scannedAt.isEmpty()?nowIso():snapshot.scannedAt;
     QSet<int> matchedPrior;
 
-    for(auto p:snapshot.items){
+    const auto normalizePlaceholderField=[](QString value){
+        return value.trimmed().normalized(QString::NormalizationForm_KC).toCaseFolded();
+    };
+    const auto unavailablePlaceholderTitle=[&](const QString& title){
+        const auto normalized=normalizePlaceholderField(title);
+        return normalized=="[private video]"||normalized=="private video"||
+               normalized=="[deleted video]"||normalized=="deleted video"||
+               normalized=="[unavailable item]"||normalized=="unavailable item"||
+               normalized=="[unavailable video]"||normalized=="unavailable video";
+    };
+    const auto resolvedNeighbor=[](const QVector<PlaylistItem>& items,int index,int step){
+        for(int i=index+step;i>=0&&i<items.size();i+=step){
+            if(items[i].membership=="removed")continue;
+            if(!items[i].providerId.isEmpty())return items[i].providerId;
+        }
+        return QString();
+    };
+    const auto conservativePlaceholderDriftCandidate=[&](const PlaylistItem& observed,int observedIndex){
+        QVector<int> candidates;
+        const auto observedTitle=normalizePlaceholderField(observed.title);
+        const auto observedUrl=normalizePlaceholderField(observed.url);
+        for(int i=0;i<prior.size();++i){
+            const auto& candidate=prior[i];
+            if(matchedPrior.contains(i)||candidate.membership=="removed"||!candidate.providerId.isEmpty()||
+               !candidate.itemKey.startsWith("placeholder:"+source.key+":"))continue;
+
+            const auto candidateTitle=normalizePlaceholderField(candidate.title);
+            const auto candidateUrl=normalizePlaceholderField(candidate.url);
+            const bool stableUrl=!observedUrl.isEmpty()&&!candidateUrl.isEmpty()&&observedUrl==candidateUrl;
+            const bool stableTitle=!observedTitle.isEmpty()&&!candidateTitle.isEmpty()&&observedTitle==candidateTitle;
+            const bool stableUnavailableClass=unavailablePlaceholderTitle(observed.title)&&unavailablePlaceholderTitle(candidate.title);
+            if(!stableUrl&&!stableTitle&&!stableUnavailableClass)continue;
+
+            const bool stablePosition=observed.position>=0&&
+                (candidate.position==observed.position||candidate.lastPosition==observed.position);
+            const auto priorBefore=resolvedNeighbor(prior,i,-1);
+            const auto priorAfter=resolvedNeighbor(prior,i,1);
+            const auto currentBefore=resolvedNeighbor(snapshot.items,observedIndex,-1);
+            const auto currentAfter=resolvedNeighbor(snapshot.items,observedIndex,1);
+            const bool stableNeighbors=!priorBefore.isEmpty()&&!priorAfter.isEmpty()&&
+                priorBefore==currentBefore&&priorAfter==currentAfter;
+
+            // A stable URL is strong provider evidence. Title-only or sentinel
+            // continuity additionally requires position or two-sided resolved
+            // neighbors, so a new unrelated unresolved item is not silently
+            // merged merely because it has a generic placeholder title.
+            if(stableUrl||stablePosition||stableNeighbors)candidates.append(i);
+        }
+        return candidates.size()==1?candidates.front():-1;
+    };
+
+    for(int snapshotIndex=0;snapshotIndex<snapshot.items.size();++snapshotIndex){
+        auto p=snapshot.items[snapshotIndex];
         if(!p.providerId.isEmpty()&&!detail::videoIdSafe(p.providerId)){summary.error="Invalid provider identity";return summary;}
         const bool unresolved=p.providerId.isEmpty();
         const auto expectedKey=unresolved?placeholderBaseKey(source.key,p.title,p.url):canonicalKey(p.providerId,source.key,p.position,p.title);
@@ -1014,6 +1066,15 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             const auto candidates=priorPlaceholders.value(fingerprint);
             int priorIndexForPlaceholder=-1;
             for(const auto candidate:candidates)if(!matchedPrior.contains(candidate)){priorIndexForPlaceholder=candidate;break;}
+
+            // Descriptive metadata on unavailable/private placeholders is not
+            // durable identity. If the exact fingerprint drifted, reuse the
+            // historical occurrence only when one conservative candidate is
+            // supported by stable URL, position, or two-sided resolved-neighbor
+            // evidence. Ambiguity deliberately falls through to a fresh ID.
+            if(priorIndexForPlaceholder<0)
+                priorIndexForPlaceholder=conservativePlaceholderDriftCandidate(p,snapshotIndex);
+
             if(priorIndexForPlaceholder>=0){
                 matchedPrior.insert(priorIndexForPlaceholder);
                 p.itemKey=prior[priorIndexForPlaceholder].itemKey;

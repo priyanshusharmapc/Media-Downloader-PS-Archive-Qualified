@@ -146,6 +146,70 @@ int main(int argc,char** argv){QCoreApplication app(argc,argv);if(argc!=2)return
    require(f.store.reconcile(source,reordered).committed,"reordered unresolved reconciliation failed");const auto after=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty()&&after.size()==2,"reordered unresolved occurrences missing");
    QSet<QString> beforeKeys,afterKeys;for(const auto& item:before)beforeKeys.insert(item.itemKey);for(const auto& item:after)afterKeys.insert(item.itemKey);require(beforeKeys==afterKeys,"unresolved reorder changed canonical identities");
   }
+  else if(name=="placeholder-metadata-drift"){
+   const auto resolved=[](const QString& id,int position){
+    PlaylistItem item;item.providerId=id;item.itemKey="youtube:"+id;item.title="Resolved "+id;item.url="https://www.youtube.com/watch?v="+id;item.position=position;item.availability="public";return item;
+   };
+
+   // Provider placeholder labels and URLs may drift while the same historical
+   // occurrence remains bracketed by stable resolved neighbors.
+   Fixture f;Source source;source.key="PLDRIFT";source.url="https://www.youtube.com/playlist?list=PLDRIFT";source.title="Drift";
+   Snapshot first;first.sourceKey=source.key;first.complete=true;first.scannedAt="2026-01-01T00:00:00.000Z";
+   first.items.append(resolved("AAA111bbb22",1));
+   PlaylistItem old;old.title="[Private video]";old.url="https://example.invalid/private-slot";old.position=2;old.itemKey=canonicalKey({},source.key,2,old.title);old.availability="private";first.items.append(old);
+   first.items.append(resolved("BBB222ccc33",3));
+   require(f.store.reconcile(source,first).committed,"initial placeholder drift setup failed");
+
+   QString e;const auto before=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty(),"load drift baseline");
+   PlaylistItem priorPlaceholder;bool foundPrior=false;
+   for(const auto& row:before)if(row.providerId.isEmpty()&&row.position==2){priorPlaceholder=row;foundPrior=true;break;}
+   require(foundPrior,"baseline placeholder missing");
+
+   Snapshot second;second.sourceKey=source.key;second.complete=true;second.scannedAt="2026-01-02T00:00:00.000Z";
+   second.items.append(resolved("AAA111bbb22",1));
+   PlaylistItem drifted;drifted.title="[Deleted video]";drifted.url="";drifted.position=2;drifted.itemKey=canonicalKey({},source.key,2,drifted.title);drifted.availability="deleted";second.items.append(drifted);
+   second.items.append(resolved("BBB222ccc33",3));
+   const auto driftSummary=f.store.reconcile(source,second);require(driftSummary.committed,"metadata-drift reconciliation failed: "+driftSummary.error);
+
+   const auto after=f.store.loadPlaylistItems(source.key,&e);require(e.isEmpty(),"load drift result");
+   PlaylistItem continued;bool foundContinued=false;
+   for(const auto& row:after)if(row.providerId.isEmpty()&&row.membership=="active"&&row.position==2){continued=row;foundContinued=true;break;}
+   require(foundContinued,"drifted placeholder missing after reconcile");
+   require(continued.itemKey==priorPlaceholder.itemKey,"metadata drift split canonical placeholder identity");
+   require(continued.entryKey==priorPlaceholder.entryKey,"metadata drift split occurrence identity");
+   require(continued.firstSeen==priorPlaceholder.firstSeen,"metadata drift reset first-seen evidence");
+   require(continued.title=="[Deleted video]","drifted observation metadata was not refreshed");
+
+   // Two plausible historical placeholders without position/neighbor evidence
+   // are ambiguous and must not be guessed.
+   Fixture ambiguous;Source as;as.key="PLDRIFTAMB";as.url="https://www.youtube.com/playlist?list=PLDRIFTAMB";as.title="Ambiguous drift";
+   Snapshot a1;a1.sourceKey=as.key;a1.complete=true;
+   for(int position:QList<int>{1,2}){PlaylistItem p;p.title="[Private video]";p.url="";p.position=position;p.itemKey=canonicalKey({},as.key,position,p.title);p.availability="private";a1.items.append(p);}
+   require(ambiguous.store.reconcile(as,a1).committed,"ambiguous drift setup failed");
+   const auto ambiguousBefore=ambiguous.store.loadPlaylistItems(as.key,&e);require(e.isEmpty()&&ambiguousBefore.size()==2,"ambiguous baseline missing");
+   QSet<QString> oldEntries;for(const auto& row:ambiguousBefore)oldEntries.insert(row.entryKey);
+   Snapshot a2;a2.sourceKey=as.key;a2.complete=true;PlaylistItem ap;ap.title="[Deleted video]";ap.url="";ap.position=99;ap.itemKey=canonicalKey({},as.key,99,ap.title);ap.availability="deleted";a2.items.append(ap);
+   require(ambiguous.store.reconcile(as,a2).committed,"ambiguous drift reconcile failed");
+   const auto ambiguousAfter=ambiguous.store.loadPlaylistItems(as.key,&e);require(e.isEmpty(),"load ambiguous result");
+   bool sawFresh=false;for(const auto& row:ambiguousAfter)if(row.membership=="active"&&row.position==99){sawFresh=true;require(!oldEntries.contains(row.entryKey),"ambiguous drift guessed an old occurrence");}
+   require(sawFresh,"ambiguous drift did not retain fresh observation");
+
+   // Same position and neighbors are not enough when the new unresolved item
+   // has unrelated descriptive evidence.
+   Fixture replacement;Source rs;rs.key="PLDRIFTNEW";rs.url="https://www.youtube.com/playlist?list=PLDRIFTNEW";rs.title="Replacement";
+   Snapshot r1;r1.sourceKey=rs.key;r1.complete=true;r1.items.append(resolved("CCC333ddd44",1));
+   PlaylistItem rp;rp.title="Old unresolved";rp.url="https://example.invalid/old";rp.position=2;rp.itemKey=canonicalKey({},rs.key,2,rp.title);rp.availability="unavailable";r1.items.append(rp);
+   r1.items.append(resolved("DDD444eee55",3));require(replacement.store.reconcile(rs,r1).committed,"replacement setup failed");
+   const auto replacementBefore=replacement.store.loadPlaylistItems(rs.key,&e);require(e.isEmpty(),"load replacement baseline");
+   QString oldEntry;for(const auto& row:replacementBefore)if(row.providerId.isEmpty())oldEntry=row.entryKey;require(!oldEntry.isEmpty(),"replacement old placeholder missing");
+   Snapshot r2;r2.sourceKey=rs.key;r2.complete=true;r2.items.append(resolved("CCC333ddd44",1));
+   PlaylistItem np;np.title="Completely new unresolved";np.url="https://example.invalid/new";np.position=2;np.itemKey=canonicalKey({},rs.key,2,np.title);np.availability="unavailable";r2.items.append(np);
+   r2.items.append(resolved("DDD444eee55",3));require(replacement.store.reconcile(rs,r2).committed,"replacement reconcile failed");
+   const auto replacementAfter=replacement.store.loadPlaylistItems(rs.key,&e);require(e.isEmpty(),"load replacement result");
+   bool sawReplacement=false;for(const auto& row:replacementAfter)if(row.membership=="active"&&row.position==2&&row.providerId.isEmpty()){sawReplacement=true;require(row.entryKey!=oldEntry,"unrelated replacement was merged into old placeholder");}
+   require(sawReplacement,"new unresolved replacement missing");
+  }
+
   else if(name=="placeholder-promotion"){
    Fixture f;Source source;source.key="PLPROMOTE";source.url="https://www.youtube.com/playlist?list=PLPROMOTE";source.title="Promotion";
    Snapshot first;first.sourceKey=source.key;first.complete=true;first.scannedAt="2026-01-01T00:00:00.000Z";
