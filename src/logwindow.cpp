@@ -96,7 +96,7 @@ void logWindow::Hide()
 	auto w = QString::number( r.width() ) ;
 	auto h = QString::number( r.height() ) ;
 
-	m_settings.setWindowDimensions( "LogWindow",x + "-" + y + "-" + w + "-" + h ) ;
+	m_settings.setWindowDimensions( "LogWindow",x + " " + y + " " + w + " " + h ) ;
 
 	this->hide() ;
 	this->clear() ;
@@ -125,18 +125,19 @@ void logWindow::Show( bool s )
 
 	if( !w.isEmpty() ){
 
-		auto m = util::split( w,'-',true ) ;
+		auto m = util::split( w,' ',true ) ;
 
 		if( m.size() == 4 ){
 
-			QRect r ;
+			bool xOk = false, yOk = false, widthOk = false, heightOk = false ;
+			const auto x = m.at( 0 ).toInt( &xOk ) ;
+			const auto y = m.at( 1 ).toInt( &yOk ) ;
+			const auto width = m.at( 2 ).toInt( &widthOk ) ;
+			const auto height = m.at( 3 ).toInt( &heightOk ) ;
 
-			r.setX( m.at( 0 ).toInt() ) ;
-			r.setY( m.at( 1 ).toInt() ) ;
-			r.setWidth( m.at( 2 ).toInt() ) ;
-			r.setHeight( m.at( 3 ).toInt() ) ;
-
-			this->window()->setGeometry( r ) ;
+			if( xOk && yOk && widthOk && heightOk && width > 0 && height > 0 ){
+				this->window()->setGeometry( x,y,width,height ) ;
+			}
 		}
 	}
 
