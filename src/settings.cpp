@@ -25,6 +25,7 @@
 #include "logger.h"
 #include "themes.h"
 #include "directoryEntries.h"
+#include "archive/archiveprocess.h"
 
 #include <cmath>
 #include <QDir>
@@ -37,6 +38,8 @@
 
 #include <cstring>
 #include <algorithm>
+#include <atomic>
+#include <memory>
 
 #include <QDesktopServices>
 
@@ -1805,26 +1808,46 @@ const settings::flatpakRuntimeOptions::VLC& settings::flatpakRuntimeOptions::get
 
 void settings::flatpakRuntimeOptions::VLC::checkAvailability() const
 {
-	if( this->checkAvailability( { "--host","vlc" } ) ){
-
-		this->checkAvailability( { "--host","flatpak","run","org.videolan.VLC" } ) ;
+	const auto context = QCoreApplication::instance() ;
+	if( context == nullptr ){
+		return ;
 	}
-}
 
-bool settings::flatpakRuntimeOptions::VLC::checkAvailability( const QStringList& e ) const
-{
-	QProcess exe ;
+	const auto cancel = std::make_shared< std::atomic_bool >( false ) ;
+	QObject::connect( context,&QObject::destroyed,[ cancel ](){ cancel->store( true ) ; } ) ;
 
-	exe.start( "flatpak-spawn",e + QStringList{ "--version" } ) ;
+	class probe
+	{
+	public:
+		probe( const VLC& owner,std::shared_ptr< std::atomic_bool > cancel ) :
+			m_owner( &owner ),m_cancel( std::move( cancel ) )
+		{
+		}
+		QStringList bg()
+		{
+			const QList< QStringList > candidates{
+				{ "--host","vlc" },
+				{ "--host","flatpak","run","org.videolan.VLC" }
+			} ;
+			for( const auto& candidate : candidates ){
+				const auto result = archive::detail::runContainedProcess(
+					"flatpak-spawn",candidate + QStringList{ "--version" },
+					QString(),5000,m_cancel.get() ) ;
+				if( result.ok ){
+					return candidate ;
+				}
+				if( m_cancel->load() )break ;
+			}
+			return {} ;
+		}
+		void fg( QStringList&& args )
+		{
+			m_owner->m_args = std::move( args ) ;
+		}
+	private:
+		const VLC * m_owner ;
+		std::shared_ptr< std::atomic_bool > m_cancel ;
+	} ;
 
-	exe.waitForFinished() ;
-
-	if( exe.exitCode() == 0 && exe.exitStatus() == QProcess::ExitStatus::NormalExit ){
-
-		m_args = e ;
-
-		return false ;
-	}else{
-		return true ;
-	}
+	utils::qthread::run( context,probe( *this,cancel ) ) ;
 }
