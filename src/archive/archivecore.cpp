@@ -659,10 +659,24 @@ bool validateStoreGraph(const Paths& paths,const QJsonArray& sources,const QJson
         const auto metaPath=paths.playlistFile(dir);
         const auto itemsPath=paths.playlistItemsFile(dir);
         const auto historyPath=paths.playlistHistoryFile(dir);
-        const bool managed=QFileInfo::exists(metaPath)||QFileInfo::exists(itemsPath)||QFileInfo::exists(historyPath);
+        const auto retiredPath=QDir(paths.sourceDir(dir)).filePath("retired.json");
+        const bool managed=QFileInfo::exists(metaPath)||QFileInfo::exists(itemsPath)||
+                           QFileInfo::exists(historyPath)||QFileInfo::exists(retiredPath);
         if(!managed)continue;
-        if(!sourceKeys.contains(dir))
-            return detail::reject(error,"Managed playlist directory has no registered source: "+dir);
+
+        const bool registered=sourceKeys.contains(dir);
+        if(!registered){
+            QByteArray retirementBytes;
+            if(!QFileInfo::exists(retiredPath)||!detail::readBytes(retiredPath,&retirementBytes,error))
+                return detail::reject(error,"Managed playlist directory has no registered source or retirement marker: "+dir);
+            QJsonParseError retirementParse;
+            const auto retirement=QJsonDocument::fromJson(retirementBytes,&retirementParse);
+            if(retirementParse.error!=QJsonParseError::NoError||!retirement.isObject()||
+               retirement.object().value("schema_version").toInt()!=1||
+               retirement.object().value("source_key").toString()!=dir||
+               retirement.object().value("retired_at").toString().isEmpty())
+                return detail::reject(error,"Invalid retired playlist marker: "+dir);
+        }
 
         if(QFileInfo::exists(metaPath)){
             QByteArray metaBytes;
