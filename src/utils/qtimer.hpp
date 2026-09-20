@@ -76,6 +76,30 @@ namespace utils{
 			new Timer( interval,std::forward< Function >( function ) ) ;
 		}
 
+
+		/*
+		 * Owner-aware one-shot timer. The timer is parented to the supplied
+		 * QObject, so destruction of the real owner cancels the delayed callback
+		 * instead of leaving a raw-owner closure alive in the event queue.
+		 */
+		template< typename Function,
+			  typename std::enable_if< std::is_void< details::result_of< Function > >::value,int >::type = 0 >
+		void run( QObject * context,int interval,Function&& function )
+		{
+			if( !context )return ;
+
+			auto timer = new QTimer( context ) ;
+			timer->setSingleShot( true ) ;
+
+			QObject::connect( timer,&QTimer::timeout,context,
+				[ timer,function = std::forward< Function >( function ) ]() mutable {
+					function() ;
+					timer->deleteLater() ;
+				} ) ;
+
+			timer->start( interval ) ;
+		}
+
 		/*
 		 * Function must takes no argument and will be called once when the interval pass
 		 */
