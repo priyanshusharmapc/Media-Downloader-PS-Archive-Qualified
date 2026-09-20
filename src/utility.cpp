@@ -35,6 +35,7 @@
 #include <QFile>
 #include <QSaveFile>
 #include <QJsonDocument>
+#include <QUrl>
 
 #include <ctime>
 #include <cstring>
@@ -1381,6 +1382,20 @@ QString utility::clipboardText()
 	}
 
 	return {} ;
+}
+
+bool utility::isHttpUrl( const QString& value )
+{
+	const QUrl url( value.trimmed(),QUrl::StrictMode ) ;
+
+	if( !url.isValid() || url.host().isEmpty() ){
+		return false ;
+	}
+
+	const auto scheme = url.scheme() ;
+
+	return scheme.compare( "http",Qt::CaseInsensitive ) == 0 ||
+	       scheme.compare( "https",Qt::CaseInsensitive ) == 0 ;
 }
 
 QString utility::downloadFolder( const Context& ctx )

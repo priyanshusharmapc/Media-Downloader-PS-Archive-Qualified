@@ -641,6 +641,7 @@ namespace utility
 	void setHelpVersionOfMediaDownloader( const QString& ) ;
 	QString homePath() ;
 	QString clipboardText() ;
+	bool isHttpUrl( const QString& ) ;
 	QString fromSecsSinceEpoch( qint64 ) ;
 	QStringList setEnvArgs( engines::engine::baseEngine::optionsEnvironment&,const QStringList& ) ;
 
