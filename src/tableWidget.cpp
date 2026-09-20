@@ -678,20 +678,22 @@ QString tableWidget::completeProgress( int firstRow )
 		}
 	}
 
-	auto z = completed + errored + cancelled ;
+	const qint64 z = static_cast< qint64 >( completed ) + errored + cancelled ;
 
 	auto m = QString::number( z ) + "/" + QString::number( rowCount ) ;
+	const qint64 rawPercentage = rowCount > 0 ? z * 100 / rowCount : 0 ;
+	const auto percentage = rawPercentage < 0 ? 0 : ( rawPercentage > 100 ? 100 : rawPercentage ) ;
 
-	auto a = m + "(" + QString::number( z * 100 / rowCount ) + "%)" ;
+	auto a = m + "(" + QString::number( percentage ) + "%)" ;
 	auto b = QString::number( running ) ;
 	auto c = QString::number( notStarted ) ;
 	auto d = QString::number( completed ) ;
 	auto e = QString::number( errored ) ;
 	auto f = QString::number( cancelled ) ;
 
-	if( a.startsWith( "100" ) ){
+	if( rowCount > 0 && z == rowCount ){
 
-		a = "100" ;
+		a = "100%" ;
 	}
 
 	return QObject::tr( "Completed: %1, Running: %2, Not Started: %3, Succeeded: %4, Failed: %5, Cancelled: %6" ).arg( a,b,c,d,e,f ) ;
