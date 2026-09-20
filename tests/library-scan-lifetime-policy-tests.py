@@ -48,7 +48,8 @@ assert "Context& m_ctx" not in proxy_set
 # Settings startup worker captures immutable cleanup values only; Flatpak operations
 # that require live settings state stay in the owner lifetime.
 init=settings[settings.index("void settings::init_done"):settings.index("void settings::setTabNumber")]
-assert "[ candidate,configPath,runningUpdated ]" in init
+assert "[ candidate,configPath,runningUpdated,currentExecutable ]" in init
+assert "QCoreApplication::applicationFilePath()" in init
 assert "isOwnedUpdateCleanupPath" in init
 assert "settings& m_parent" not in init
 assert "utils::qthread::run( meaw( *this ) )" not in init
