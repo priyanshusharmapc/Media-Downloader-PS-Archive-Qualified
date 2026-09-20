@@ -24,6 +24,7 @@
 #include <QFile>
 #include <QStringList>
 #include <QCryptographicHash>
+#include <QUuid>
 
 #include "engines.h"
 #include "utils/network_access_manager.hpp"
@@ -503,12 +504,14 @@ private:
 		{
 			metadata = m.move() ;
 
-			filePath = tempPath + "/" + metadata.fileName() ;
+			const auto attempt = ".mdps-component-download-" +
+				QUuid::createUuid().toString( QUuid::WithoutBraces ) + "-" + metadata.fileName() ;
+			filePath = QDir( tempPath ).filePath( attempt ) ;
 
-			isArchive = filePath.endsWith( ".zip" ) || filePath.contains( ".tar." ) ;
+			isArchive = metadata.fileName().endsWith( ".zip" ) ||
+				metadata.fileName().contains( ".tar." ) ;
 
 			if( !isArchive ){
-
 				filePath += ".tmp" ;
 			}
 		}
