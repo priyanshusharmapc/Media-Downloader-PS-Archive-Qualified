@@ -133,14 +133,13 @@ bool Logger::clearDownloadHistory()
 
 		const auto& e = m_ctx->Engines().engineDirPaths().downloadHistoryFilePath() ;
 
-		if( QFile::exists( e ) ){
+		// Use the same history-file guard as readers/writers so a successful
+		// clear cannot race an append or a mapped/read snapshot.
+		utility::archiveData::guardHistoryFile() ;
+		const auto removed = QFile::exists( e ) && QFile::remove( e ) ;
+		utility::archiveData::unGuardHistoryFile() ;
 
-			QFile::remove( e ) ;
-
-			return true ;
-		}else{
-			return false ;
-		}
+		return removed ;
 	}else{
 		return false ;
 	}
