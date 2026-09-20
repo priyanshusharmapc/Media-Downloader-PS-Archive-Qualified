@@ -1388,7 +1388,7 @@ void playlistdownloader::setThumbnail( const std::vector< QByteArray >& fileName
 
 			if( f.open( QIODevice::ReadOnly ) && pixmap.loadFromData( f.readAll() ) ){
 
-				auto a = settings::tabName::batch ;
+				auto a = settings::tabName::playlist ;
 
 				auto w = m_parent.m_settings.thumbnailWidth( a ) ;
 				auto h = m_parent.m_settings.thumbnailHeight( a ) ;
