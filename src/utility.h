@@ -2194,6 +2194,8 @@ namespace utility
 
 		table.setFileNames( index,fileNames ) ;
 
+		const auto downloadFolder = table.entryAt( index ).downloadFolder ;
+
 		table.setRunningState( f.setState(),index ) ;
 
 		auto backUpUrl = table.url( index ) ;
@@ -2208,7 +2210,7 @@ namespace utility
 
 			if( es.success() ){
 
-				engine.runCommandOnDownloadedFile( fileNames ) ;
+				engine.runCommandOnDownloadedFile( fileNames,downloadFolder ) ;
 			}
 
 			if( f.done() ){

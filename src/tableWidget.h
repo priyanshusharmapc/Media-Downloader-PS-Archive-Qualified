@@ -245,6 +245,7 @@ public:
 		QJsonObject uiJson ;
 		QPixmap thumbnail ;
 		std::vector< QByteArray > fileNames ;
+		QString downloadFolder ;
 		bool splitByChapters = false ;
 		bool banner = false ;
 		bool showFirst = false ;
@@ -290,6 +291,10 @@ public:
 	void setFileNames( size_t m,const std::vector< QByteArray >& s )
 	{
 		m_items[ m ].fileNames = s ;
+	}
+	void setDownloadFolder( size_t m,QString folder )
+	{
+		m_items[ m ].downloadFolder = std::move( folder ) ;
 	}
 	enum class type{ DownloadOptions,
 			 DownloadExtendedOptions,

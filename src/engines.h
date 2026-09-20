@@ -873,7 +873,7 @@ public:
 
 			virtual QString deleteEngineBinFolder( const QString& ) ;
 
-			virtual void runCommandOnDownloadedFile( const std::vector< QByteArray >& ) ;
+			virtual void runCommandOnDownloadedFile( const std::vector< QByteArray >&,const QString& ) ;
 
 			virtual QString commandString( const engines::engine::exeArgs::cmd& ) ;
 
@@ -1355,9 +1355,9 @@ public:
 		{
 			return m_engine->commandString( cmd ) ;
 		}
-		void runCommandOnDownloadedFile( const std::vector< QByteArray >& fileNames ) const
+		void runCommandOnDownloadedFile( const std::vector< QByteArray >& fileNames,const QString& downloadFolder ) const
 		{
-			m_engine->runCommandOnDownloadedFile( fileNames ) ;
+			m_engine->runCommandOnDownloadedFile( fileNames,downloadFolder ) ;
 		}
 		const QStringList& defaultDownLoadCmdOptions() const
 		{

@@ -884,8 +884,9 @@ void batchdownloader::setThumbnail( const std::vector< QByteArray >& fileNames,
 				   const engines::engine& engine,
 				   int row )
 {
-	auto m = m_settings.downloadFolder() ;
-	auto downloadFolder = engine.downloadFolder( m ) ;
+	const auto& entry = m_table.entryAt( row ) ;
+	const auto jobFolder = entry.downloadFolder.isEmpty() ? m_settings.downloadFolder() : entry.downloadFolder ;
+	auto downloadFolder = engine.downloadFolder( jobFolder ) ;
 
 	class meaw
 	{
@@ -1428,7 +1429,8 @@ void batchdownloader::renameFile( int row )
 	if( fn.size() ){
 
 		auto nn = m_ui.plainTextEditBD->toPlainText() ;
-		auto df = m_ctx.Settings().downloadFolder() ;
+		const auto& entry = m_table.entryAt( row ) ;
+		auto df = entry.downloadFolder.isEmpty() ? m_ctx.Settings().downloadFolder() : entry.downloadFolder ;
 
 		auto& item = m_table.item( row,m_table.startPosition() ) ;
 

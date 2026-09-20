@@ -848,8 +848,10 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 			m_parent( p ),
 			m_engine( engine ),
 			m_index( index ),
-			m_downloadRecursively( dr )
+			m_downloadRecursively( dr ),
+			m_downloadFolder( p.m_ctx.Settings().downloadFolder() )
 		{
+			m_parent.m_table.setDownloadFolder( m_index,m_downloadFolder ) ;
 		}
 		bool addData( const QByteArray& e )
 		{
@@ -908,7 +910,7 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 		}
 		QString downloadFolder()
 		{
-			return m_parent.m_ctx.Settings().downloadFolder() ;
+			return m_downloadFolder ;
 		}
 		events move()
 		{
@@ -928,6 +930,7 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 		const engines::engine& m_engine ;
 		int m_index ;
 		bool m_downloadRecursively ;
+		QString m_downloadFolder ;
 	} ;
 
 	auto m = m_ui.lineEditPLUrlOptions->text() ;
@@ -1359,8 +1362,9 @@ void playlistdownloader::setThumbnail( const std::vector< QByteArray >& fileName
 				      const engines::engine& engine,
 				      int row )
 {
-	auto m = m_settings.downloadFolder() ;
-	auto downloadFolder = engine.downloadFolder( m ) ;
+	const auto& entry = m_table.entryAt( row ) ;
+	const auto jobFolder = entry.downloadFolder.isEmpty() ? m_settings.downloadFolder() : entry.downloadFolder ;
+	auto downloadFolder = engine.downloadFolder( jobFolder ) ;
 
 	class meaw
 	{

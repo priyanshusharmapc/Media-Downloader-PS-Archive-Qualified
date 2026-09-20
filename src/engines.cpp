@@ -294,9 +294,11 @@ void engines::openUrls( tableWidget& table,int row,const engines::engine& engine
 	if( reportFinished::finishedStatus::finishedWithSuccess( table,row ) ){
 
 		const auto& ee = table.uiText( row ) ;
-		const auto& ss = table.entryAt( row ).fileNames ;
+		const auto& entry = table.entryAt( row ) ;
+		const auto& ss = entry.fileNames ;
+		const auto folder = entry.downloadFolder.isEmpty() ? m_settings.downloadFolder() : entry.downloadFolder ;
 
-		engine.openLocalFile( { ee,m_settings.downloadFolder(),ss } ) ;
+		engine.openLocalFile( { ee,folder,ss } ) ;
 	}
 }
 
@@ -1894,9 +1896,10 @@ QString engines::engine::baseEngine::deleteEngineBinFolder( const QString& e )
 	}
 }
 
-void engines::engine::baseEngine::runCommandOnDownloadedFile( const std::vector< QByteArray >& fileNames )
+void engines::engine::baseEngine::runCommandOnDownloadedFile( const std::vector< QByteArray >& fileNames,const QString& downloadFolder )
 {
-	auto df = m_settings.downloadFolder() + "/" ;
+	const auto folder = downloadFolder.isEmpty() ? m_settings.downloadFolder() : downloadFolder ;
+	auto df = folder + "/" ;
 
 	m_settings.runCommandOnSuccessfulDownload( this->engine().name(),df,fileNames ) ;
 }

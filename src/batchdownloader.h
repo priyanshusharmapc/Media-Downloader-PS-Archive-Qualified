@@ -403,8 +403,10 @@ private:
 				m_parent( p ),
 				m_engine( engine ),
 				m_index( index ),
-				m_event( e.move() )
+				m_event( e.move() ),
+				m_downloadFolder( p.m_ctx.Settings().downloadFolder() )
 			{
+				m_parent.m_table.setDownloadFolder( m_index,m_downloadFolder ) ;
 				m_event.whenCreated() ;
 			}
 			bool addData( const QByteArray& e )
@@ -446,7 +448,7 @@ private:
 			}
 			QString downloadFolder()
 			{
-				return m_parent.m_ctx.Settings().downloadFolder() ;
+				return m_downloadFolder ;
 			}
 			events move()
 			{
@@ -457,6 +459,7 @@ private:
 			const engines::engine& m_engine ;
 			int m_index ;
 			Event m_event ;
+			QString m_downloadFolder ;
 		} ;
 
 		auto updater = [ this,index ]( const QByteArray& e ){
