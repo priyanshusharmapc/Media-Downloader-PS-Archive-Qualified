@@ -2240,10 +2240,14 @@ namespace utility
 
 					auto args = util::splitPreserveQuotes( a ) ;
 
-					if( !args.isEmpty() ){
-						auto exe = args.takeAt( 0 ) ;
-						QProcess::startDetached( exe,args ) ;
+					// A non-empty persisted string can still tokenize to zero or a
+					// whitespace-only executable token. Reject both before takeAt(0).
+					if( args.isEmpty() || args.at( 0 ).trimmed().isEmpty() ){
+						return ;
 					}
+
+					auto exe = args.takeAt( 0 ) ;
+					QProcess::startDetached( exe,args ) ;
 				}
 			}
 		}
