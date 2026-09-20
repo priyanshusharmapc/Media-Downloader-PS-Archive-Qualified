@@ -920,5 +920,5 @@ void library::showContents( const QString& path )
 		std::shared_ptr< std::atomic_bool > m_continue ;
 	} ;
 
-	utils::qthread::run( meaw( this,safePath,std::move( scanContinue ) ) ) ;
+	utils::qthread::run( this,meaw( this,safePath,std::move( scanContinue ) ) ) ;
 }
