@@ -1974,8 +1974,9 @@ bool utility::startedUpdatedVersion( settings& s,const utility::cliArguments& ca
 	if( QFile::exists( update_new ) ){
 
 		QDir dir ;
+		const auto hadCurrentUpdate = QFile::exists( update ) ;
 
-		if( QFile::exists( update ) ){
+		if( hadCurrentUpdate ){
 
 			while( true ){
 
@@ -1991,10 +1992,26 @@ bool utility::startedUpdatedVersion( settings& s,const utility::cliArguments& ca
 				}
 			}
 
-			dir.rename( update,updated_old ) ;
+			// Promotion is a transaction. If the current staged tree cannot be
+			// moved out of the way, never inspect or launch whatever happens to
+			// remain at "update".
+			if( !dir.rename( update,updated_old ) ){
+				return false ;
+			}
 		}
 
-		dir.rename( update_new,update ) ;
+		if( !dir.rename( update_new,update ) ){
+
+			// The old tree was successfully moved but the new tree could not be
+			// promoted. Restore the old location before giving up. If that
+			// restoration also fails, keep both update_new and updated_old
+			// untouched as recovery evidence and still abort before inspecting
+			// any staged executable.
+			if( hadCurrentUpdate && !dir.rename( updated_old,update ) ){
+				return false ;
+			}
+			return false ;
+		}
 	}
 
 	QString exePath = update + "/media-downloader.exe" ;
