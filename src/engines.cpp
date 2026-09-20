@@ -48,6 +48,7 @@
 #include <QNetworkProxyFactory>
 #include <QDir>
 #include <QUrl>
+#include <QSaveFile>
 
 #include <cstring>
 
@@ -768,47 +769,68 @@ QString engines::addEngine( const QByteArray& data,const QString& extensionFileN
 	util::Json json( data ) ;
 
 	if( json ){
-
 		auto object = json.toObject() ;
-
 		auto name = object.value( "Name" ).toString() ;
 
 		if( !name.isEmpty() ){
-
-			auto e = m_enginePaths.enginePath( extensionFileName ) ;
-
-			QFile f( e ) ;
-
-			if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-				f.write( data ) ;
-
-				f.flush() ;
-
-				f.close() ;
-
-				for( int i = 0 ; i < 5 ; i++ ){
-
-					if( QFile::exists( e ) ){
-
-						break ;
-					}else{
-						utility::waitForOneSecond() ;
-					}
-				}
-
-				if( this->addEngine( extensionFileName,id ) ){
-
-					return name ;
-				}else{
+			// Validate exactly the engine object that would be loaded after
+			// publication. Derived yt-dlp definitions are overlays on top of
+			// yt-dlp.json, so compose those in memory before touching disk.
+			QJsonObject candidateObject = object ;
+			auto composeDerived = [ this,&object ]( engines::converter converter )->QJsonObject {
+				const auto basePath = m_enginePaths.enginePath( "yt-dlp.json" ) ;
+				util::Json base( engines::file( basePath,m_logger ).readAll() ) ;
+				if( !base ){
 					return {} ;
 				}
+				return converter( base.toObject(),object ) ;
+			} ;
+
+			if( extensionFileName == "yt-dlp-nightly.json" ){
+				candidateObject = composeDerived( yt_dlp::cmdNightly ) ;
+			}else if( extensionFileName == "yt-dlp-ffmpeg.json" ){
+				candidateObject = composeDerived( yt_dlp::cmdFfmpeg ) ;
+			}else if( extensionFileName == "yt-dlp-aria2c.json" ){
+				candidateObject = composeDerived( yt_dlp::cmdAria2C ) ;
 			}
+
+			auto candidate = candidateObject.isEmpty()
+				? engines::EnginesList::engine{}
+				: this->getEngineByPath1( candidateObject ) ;
+
+			if( !candidate.valid() || candidate->exePath().isEmpty() ){
+				m_logger.add( QObject::tr( "Rejected engine definition before persistence: %1" ).arg( extensionFileName ),id ) ;
+				return {} ;
+			}
+
+			const auto path = m_enginePaths.enginePath( extensionFileName ) ;
+			QSaveFile file( path ) ;
+			if( !file.open( QIODevice::WriteOnly ) ){
+				m_logger.add( QObject::tr( "Failed To Save Plugin Definition: %1" ).arg( file.errorString() ),id ) ;
+				return {} ;
+			}
+
+			if( file.write( data ) != data.size() || !file.commit() ){
+				file.cancelWriting() ;
+				m_logger.add( QObject::tr( "Failed To Save Plugin Definition: %1" ).arg( file.errorString() ),id ) ;
+				return {} ;
+			}
+
+			// Admission cannot now discover a different definition because it
+			// consumes the exact in-memory candidate validated above.
+			if( this->engineAdd( extensionFileName,candidate.move(),id ) ){
+				m_backends.sort() ;
+				return name ;
+			}
+
+			// engineAdd has no remaining expected failure after the checks above,
+			// but keep the failure visible rather than pretending installation.
+			m_logger.add( QObject::tr( "Failed To Admit Validated Plugin Definition: %1" ).arg( extensionFileName ),id ) ;
+			return {} ;
 		}
 	}
 
 	m_logger.add( QObject::tr( "Failed To Load A Plugin" ) + ": " + json.errorString(),id ) ;
-
 	return {} ;
 }
 
