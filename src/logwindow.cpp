@@ -18,6 +18,7 @@
  */
 
 #include "logwindow.h"
+#include <QMessageBox>
 #include "ui_logwindow.h"
 
 #include "settings.h"
@@ -51,6 +52,10 @@ logWindow::logWindow( QWidget * parent,settings& s,Logger& logger ) :
 			if( m_logger.clearDownloadHistory() ){
 
 				m_ui->plainTextEdit->clear() ;
+			}else{
+				QMessageBox::warning( this,
+						      tr( "Clear Failed" ),
+						      tr( "Download history could not be removed from disk." ) ) ;
 			}
 		}else{
 			m_logger.showAllLogs() ;
