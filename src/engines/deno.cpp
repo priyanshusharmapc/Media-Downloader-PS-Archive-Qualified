@@ -20,11 +20,16 @@
 #include "deno.h"
 #include <QProcess>
 
+namespace
+{
+const QString denoVersionArgument = QStringLiteral( "--version" ) ;
+}
+
 util::version deno::version( const QString& m )
 {
 	QProcess cmd ;
 
-	cmd.start( m,{ "--version" } ) ;
+	cmd.start( m,{ denoVersionArgument } ) ;
 
 	cmd.waitForFinished() ;
 
@@ -84,7 +89,7 @@ void deno::init( settings&,Logger& logger,const engines::enginePaths& enginePath
 
 	mainObj.insert( "Name","deno" ) ;
 
-	mainObj.insert( "VersionArgument","--version" ) ;
+	mainObj.insert( "VersionArgument",denoVersionArgument ) ;
 
 	mainObj.insert( "BackendPath",utility::stringConstants::defaultPath() ) ;
 
