@@ -1915,14 +1915,36 @@ RecoveryImporter::RecoveryImporter(RuntimeConfig c,Store& s,ActivityLogger& l):m
 
 ValidationResult RecoveryImporter::validate(const QString& packageDir) const
 {
+    QByteArray manifestBytes;
+    QString error;
+    if(!detail::readBytes(QDir(packageDir).filePath("manifest.json"),&manifestBytes,&error)){
+        ValidationResult r;r.errors<<error;return r;
+    }
+    return validateSnapshot(packageDir,manifestBytes);
+}
+
+ValidationResult RecoveryImporter::validateSnapshot(const QString& packageDir,const QByteArray& manifestBytes) const
+{
     ValidationResult r;SyncLock lock(m_store.paths());
     if(!lock.tryLock()){r.errors<<lock.errorString();return r;}
     const QFileInfo dirInfo(packageDir);
     if(!dirInfo.isDir()||!detail::noLinks(packageDir)){r.errors<<"Package is not an unlinked directory";return r;}
-    QByteArray bytes;QString pe;
-    if(!detail::readBytes(QDir(packageDir).filePath("manifest.json"),&bytes,&pe)){r.errors<<pe;return r;}
-    if(bytes.size()>1024*1024){r.errors<<"Manifest exceeds the 1 MiB safety limit";return r;}
-    const auto doc=parseJson(bytes,&pe);
+    QDirIterator tree(packageDir,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,QDirIterator::Subdirectories);
+    while(tree.hasNext()){
+        const auto path=tree.next();
+        const QFileInfo info=tree.fileInfo();
+        const auto rel=QDir(packageDir).relativeFilePath(path);
+        if(!detail::relativeSafe(rel)||!detail::noLinks(path)||info.isSymLink()){
+            r.errors<<"Recovery package contains a linked or unsafe entry: "+rel;
+            continue;
+        }
+        if(!info.isFile()&&!info.isDir())
+            r.errors<<"Recovery package contains a special filesystem entry: "+rel;
+    }
+
+    QString pe;
+    if(manifestBytes.size()>1024*1024){r.errors<<"Manifest exceeds the 1 MiB safety limit";return r;}
+    const auto doc=parseJson(manifestBytes,&pe);
     if(!doc.isObject()){r.errors<<("Invalid manifest.json: "+pe);return r;}
     const auto o=doc.object();
     if(o.value("schema_version")!=QJsonValue(1))r.errors<<"schema_version must be the number 1";
@@ -2015,8 +2037,10 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* 
     const auto absolute=QFileInfo(packageDir).absoluteFilePath();
     const auto pending=m_store.paths().importsPending();
     if(QFileInfo(absolute).absolutePath()!=pending||!detail::noLinks(absolute))return detail::reject(error,"Only direct, unlinked Pending packages can be ingested");
-    const auto vr=validate(absolute);if(!vr.ok)return detail::reject(error,vr.errors.join("; "));
-    QByteArray manifestBytes;if(!detail::readBytes(QDir(absolute).filePath("manifest.json"),&manifestBytes,error))return false;
+    QByteArray manifestBytes;
+    if(!detail::readBytes(QDir(absolute).filePath("manifest.json"),&manifestBytes,error))return false;
+    const auto vr=validateSnapshot(absolute,manifestBytes);
+    if(!vr.ok)return detail::reject(error,vr.errors.join("; "));
     const auto manifest=QJsonDocument::fromJson(manifestBytes).object();const auto reps=manifest.value("representations").toObject();
     QString stateError;auto items=m_store.loadCanonicalItems(&stateError);if(!stateError.isEmpty())return detail::reject(error,stateError);
     int index=-1;for(int i=0;i<items.size();++i)if(items[i].key==vr.itemKey){index=i;break;}
@@ -2057,11 +2081,17 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* 
     for(auto it=inputHashes.begin();it!=inputHashes.end();++it)if(detail::fileDigest(it.key(),error)!=it.value())return detail::reject(error,"Submitted media changed during normalization");
     const auto manifestHash=detail::digest(manifestBytes);
     if(detail::fileDigest(QDir(absolute).filePath("manifest.json"),error)!=manifestHash)return detail::reject(error,"Submitted manifest changed during normalization");
-    // Bind every included package file, not just the manifest. Evidence remains inspectable in Accepted.
-    QJsonObject evidenceHashes;QDirIterator files(absolute,QDir::Files|QDir::Hidden,QDirIterator::Subdirectories);
-    while(files.hasNext()){const auto file=files.next();const auto rel=QDir(absolute).relativeFilePath(file);
-        if(!detail::relativeSafe(rel)||!detail::noLinks(file))return detail::reject(error,"Unsafe file in recovery package");
-        const auto hash=detail::fileDigest(file,error);if(hash.isEmpty())return false;evidenceHashes[rel]=hash;
+    const auto finalSnapshot=validateSnapshot(absolute,manifestBytes);
+    if(!finalSnapshot.ok)return detail::reject(error,"Recovery package changed during normalization: "+finalSnapshot.errors.join("; "));
+
+    QJsonObject evidenceHashes;
+    QDirIterator evidence(absolute,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,QDirIterator::Subdirectories);
+    while(evidence.hasNext()){
+        const auto path=evidence.next();const auto info=evidence.fileInfo();const auto rel=QDir(absolute).relativeFilePath(path);
+        if(!detail::relativeSafe(rel)||!detail::noLinks(path)||info.isSymLink())return detail::reject(error,"Unsafe entry in recovery package: "+rel);
+        if(info.isDir())continue;
+        if(!info.isFile())return detail::reject(error,"Special entry in recovery package: "+rel);
+        const auto hash=detail::fileDigest(path,error);if(hash.isEmpty())return false;evidenceHashes[rel]=hash;
     }
     const QJsonObject receipt{{"schema_version",1},{"package_id",vr.packageId},{"item_key",vr.itemKey},{"result","accepted"},{"accepted_at",nowIso()},{"manifest_sha256",manifestHash},{"file_sha256",evidenceHashes},{"promoted_paths",promoted},{"transaction_id",transactionId}};
     QMap<QString,QByteArray> writes={{"State/ArchiveMode/items.json",QJsonDocument(canonical).toJson()},
