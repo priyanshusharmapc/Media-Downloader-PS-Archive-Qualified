@@ -29,6 +29,8 @@
 #include <QJsonDocument>
 #include <QFile>
 #include <QSaveFile>
+#include <QLockFile>
+#include <QUuid>
 
 #include <cmath>
 #include <limits>
@@ -641,11 +643,21 @@ void batchdownloader::showCustomContext()
 
 void batchdownloader::init_done()
 {
-	auto m = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
+	const auto shared = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
 
-	if( QFile::exists( m ) ){
-
-		this->getListFromFile( m,true ) ;
+	if( QFile::exists( shared ) ){
+		// Claim one immutable recovery generation while holding the same lock
+		// used by shutdown writers. Later writers are free to create a new
+		// shared generation without the restore callback ever deleting it.
+		QLockFile lock( shared + ".lock" ) ;
+		lock.setStaleLockTime( 30000 ) ;
+		if( lock.tryLock( 10000 ) && QFile::exists( shared ) ){
+			const auto claimed = shared + ".consume-" +
+				QUuid::createUuid().toString( QUuid::WithoutBraces ) + ".json" ;
+			if( QFile::rename( shared,claimed ) ){
+				this->getListFromFile( claimed,true ) ;
+			}
+		}
 	}
 
 	m_initDone = true ;
@@ -2005,49 +2017,54 @@ void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 {
 	engines::file::readAll( this,e,m_ctx.logger(),[ this,deleteFile,e ]( bool readOk,QByteArray list ){
 
-		if( !readOk || list.isEmpty() ){
+		const auto restoreClaimedAutosave = [ this,deleteFile,&e ](){
+			if( !deleteFile || !e.contains( ".consume-" ) ){
+				return ;
+			}
+			const auto shared = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
+			QLockFile lock( shared + ".lock" ) ;
+			lock.setStaleLockTime( 30000 ) ;
+			if( lock.tryLock( 10000 ) && !QFile::exists( shared ) ){
+				QFile::rename( e,shared ) ;
+			}
+		} ;
 
+		if( !readOk || list.isEmpty() ){
+			restoreClaimedAutosave() ;
 			return ;
 		}
 
 		Items items ;
-
 		auto jsonCandidate = list.trimmed() ;
 
-		// JSON permits leading whitespace. Also tolerate a UTF-8 BOM from
-		// external editors before deciding whether this is structured input.
 		if( jsonCandidate.startsWith( "\xEF\xBB\xBF" ) ){
 			jsonCandidate.remove( 0,3 ) ;
 			jsonCandidate = jsonCandidate.trimmed() ;
 		}
 
 		if( jsonCandidate.startsWith( '[' ) || jsonCandidate.startsWith( '{' ) ){
-
 			this->parseDataFromFile( items,jsonCandidate ) ;
 		}else{
 			list.replace( "\r","" ) ;
-
 			for( const auto& it : util::split( list,'\n',true ) ){
-
 				const auto candidate = it.trimmed() ;
 				if( utility::isHttpUrl( candidate ) ){
-
 					items.add( candidate ) ;
 				}
 			}
 		}
 
 		if( items.size() ){
-
 			m_ui.tabWidget->setCurrentIndex( 1 ) ;
 			this->parseItems( items.move(),{ false,false } ) ;
 
-			// Preserve the only recovery artifact until its contents were
-			// successfully read, parsed and handed to the restore path.
 			if( deleteFile && !QFile::remove( e ) ){
-
 				m_ctx.logger().add( "Failed to remove restored autosave: " + e,utility::loggerID() ) ;
 			}
+		}else{
+			// Parsing produced no recoverable jobs. Put a claimed autosave back
+			// only if no newer generation has appeared in the meantime.
+			restoreClaimedAutosave() ;
 		}
 	} ) ;
 }
