@@ -492,6 +492,10 @@ settings::settings( const utility::cliArguments& args ) :
 
 void settings::openUrl( const QString& e )
 {
+	if( e.trimmed().isEmpty() ){
+		return ;
+	}
+
 	auto m = QUrl::fromLocalFile( e ) ;
 
 	if( m_MdScaleFactor.isEmpty() ){
