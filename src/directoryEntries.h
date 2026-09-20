@@ -72,6 +72,7 @@ private:
 	std::vector< directoryEntries::entry > m_folders ;
 	std::vector< directoryEntries::entry > m_files ;
 	std::vector< directoryEntries::wrapper > m_joined ;
+	std::vector< directoryEntries::wrapper > m_globalJoined ;
 public:
 	template< typename Function >
 	void forEachFile( Function function )
@@ -93,6 +94,8 @@ public:
 	{
 		m_folders.clear() ;
 		m_files.clear() ;
+		m_joined.clear() ;
+		m_globalJoined.clear() ;
 	}
 	void sortByDateAscending()
 	{
@@ -160,6 +163,8 @@ public:
 		std::sort( m_joined.begin(),m_joined.end(),[ & ]( const wrapper& lhs,const wrapper& rhs ){
 			return s( *lhs.operator->(),*rhs.operator->() ) ;
 		} ) ;
+
+		m_globalJoined = m_joined ;
 	}
 	void addFile( qint64 dateCreated,QString path )
 	{
@@ -222,9 +227,11 @@ public:
 
 				m_joined.emplace_back( it ) ;
 			}
+		}else{
+			// Restore the last globally sorted mixed sequence. This makes toggling
+			// folder grouping reversible without requiring another sort operation.
+			m_joined = m_globalJoined ;
 		}
-		// When folderFirst is false, sort() has already produced one globally
-		// ordered mixed sequence. Preserve it rather than forcing files-first.
 	}
 
 	directoryEntries::iter Iter()
