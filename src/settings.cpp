@@ -115,22 +115,49 @@ void settings::clearOptionsHistory( settings::tabName e,const QString& engineNam
 }
 
 void settings::addToHistory( QSettings& settings,
-			     QStringList& history,
 			     const QString& key,
+			     QStringList& history,
 			     const QString& input,
 			     int max )
 {
-	if( !input.isEmpty() && !history.contains( input ) ){
+	bool changed = false ;
 
-		if( history.size() == max ){
+	// A non-positive limit means history is disabled. Persist the normalized
+	// empty state instead of attempting removeLast() on an empty list.
+	if( max <= 0 ){
 
-			history.removeLast() ;
+		if( !history.isEmpty() ){
+
+			history.clear() ;
+			settings.setValue( key,history ) ;
 		}
-
-		history.insert( 0,input ) ;
-
-		settings.setValue( key,history ) ;
+		return ;
 	}
+
+	// Older settings may already contain more entries than a newly reduced
+	// limit. Normalize them even when this input is empty or duplicated.
+	while( history.size() > max ){
+
+		history.removeLast() ;
+		changed = true ;
+	}
+
+	if( input.isEmpty() || history.contains( input ) ){
+
+		if( changed ){
+
+			settings.setValue( key,history ) ;
+		}
+		return ;
+	}
+
+	while( history.size() >= max ){
+
+		history.removeLast() ;
+	}
+
+	history.insert( 0,input ) ;
+	settings.setValue( key,history ) ;
 }
 
 void settings::addToplaylistRangeHistory( const QString& engineName,const QString& e )
@@ -923,7 +950,11 @@ int settings::stringTruncationSize()
 
 int settings::historySize()
 {
-	return this->getOption( "HistorySize",10 ) ;
+	const auto size = this->getOption( "HistorySize",10 ) ;
+
+	// Invalid negative persisted values disable history instead of flowing into
+	// unsafe list operations.
+	return size > 0 ? size : 0 ;
 }
 
 QString settings::thumbnailTabName( const QString& s, settings::tabName e )
