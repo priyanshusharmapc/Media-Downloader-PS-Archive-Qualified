@@ -357,11 +357,12 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 {
 	if( p.finished() ){
 
+		const auto receivedHash = md.hashCalculator->result() ;
 		md.file.close() ;
 
-		if( md.file.writeFailed() ){
+		if( md.file.writeFailed() || !md.file.verifyPersistedHash( receivedHash ) ){
 			md.status.done() ;
-			this->post( m_appName,QObject::tr( "Download Failed: could not persist complete payload: %1" ).arg( md.file.writeError() ),md.id ) ;
+			this->post( m_appName,QObject::tr( "Download Failed: persisted payload integrity check failed: %1" ).arg( md.file.writeError() ),md.id ) ;
 			utility::removeFile( md.tmpFile ) ;
 			m_tabManager.enableAll() ;
 			return ;
@@ -371,13 +372,13 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 
 			if( md.hash.isEmpty() ){
 
-				auto m = QObject::tr( "Skipping Checking Download Hash" ) ;
+				auto m = QObject::tr( "Skipping Remote Download Hash Check" ) ;
 
 				this->post( m_appName,m,md.id ) ;
 
 				this->extractMediaDownloader( md.move() ) ;
 			}else{
-				auto m = md.hashCalculator->result().toHex().toLower() ;
+				auto m = receivedHash.toHex().toLower() ;
 
 				if( utility::cliArguments::useFakeMdHash() ){
 
@@ -794,20 +795,21 @@ void networkAccess::downloadP( networkAccess::Opts& opts,const utils::network::p
 
 	if( p.finished() ){
 
+		const auto receivedHash = opts.hashCalculator->result() ;
 		opts.file.close() ;
 
-		if( opts.file.writeFailed() ){
+		if( opts.file.writeFailed() || !opts.file.verifyPersistedHash( receivedHash ) ){
 			opts.reportFailed() ;
-			opts.networkError.add( QObject::tr( "Download Failed: could not persist complete payload: %1" ).arg( opts.file.writeError() ) ) ;
+			opts.networkError.add( QObject::tr( "Download Failed: persisted payload integrity check failed: %1" ).arg( opts.file.writeError() ) ) ;
 		}else if( p.success() ){
 
 			if( opts.metadata.hash().isEmpty() ){
 
-				auto m = QObject::tr( "Skipping Checking Download Hash" ) ;
+				auto m = QObject::tr( "Skipping Remote Download Hash Check" ) ;
 
 				this->post( m_appName,m,opts.id ) ;
 			}else{
-				auto m = opts.hashCalculator->result().toHex().toLower() ;
+				auto m = receivedHash.toHex().toLower() ;
 
 				if( opts.metadata.hash() != m ){
 
