@@ -312,48 +312,41 @@ networkAccess::networkAccess( const Context& ctx ) :
 
 void networkAccess::updateMediaDownloader( networkAccess::Status status,const QJsonDocument& json ) const
 {
-	class meaw
-	{
-	public:
-		meaw( bool Qt6 ) : m_name( Qt6 ? "MediaDownloaderQt6" : "MediaDownloaderQt5" )
-		{
+	const auto expectedName = utility::Qt6Version() ? QStringLiteral( "MediaDownloaderQt6.zip" )
+	                                               : QStringLiteral( "MediaDownloaderQt5.zip" ) ;
+	const auto expectedPrefix = QStringLiteral(
+		"/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified/releases/download/" ) ;
+
+	QVector< QJsonObject > matches ;
+	const auto root = json.object() ;
+	const auto assets = root.value( "assets" ).toArray() ;
+	for( const auto& value : assets ){
+		if( !value.isObject() )continue ;
+		const auto obj = value.toObject() ;
+		if( obj.value( "name" ).toString() != expectedName )continue ;
+
+		const auto url = obj.value( "browser_download_url" ).toString() ;
+		const QUrl parsed( url ) ;
+		if( parsed.scheme().compare( "https",Qt::CaseInsensitive ) != 0 ||
+		    parsed.host().compare( "github.com",Qt::CaseInsensitive ) != 0 ||
+		    !parsed.path().startsWith( expectedPrefix ) ||
+		    QFileInfo( parsed.path() ).fileName() != expectedName ){
+			continue ;
 		}
-		bool operator()( const QJsonObject& obj )
-		{
-			const auto url = obj.value( "browser_download_url" ).toString() ;
-			const QUrl parsed( url ) ;
-			const auto expectedPrefix = QString(
-				"/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified/releases/download/" ) ;
-
-			// Asset identity is part of the update trust boundary. A release JSON
-			// object may name arbitrary URLs, so reject anything outside this
-			// repository before a byte is staged or extracted.
-			if( parsed.scheme().compare( "https",Qt::CaseInsensitive ) != 0 ||
-			    parsed.host().compare( "github.com",Qt::CaseInsensitive ) != 0 ||
-			    !parsed.path().startsWith( expectedPrefix ) ){
-				return false ;
-			}
-
-			return url.contains( m_name ) && url.endsWith( ".zip",Qt::CaseInsensitive ) ;
-		}
-	private:
-		QString m_name ;
-	} ;
-
-	auto obj = utility::parseJsonDataFromGitHub( json,meaw( utility::Qt6Version() ) ) ;
-
-	if( obj.isEmpty() ){
-
-		status.done() ;
-
-		auto m = QObject::tr( "Failed to parse json file from github" ) ;
-
-		this->post( m_appName,m,status.id() ) ;
-
-		m_tabManager.enableAll() ;
-	}else{
-		this->updateMediaDownloader( networkAccess::updateMDOptions( obj,status.move() ) ) ;
+		matches.append( obj ) ;
 	}
+
+	if( matches.size() != 1 ){
+		status.done() ;
+		this->post( m_appName,
+			QObject::tr( "Update failed: expected exactly one release asset named %1, found %2" )
+				.arg( expectedName ).arg( matches.size() ),
+			status.id() ) ;
+		m_tabManager.enableAll() ;
+		return ;
+	}
+
+	this->updateMediaDownloader( networkAccess::updateMDOptions( matches.first(),status.move() ) ) ;
 }
 
 void networkAccess::updateMediaDownloader( networkAccess::Status status ) const
@@ -435,12 +428,14 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 			}
 
 			if( !digest.present ){
-
-				auto m = QObject::tr( "Skipping Remote Download Hash Check" ) ;
-
-				this->post( m_appName,m,md.id ) ;
-
-				this->extractMediaDownloader( md.move() ) ;
+				md.status.done() ;
+				this->post( m_appName,QObject::tr( "Download Failed: release asset has no required SHA-256 digest" ),md.id ) ;
+				const auto cleanupError = utility::removeFile( md.tmpFile ) ;
+				if( !cleanupError.isEmpty() ){
+					this->failedToRemove( m_appName,md.tmpFile,cleanupError,md.id ) ;
+				}
+				m_tabManager.enableAll() ;
+				return ;
 			}else{
 				auto actual = receivedHash.toHex().toLower() ;
 
@@ -551,6 +546,14 @@ void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils:
 		if( !QFileInfo( extractedPath ).isDir() || !QFileInfo( expectedExecutable ).isFile() ){
 			md.status.done() ;
 			this->post( m_appName,QObject::tr( "Failed To Extract: updater archive is missing the expected application layout" ),md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
+
+		QString treeError ;
+		if( !utility::updaterTreeIsSafe( extractedPath,&treeError ) ){
+			md.status.done() ;
+			this->post( m_appName,QObject::tr( "Failed To Extract: unsafe updater filesystem tree: %1" ).arg( treeError ),md.id ) ;
 			cleanupStage() ;
 			return ;
 		}
