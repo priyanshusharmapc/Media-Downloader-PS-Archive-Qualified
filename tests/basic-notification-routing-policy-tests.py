@@ -8,4 +8,5 @@ i=s.index("desktopNotifyOnDownloadComplete()"); j=s.index("void basicdownloader:
 body=s[i:j]
 assert "desktopNotifyOnAllDownloadComplete()" in body
 assert 'notifyOnAllDownloadComplete( "1 Download Complete" )' in body
+assert 'else if( s.Settings().desktopNotifyOnAllDownloadComplete() )' not in body
 print("Basic all-download notification routing policy: PASS")
