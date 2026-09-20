@@ -35,10 +35,12 @@ Detailed implementation, compatibility boundaries, reproduction commands and ret
 
 The older AUDIT2 table above is preserved as a historical PR #203 checkpoint and is **superseded for current status**.
 
-- All **199 non-retracted technical finding records** now have source remediation integrated on `audit2-remediation`, including the two retained historical ID-collision records.
+- All **200 non-retracted technical finding records** now have source remediation integrated on `audit2-remediation`, including the two retained historical ID-collision records.
 - There are **0 open remediation PRs**.
 - Retracted findings `068`, `146`, and `163` are not counted as legitimate remediation. The previously merged 068 source/test change was removed from the final integration tree; PR #123 for retracted 163 was closed unmerged.
 - The authoritative row-by-row reconciliation is `docs/remediation/FINAL-AUDIT2-RECONCILIATION.md`.
 - Final GitHub Actions qualification remains externally blocked because Linux and Windows jobs fail before any workflow step executes (`steps: null`). No CI gate is waived.
+
+Post-integration High/Medium re-audit found and repaired the residual 036/039/085 gaps plus new High finding 201 in PR #209, merged as `098124197753e1e9895c177052d27ce208464439`. The canonical count is now **200** non-retracted technical records.
 
 Under issue #3's strict vocabulary, **source integration is complete, final qualification is blocked pending executable exact-head CI**.
