@@ -28,6 +28,7 @@
 #include <QSize>
 #include <QHeaderView>
 #include <QMenu>
+#include <QSignalBlocker>
 
 #include "engines.h"
 
@@ -819,18 +820,51 @@ private:
 			bool m_column ;
 		} ;
 
-		auto stuff = std::move( m_stuff ) ;
+		struct sortableItem
+		{
+			sortableItem( Stuff&& s,bool selected ) :
+				stuff( std::move( s ) ),wasSelected( selected )
+			{
+			}
+			Stuff stuff ;
+			bool wasSelected ;
+		} ;
 
-		std::sort( stuff.begin(),stuff.end(),meaw( ascending,column ) ) ;
+		std::vector< sortableItem > rows ;
+		rows.reserve( m_stuff.size() ) ;
+
+		for( size_t row = 0 ; row < m_stuff.size() ; ++row ){
+
+			rows.emplace_back( std::move( m_stuff[ row ] ),
+					   this->isSelected( static_cast< int >( row ) ) ) ;
+		}
+
+		// Rebuilding the table is an implementation detail of sorting. Block
+		// transient selection signals so effective download options are not
+		// rewritten while rows temporarily disappear.
+		QSignalBlocker blocker( m_table ) ;
+
+		meaw comparer( ascending,column ) ;
+		std::sort( rows.begin(),rows.end(),[ & ]( const sortableItem& a,const sortableItem& b ){
+			return comparer( a.stuff,b.stuff ) ;
+		} ) ;
 
 		this->clear() ;
 
-		for( auto& it : stuff ){
+		for( auto& item : rows ){
 
-			int row = this->addRow( std::move( it ) ) ;
+			int row = this->addRow( std::move( item.stuff ) ) ;
 
 			this->fromStuff( this->stuffAtLast(),Forwader( row,*this ) ) ;
+
+			if( item.wasSelected ){
+
+				for( int col = 0 ; col < m_table.columnCount() ; ++col ){
+					m_table.item( row,col )->setSelected( true ) ;
+				}
+			}
 		}
+
 	}
 	template< typename Rows >
 	void filterTable( Rows& rows,int column,QMenu& m )
