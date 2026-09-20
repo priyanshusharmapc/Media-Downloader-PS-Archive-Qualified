@@ -38,3 +38,15 @@ print("Windows extended path namespace policy: PASS")
 
 # UNC admission requires both server and share components.
 assert "split( '/',Qt::SkipEmptyParts ).size() < 2" in body
+
+
+# Rejected inputs become an empty native path; the consumer must preserve that
+# fail-closed state without dereferencing an empty reverse iterator.
+handle_start = source.index("class handle")
+handle_end = source.index("void removePath", handle_start)
+handle = source[handle_start:handle_end]
+assert "if( s.empty() )" in handle
+assert "m_handle = INVALID_HANDLE_VALUE" in handle
+assert "m_data{}" in handle
+assert "if( m_handle != INVALID_HANDLE_VALUE )" in handle
+assert handle.index("if( s.empty() )") < handle.index("*s.rbegin()")
