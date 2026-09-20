@@ -388,7 +388,7 @@ void tableWidget::selectRow( QTableWidgetItem * current,QTableWidgetItem * previ
 			// Let Qt's ExtendedSelection model preserve Ctrl, Shift and
 			// Ctrl+Shift gestures. Only a plain click should collapse the
 			// selection to the current row.
-			if( !( modifiers & ( Qt::ControlModifier | Qt::ShiftModifier ) ) ){
+			if( !( modifiers & ( Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier ) ) ){
 
 				auto currentRow = current->row() ;
 
