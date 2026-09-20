@@ -29,6 +29,9 @@
 #include <cmath>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QTemporaryFile>
 #include <QGuiApplication>
 #include <QScreen>
 
@@ -116,8 +119,8 @@ void settings::clearOptionsHistory( settings::tabName e,const QString& engineNam
 }
 
 void settings::addToHistory( QSettings& settings,
-			     const QString& key,
 			     QStringList& history,
+			     const QString& key,
 			     const QString& input,
 			     int max )
 {
@@ -583,7 +586,9 @@ void settings::openUrl( const QString& e )
 
 settings::~settings()
 {
-	this->clearFlatPakTemps() ;
+	// Flatpak handoff playlists are intentionally leased beyond this process.
+	// Stale handoffs are reclaimed on a later startup instead of being deleted
+	// while a detached desktop-launched player may still be opening them.
 }
 
 QSettings& settings::bk()
@@ -1407,13 +1412,21 @@ void settings::clearFlatPakTemps()
 {
 	if( utility::platformisFlatPak() ){
 
-		auto ee = QDir( m_appDataPath ).filePath( "tmp" ) ;
+		const auto root = QDir( m_appDataPath ).filePath( "tmp" ) ;
+		const auto now = QDateTime::currentDateTimeUtc() ;
+		const qint64 leaseSeconds = 24 * 60 * 60 ;
 
-		directoryManager::readAll( ee ).forEachFile( [ & ]( const QString& e ){
+		directoryManager::readAll( root ).forEachFile( [ & ]( const QString& name ){
 
-			if( e.endsWith( ".m3u8" ) ){
+			if( !name.endsWith( ".m3u8" ) ){
+				return ;
+			}
 
-				QFile::remove( ee + "/" + e ) ;
+			const auto path = QDir( root ).filePath( name ) ;
+			const QFileInfo info( path ) ;
+			if( info.exists() &&
+			    info.lastModified().toUTC().secsTo( now ) >= leaseSeconds ){
+				QFile::remove( path ) ;
 			}
 		} ) ;
 	}
@@ -1625,26 +1638,24 @@ QByteArray settings::hash( quint64 i,const QString& s )
 
 QString settings::tmpFile( const QString& e,const QString& s )
 {
-	QString m ;
+	Q_UNUSED( s )
 
-	for( quint64 i = 0 ; i < 100 ; i++ ){
-
-		m = "tmp/" + this->hash( i,s ) + ".m3u8" ;
-
-		if( e.endsWith( "/" ) ){
-
-			m = e + m ;
-		}else{
-			m = e + "/" + m ;
-		}
-
-		if( !QFile::exists( m ) ){
-
-			break ;
-		}
+	const auto tmpRoot = QDir( e ).filePath( "tmp" ) ;
+	if( !QDir().mkpath( tmpRoot ) ){
+		return {} ;
 	}
 
-	return m ;
+	// QTemporaryFile performs an exclusive create, so multiple supported
+	// application instances can never reserve the same external-player handoff.
+	QTemporaryFile file( QDir( tmpRoot ).filePath( "handoff-XXXXXX.m3u8" ) ) ;
+	file.setAutoRemove( false ) ;
+	if( !file.open() ){
+		return {} ;
+	}
+
+	const auto path = file.fileName() ;
+	file.close() ;
+	return path ;
 }
 
 QStringList settings::mediaPlayer::action::setVLCoptions( const QStringList& m ) const
@@ -1692,34 +1703,39 @@ void settings::mediaPlayer::action::operator()() const
 			}
 		}else{
 			auto urls = m_urls.join( "\n" ) ;
+			const auto m = m_settings.tmpFile( m_appDataPath,urls ) ;
+			if( m.isEmpty() ){
+				this->logError() ;
+				return ;
+			}
 
-			auto m = m_settings.tmpFile( m_appDataPath,urls ) ;
+			auto duration = m_obj.value( "duration" ).toString().toUtf8() ;
+			auto title    = m_obj.value( "title" ).toString().toUtf8() ;
 
-			QFile ff( m ) ;
+			// EXTINF metadata is line-oriented. Provider-controlled title text
+			// must never terminate the metadata line and inject another URL or
+			// playlist directive into the desktop handoff.
+			title.replace( '\r',' ' ) ;
+			title.replace( '\n',' ' ) ;
 
-			if( ff.open( QIODevice::WriteOnly ) ){
+			QByteArray payload = "#EXTM3U\n\n" ;
+			if( duration != "0" && !title.isEmpty() && title != "NA" ){
+				payload += "#EXTINF:" + duration + ", " + title + "\n" ;
+			}
+			payload += urls.toUtf8() + "\n" ;
 
-				auto duration = m_obj.value( "duration" ).toString().toUtf8() ;
-				auto title    = m_obj.value( "title" ).toString().toUtf8() ;
+			QSaveFile out( m ) ;
+			if( !out.open( QIODevice::WriteOnly ) ||
+			    out.write( payload ) != payload.size() ||
+			    !out.commit() ){
+				QFile::remove( m ) ;
+				this->logError() ;
+				return ;
+			}
 
-				// EXTINF metadata is line-oriented. Provider-controlled title text
-				// must never be able to terminate the metadata line and inject a
-				// second URL or playlist directive into the external-player handoff.
-				title.replace( '\r',' ' ) ;
-				title.replace( '\n',' ' ) ;
-
-				QByteArray aa = "#EXTM3U\n\n" ;
-
-				if( duration != "0" && !title.isEmpty() && title != "NA" ){
-
-					aa += "#EXTINF:" + duration + ", " + title + "\n" ;
-				}
-
-				ff.write( aa + urls.toUtf8() + "\n" ) ;
-
-				ff.close() ;
-
-				QDesktopServices::openUrl( QUrl::fromLocalFile( m ) ) ;
+			if( !QDesktopServices::openUrl( QUrl::fromLocalFile( m ) ) ){
+				QFile::remove( m ) ;
+				this->logError() ;
 			}
 		}
 
