@@ -35,6 +35,8 @@
 #include <QDateTime>
 #include <QUrl>
 #include <QUuid>
+#include <QPointer>
+#include <QWidget>
 
 #include <chrono>
 
@@ -68,6 +70,56 @@ QString removeUpdatePath( const QString& path )
 QString uniqueUpdateSibling( const QString& path,const QString& tag )
 {
     return path + "." + tag + "-" + QUuid::createUuid().toString( QUuid::WithoutBraces ) ;
+}
+
+struct ParsedReleaseDigest
+{
+    bool present = false ;
+    bool valid = true ;
+    QString sha256 ;
+    QString error ;
+};
+
+ParsedReleaseDigest parseReleaseSha256( QString digest )
+{
+    ParsedReleaseDigest out ;
+    digest = digest.trimmed() ;
+    if( digest.isEmpty() ){
+        return out ;
+    }
+
+    out.present = true ;
+    QString hex = digest ;
+    const auto separator = digest.indexOf( ':' ) ;
+    if( separator >= 0 ){
+        const auto algorithm = digest.left( separator ).trimmed() ;
+        if( algorithm.compare( "sha256",Qt::CaseInsensitive ) != 0 ){
+            out.valid = false ;
+            out.error = QObject::tr( "Unsupported release digest algorithm: %1" ).arg( algorithm ) ;
+            return out ;
+        }
+        hex = digest.mid( separator + 1 ).trimmed() ;
+    }
+
+    if( hex.size() != 64 ){
+        out.valid = false ;
+        out.error = QObject::tr( "Malformed SHA-256 release digest" ) ;
+        return out ;
+    }
+
+    for( const auto ch : hex ){
+        const auto c = ch.toLower() ;
+        const bool digit = c >= QLatin1Char( '0' ) && c <= QLatin1Char( '9' ) ;
+        const bool alpha = c >= QLatin1Char( 'a' ) && c <= QLatin1Char( 'f' ) ;
+        if( !digit && !alpha ){
+            out.valid = false ;
+            out.error = QObject::tr( "Malformed SHA-256 release digest" ) ;
+            return out ;
+        }
+    }
+
+    out.sha256 = hex.toLower() ;
+    return out ;
 }
 
 QString restoreUpdateBackup( const QString& backup,const QString& destination )
@@ -368,9 +420,21 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 			return ;
 		}
 
-		if( p.success() ){			
+		if( p.success() ){
 
-			if( md.hash.isEmpty() ){
+			const auto digest = parseReleaseSha256( md.hash ) ;
+			if( !digest.valid ){
+				md.status.done() ;
+				this->post( m_appName,QObject::tr( "Download Failed: invalid release digest metadata: %1" ).arg( digest.error ),md.id ) ;
+				const auto cleanupError = utility::removeFile( md.tmpFile ) ;
+				if( !cleanupError.isEmpty() ){
+					this->failedToRemove( m_appName,md.tmpFile,cleanupError,md.id ) ;
+				}
+				m_tabManager.enableAll() ;
+				return ;
+			}
+
+			if( !digest.present ){
 
 				auto m = QObject::tr( "Skipping Remote Download Hash Check" ) ;
 
@@ -378,18 +442,18 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 
 				this->extractMediaDownloader( md.move() ) ;
 			}else{
-				auto m = receivedHash.toHex().toLower() ;
+				auto actual = receivedHash.toHex().toLower() ;
 
 				if( utility::cliArguments::useFakeMdHash() ){
 
-					m = "bogusHashValue" ;
+					actual = "bogusHashValue" ;
 				}
 
-				if( md.hash == m ){
+				if( digest.sha256 == actual ){
 
 					this->extractMediaDownloader( md.move() ) ;
 				}else{
-					this->hashDoNotMatch( md.hash,m,md.id ) ;
+					this->hashDoNotMatch( digest.sha256,actual,md.id ) ;
 
 					const auto cleanupError = utility::removeFile( md.tmpFile ) ;
 					if( !cleanupError.isEmpty() ){
@@ -461,20 +525,35 @@ void networkAccess::updateMediaDownloader( networkAccess::updateMDOptions md ) c
 	}
 }
 
-void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils::qprocess::outPut& s ) const
+void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils::qprocess::outPut& result ) const
 {
-	auto mm = utility::removeFile( md.tmpFile ) ;
+	const auto archiveCleanup = utility::removeFile( md.tmpFile ) ;
 
-	if( !mm.isEmpty() ){
-
-		this->failedToRemove( m_appName,md.tmpFile,mm,md.id ) ;
+	if( !archiveCleanup.isEmpty() ){
+		this->failedToRemove( m_appName,md.tmpFile,archiveCleanup,md.id ) ;
 	}
 
-	if( s.success() ){
+	auto cleanupStage = [&](){
+		if( !md.extractStagePath.isEmpty() ){
+			const auto cleanup = utility::removeFolder( md.extractStagePath ) ;
+			if( !cleanup.isEmpty() ){
+				this->failedToRemove( m_appName,md.extractStagePath,cleanup,md.id ) ;
+			}
+		}
+	} ;
 
-		auto mm = md.name ;
+	if( result.success() ){
 
-		auto extractedPath = md.tmpPath + "/" + mm.mid( 0,mm.size() - 4 ) ;
+		const auto baseName = md.name.left( md.name.size() - 4 ) ;
+		const auto extractedPath = QDir( md.extractStagePath ).filePath( baseName ) ;
+		const auto expectedExecutable = QDir( extractedPath ).filePath( "media-downloader.exe" ) ;
+
+		if( !QFileInfo( extractedPath ).isDir() || !QFileInfo( expectedExecutable ).isFile() ){
+			md.status.done() ;
+			this->post( m_appName,QObject::tr( "Failed To Extract: updater archive is missing the expected application layout" ),md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
 
 		auto e = utility::rename( extractedPath,md.finalPath ) ;
 
@@ -486,6 +565,7 @@ void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils:
 
 			QDir().rmdir( md.finalPath + "/local" ) ;
 
+			cleanupStage() ;
 			md.status.done() ;
 
 			auto m = QObject::tr( "Update Complete, Restart To Use New Version" ) ;
@@ -495,11 +575,13 @@ void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils:
 			md.status.done() ;
 
 			this->failedToRename( md.name,extractedPath,md.finalPath,e,md.id ) ;
+			cleanupStage() ;
 		}
 	}else{
 		md.status.done() ;
 
-		this->failedToExtract( md.exeArgs,s,md.id ) ;
+		this->failedToExtract( md.exeArgs,result,md.id ) ;
+		cleanupStage() ;
 	}
 }
 
@@ -563,44 +645,76 @@ void networkAccess::extractMediaDownloader( networkAccess::updateMDOptions md ) 
 	const auto& paths = m_ctx.Engines().engineDirPaths() ;
 
 	md.tmpPath = paths.basePath() ;
-
 	md.finalPath = paths.updateNewPath() ;
+	md.extractStagePath = QDir( md.tmpPath ).filePath(
+		".mdps-app-update-extract-" + QUuid::createUuid().toString( QUuid::WithoutBraces ) ) ;
 
 	class meaw
 	{
 	public:
-		meaw( const networkAccess& na,networkAccess::updateMDOptions md ) :
-			m_parent( na ),m_md( md.move() )
+		meaw( const networkAccess * parent,networkAccess::updateMDOptions md ) :
+			m_parent( parent ),m_md( md.move() )
 		{
 		}
-		void bg()
+		QString bg()
 		{
-			m_err = utility::removeFolder( m_md.finalPath ) ;
-		}
-		void fg()
-		{
-			if( !m_err.isEmpty() ){
-
-				m_parent.failedToRemove( m_parent.m_appName,m_md.finalPath,m_err,m_md.id ) ;
+			// Background work owns only update paths. It must not dereference the
+			// networkAccess/Context owner while application shutdown can tear it down.
+			const auto oldStage = utility::removeFolder( m_md.finalPath ) ;
+			if( !oldStage.isEmpty() ){
+				return oldStage ;
 			}
 
-			auto exe = m_parent.m_ctx.Engines().findExecutable( "bsdtar.exe" ) ;
+			if( !QDir().mkpath( m_md.extractStagePath ) ){
+				return QObject::tr( "Failed to create unique updater extraction directory: %1" ).arg( m_md.extractStagePath ) ;
+			}
+			return {} ;
+		}
+		void fg( QString&& error )
+		{
+			if( !error.isEmpty() ){
+				m_parent->failedToRemove( m_parent->m_appName,m_md.finalPath,error,m_md.id ) ;
+				m_md.status.done() ;
+				utility::removeFile( m_md.tmpFile ) ;
+				utility::removeFolder( m_md.extractStagePath ) ;
+				m_parent->m_tabManager.enableAll() ;
+				return ;
+			}
 
-			auto args = QStringList{ "-x","-f",m_md.tmpFile,"-C",m_md.tmpPath } ;
+			auto exe = m_parent->m_ctx.Engines().findExecutable( "bsdtar.exe" ) ;
 
-			auto m = QProcess::MergedChannels ;
+			if( exe.isEmpty() ){
+				m_md.status.done() ;
+				m_parent->post( m_parent->m_appName,QObject::tr( "Failed To Extract: bsdtar.exe was not found" ),m_md.id ) ;
+				utility::removeFile( m_md.tmpFile ) ;
+				utility::removeFolder( m_md.extractStagePath ) ;
+				m_parent->m_tabManager.enableAll() ;
+				return ;
+			}
 
+			auto args = QStringList{ "-x","-f",m_md.tmpFile,"-C",m_md.extractStagePath } ;
+			auto mode = QProcess::MergedChannels ;
 			m_md.exeArgs = { exe,args } ;
 
-			utils::qprocess::run( exe,args,m,m_md.move(),&m_parent,&networkAccess::emDownloader ) ;
+			QPointer< QWidget > guard( &m_parent->m_ctx.mainWidget() ) ;
+			const auto * parent = m_parent ;
+			auto moved = m_md.move() ;
+
+			utils::qprocess::run( exe,args,mode,
+				[ guard,parent,md = std::move( moved ) ]( const utils::qprocess::outPut& output ) mutable {
+					if( guard ){
+						parent->emDownloader( std::move( md ),output ) ;
+					}
+				} ) ;
 		}
 	private:
-		QString m_err ;
-		const networkAccess& m_parent ;
+		const networkAccess * m_parent ;
 		networkAccess::updateMDOptions m_md ;
 	} ;
 
-	utils::qthread::run( meaw( *this,md.move() ) ) ;
+	// Foreground continuation is bound to the main widget lifetime. The worker
+	// itself does not touch networkAccess or Context.
+	utils::qthread::run( &m_ctx.mainWidget(),meaw( this,md.move() ) ) ;
 }
 
 QNetworkRequest networkAccess::networkRequest( const QString& url,const QByteArray& userAgent,const QByteArray& referer ) const
