@@ -696,7 +696,7 @@ const QByteArray& lux::lux_dlFilter::setFileName( Logger::Data& e,const QByteArr
 			m_tmp += "\n" + fileName ;
 
 			e.addFileName( fileName ) ;
-		}else if( QFile::rename( old,New ) ){
+		}else if( old == New || QFile::rename( old,New ) ){
 
 			// Publish the requested filename only after the filesystem mutation
 			// is known to have completed successfully.
