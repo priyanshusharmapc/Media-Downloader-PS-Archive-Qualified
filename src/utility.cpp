@@ -1547,7 +1547,7 @@ void utility::saveDownloadList( const Context& ctx,QMenu& m,tableWidget& tableWi
 
 			const auto e = _saveDownloadList( tableWidget,false ) ;
 
-			if( s.endsWith( ".json",Qt::CaseInsensitive ) ){
+			if( QFileInfo( s ).suffix().compare( "json",Qt::CaseInsensitive ) == 0 ){
 
 				auto m = QJsonDocument( e ).toJson( QJsonDocument::Indented ) ;
 
