@@ -790,6 +790,7 @@ namespace utility
 	QString downloadFolder( const Context& ctx ) ;
 	bool onlyWantedVersionInfo( const utility::cliArguments& ) ;
 	bool isOwnedUpdateCleanupPath( const QString& configPath,const QString& candidate,bool runningUpdated,const QString& currentExecutable ) ;
+	bool updaterTreeIsSafe( const QString& root,QString * error = nullptr ) ;
 	bool startedUpdatedVersion( settings&,const utility::cliArguments& ) ;
 	void hideUnhideEntries( QMenu&,tableWidget&,int,bool ) ;
 	quint64 simpleRandomNumber() ;
@@ -2067,7 +2068,7 @@ namespace utility
 			return m_formats ;
 		}
 		QJsonObject uiJson() const ;
-		int intDuration() const
+		qint64 intDuration() const
 		{
 			return m_intDuration ;
 		}
@@ -2131,7 +2132,7 @@ namespace utility
 		QString m_n_entries ;
 
 		QJsonArray m_formats ;
-		int m_intDuration = 0 ;
+		qint64 m_intDuration = 0 ;
 		util::Json m_json ;
 
 		bool m_showFirst = false ;

@@ -120,8 +120,25 @@ inline bool stringArrayField(const QJsonObject& o,const QString& key,QString* er
     return true;
 }
 inline bool representationShape(const QJsonObject& r,const QString& name,QString* error){
-    for(const auto& key:QStringList{"state","path","origin","verified_at","error"})
+    for(const auto& key:QStringList{"state","path","origin","verified_at","error","verified_sha256","verification_profile"})
         if(!stringField(r,key,key=="state",error,"representation "+name))return false;
+
+    if(r.contains("verified_sha256")){
+        const auto value=r.value("verified_sha256").toString();
+        if(!value.isEmpty()&&!QRegularExpression("^[0-9A-Fa-f]{64}$").match(value).hasMatch())
+            return reject(error,"representation "+name+" has invalid verified_sha256");
+    }
+
+    if(r.contains("verified_size")){
+        const auto value=r.value("verified_size");
+        if(!value.isDouble())return reject(error,"representation "+name+" has non-numeric verified_size");
+        const auto number=value.toDouble();
+        // 2^63 is exactly representable as double. Use an exclusive bound so
+        // rounding of qint64::max() can never admit an out-of-range cast.
+        constexpr double qint64ExclusiveUpper=9223372036854775808.0;
+        if(!std::isfinite(number)||number<0||std::floor(number)!=number||number>=qint64ExclusiveUpper)
+            return reject(error,"representation "+name+" has invalid verified_size");
+    }
     return true;
 }
 

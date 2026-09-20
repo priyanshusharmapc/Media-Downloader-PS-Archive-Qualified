@@ -162,9 +162,7 @@ QString safaribooks::commandString( const engines::engine::exeArgs::cmd& cmd )
 	for( int i = 0 ; i < args.size() ; i++ ){
 
 		if( i > 0 && args[ i - 1 ] == "--cred" ){
-			m += " \"" + args[ i ] + "\"" ;
-
-			//m += " \"" + QObject::tr( "<REDACTED>" ) + "\"" ;
+			m += " \"" + QObject::tr( "<REDACTED>" ) + "\"" ;
 		}else{
 			m += " \"" + args[ i ] + "\"" ;
 		}

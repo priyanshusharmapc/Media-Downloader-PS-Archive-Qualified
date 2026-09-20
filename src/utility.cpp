@@ -25,14 +25,18 @@
 #include "tableWidget.h"
 #include "tabmanager.h"
 #include "version.h"
+#include "archive/archiveprocess.h"
 
 #include <QEventLoop>
 #include <QDesktopServices>
 #include <QClipboard>
 #include <QMimeData>
 #include <QFileDialog>
+#include <QMessageBox>
 #include <QSysInfo>
 #include <QFile>
+#include <QDirIterator>
+#include <QLockFile>
 #include <QSaveFile>
 #include <QJsonDocument>
 #include <QUrl>
@@ -1618,7 +1622,10 @@ void utility::saveDownloadList( const Context& ctx,QMenu& m,tableWidget& tableWi
 
 				auto m = QJsonDocument( e ).toJson( QJsonDocument::Indented ) ;
 
-				engines::file( s,ctx.logger() ).write( m ) ;
+				if( !engines::file( s,ctx.logger() ).write( m ) ){
+					QMessageBox::critical( &ctx.mainWidget(),QObject::tr( "Save List To File" ),
+						QObject::tr( "Failed to save the list. The previous file was preserved." ) ) ;
+				}
 			}else{
 				QByteArray m ;
 
@@ -1640,7 +1647,10 @@ void utility::saveDownloadList( const Context& ctx,QMenu& m,tableWidget& tableWi
 					m.append( url + "\n\n" ) ;
 				}
 
-				engines::file( s,ctx.logger() ).write( m ) ;
+				if( !engines::file( s,ctx.logger() ).write( QString::fromUtf8( m ) ) ){
+					QMessageBox::critical( &ctx.mainWidget(),QObject::tr( "Save List To File" ),
+						QObject::tr( "Failed to save the list. The previous file was preserved." ) ) ;
+				}
 			}
 		}
 	} ) ;
@@ -1715,7 +1725,7 @@ QJsonObject utility::MediaEntry::uiJson() const
 	obj.insert( "title",m_title ) ;
 	obj.insert( "url",m_url ) ;
 	obj.insert( "duration",d ) ;
-	obj.insert( "intDuration",m_intDuration ) ;
+	obj.insert( "intDuration",static_cast< double >( m_intDuration ) ) ;
 	obj.insert( "upload_date",u ) ;
 	obj.insert( "uploader",m_uploader ) ;
 	obj.insert( "id",m_id ) ;
@@ -1768,17 +1778,27 @@ void utility::MediaEntry::parseJson()
 	}
 
 	auto duration = object.value( "duration" ) ;
-
+	double durationSeconds = 0.0 ;
+	bool durationOk = false ;
 	if( duration.isDouble() ){
+		durationSeconds = duration.toDouble() ;
+		durationOk = std::isfinite( durationSeconds ) ;
+	}else if( duration.isString() ){
+		durationSeconds = duration.toString().toDouble( &durationOk ) ;
+	}
 
-		m_intDuration = static_cast< int >( duration.toDouble() ) ;
+	constexpr double largestExactJsonInteger=9007199254740991.0 ;
+	const double largestSafeSeconds=std::min(
+		largestExactJsonInteger,
+		static_cast< double >( std::numeric_limits< qint64 >::max() / 1000LL ) ) ;
+	if( durationOk && durationSeconds >= 0.0 && durationSeconds <= largestSafeSeconds ){
+		m_intDuration = static_cast< qint64 >( std::floor( durationSeconds ) ) ;
 	}else{
-		m_intDuration = duration.toInt() ;
+		m_intDuration = 0 ;
 	}
 
 	if( m_intDuration != 0 ){
-
-		auto s = engines::engine::baseEngine::timer::duration( m_intDuration * 1000 ) ;
+		auto s = engines::engine::baseEngine::timer::duration( m_intDuration * 1000LL ) ;
 		m_duration = utility::stringConstants::duration() + " " + s ;
 	}
 }
@@ -1945,6 +1965,96 @@ bool utility::onlyWantedVersionInfo( const utility::cliArguments& args )
 	}
 }
 
+bool utility::updaterTreeIsSafe( const QString& root,QString * error )
+{
+	const QFileInfo rootInfo( QDir::cleanPath( QFileInfo( root ).absoluteFilePath() ) ) ;
+	if( !rootInfo.exists() || !rootInfo.isDir() || rootInfo.isSymLink() ){
+		if( error )*error = "Updater tree root is missing, non-directory, or linked" ;
+		return false ;
+	}
+#if QT_VERSION >= QT_VERSION_CHECK( 6,2,0 )
+	if( rootInfo.isJunction() ){
+		if( error )*error = "Updater tree root is a junction" ;
+		return false ;
+	}
+#endif
+#ifdef Q_OS_WIN
+	const auto rootNative = QDir::toNativeSeparators( rootInfo.absoluteFilePath() ) ;
+	const auto rootAttributes = GetFileAttributesW( reinterpret_cast< LPCWSTR >( rootNative.utf16() ) ) ;
+	if( rootAttributes == INVALID_FILE_ATTRIBUTES || ( rootAttributes & FILE_ATTRIBUTE_REPARSE_POINT ) ){
+		if( error )*error = "Updater tree root is an unsafe reparse point" ;
+		return false ;
+	}
+#endif
+
+	const auto rootCanonical = QDir::fromNativeSeparators( rootInfo.canonicalFilePath() ) ;
+	if( rootCanonical.isEmpty() ){
+		if( error )*error = "Updater tree root has no canonical identity" ;
+		return false ;
+	}
+	const auto prefix = rootCanonical.endsWith( '/' ) ? rootCanonical : rootCanonical + "/" ;
+
+	QDirIterator iter( rootInfo.absoluteFilePath(),
+		QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
+		QDirIterator::Subdirectories ) ;
+	while( iter.hasNext() ){
+		iter.next() ;
+		const auto info = iter.fileInfo() ;
+		if( info.isSymLink() ){
+			if( error )*error = "Linked updater entry refused: " + info.absoluteFilePath() ;
+			return false ;
+		}
+#if QT_VERSION >= QT_VERSION_CHECK( 6,2,0 )
+		if( info.isJunction() ){
+			if( error )*error = "Updater junction refused: " + info.absoluteFilePath() ;
+			return false ;
+		}
+#endif
+		if( !info.isFile() && !info.isDir() ){
+			if( error )*error = "Special updater filesystem entry refused: " + info.absoluteFilePath() ;
+			return false ;
+		}
+#ifdef Q_OS_WIN
+		const auto native = QDir::toNativeSeparators( info.absoluteFilePath() ) ;
+		const auto attributes = GetFileAttributesW( reinterpret_cast< LPCWSTR >( native.utf16() ) ) ;
+		if( attributes == INVALID_FILE_ATTRIBUTES || ( attributes & FILE_ATTRIBUTE_REPARSE_POINT ) ){
+			if( error )*error = "Updater reparse point refused: " + info.absoluteFilePath() ;
+			return false ;
+		}
+		if( info.isFile() ){
+			const auto handle = CreateFileW( reinterpret_cast< LPCWSTR >( native.utf16() ),
+				FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
+				nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr ) ;
+			if( handle == INVALID_HANDLE_VALUE ){
+				if( error )*error = "Unable to inspect updater file identity: " + info.absoluteFilePath() ;
+				return false ;
+			}
+			BY_HANDLE_FILE_INFORMATION fileInfo{} ;
+			const auto queried = GetFileInformationByHandle( handle,&fileInfo ) != FALSE ;
+			CloseHandle( handle ) ;
+			if( !queried || fileInfo.nNumberOfLinks != 1 ){
+				if( error )*error = "Updater hard-linked/uninspectable file refused: " + info.absoluteFilePath() ;
+				return false ;
+			}
+		}
+#endif
+		const auto canonical = QDir::fromNativeSeparators( info.canonicalFilePath() ) ;
+		if( canonical.isEmpty() ){
+			if( error )*error = "Updater entry has no canonical identity: " + info.absoluteFilePath() ;
+			return false ;
+		}
+#ifdef Q_OS_WIN
+		if( !canonical.startsWith( prefix,Qt::CaseInsensitive ) ){
+#else
+		if( !canonical.startsWith( prefix,Qt::CaseSensitive ) ){
+#endif
+			if( error )*error = "Updater entry escapes staged package: " + info.absoluteFilePath() ;
+			return false ;
+		}
+	}
+	return true ;
+}
+
 static util::version _get_process_version( const QString& path,
 					   const QString& cmd,
 					   const QProcessEnvironment& env )
@@ -1970,25 +2080,22 @@ static util::version _get_process_version( const QString& path,
 		file.remove() ;
 	}
 
-	QProcess exe ;
+	// The staged updater executable is untrusted until its version has been
+	// checked. Probe it through the bounded process-tree helper and preserve
+	// the explicit updater environment required for bundled Qt/plugins.
+	const auto probe = archive::detail::runContainedProcess(
+		cmd,{ "--version" },QString(),10000,nullptr,&env ) ;
 
-	exe.setProgram( cmd ) ;
-	exe.setArguments( { "--version" } ) ;
-	exe.setProcessEnvironment( env ) ;
-
-	exe.start() ;
-
-	exe.waitForFinished() ;
-
-	util::version m = exe.readAllStandardOutput().trimmed() ;
+	util::version m = probe.ok ? probe.standardOutput.trimmed() : QString() ;
 
 	if( m.valid() ){
-
-		QFile file( e ) ;
-
-		if( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-			file.write( m.toString().toUtf8() ) ;
+		const auto bytes = m.toString().toUtf8() ;
+		QSaveFile file( e ) ;
+		file.setDirectWriteFallback( false ) ;
+		if( file.open( QIODevice::WriteOnly ) && file.write( bytes ) == bytes.size() ){
+			file.commit() ;
+		}else{
+			file.cancelWriting() ;
 		}
 	}
 
@@ -2072,6 +2179,15 @@ bool utility::startedUpdatedVersion( settings& s,const utility::cliArguments& ca
 	const auto update_new  = ew ? cpath + "update_new" : cpath + "/update_new" ;
 	const auto update      = ew ? cpath + "update" : cpath + "/update" ;
 
+	// Update promotion precedes the normal single-instance protocol. Serialize
+	// that shared filesystem transaction explicitly so a second old executable
+	// can never win the application lock while the updated process is starting.
+	QLockFile startupLock( QDir( cpath ).filePath( ".mdps-updater-startup.lock" ) ) ;
+	startupLock.setStaleLockTime( 30000 ) ;
+	if( !startupLock.tryLock( 10000 ) ){
+		return QFileInfo::exists( update_new ) || QFileInfo::exists( update ) ;
+	}
+
 	QString updated_old ;
 
 	if( QFile::exists( update_new ) ){
@@ -2120,6 +2236,10 @@ bool utility::startedUpdatedVersion( settings& s,const utility::cliArguments& ca
 	QString exePath = update + "/media-downloader.exe" ;
 
 	if( QFile::exists( exePath ) && !cargs.runningUpdated() ){
+		QString treeError ;
+		if( !utility::updaterTreeIsSafe( update,&treeError ) ){
+			return false ;
+		}
 
 		auto env = QProcessEnvironment::systemEnvironment() ;
 

@@ -80,8 +80,20 @@ int main(int argc,char** argv){
         auto sources=store.loadSources(&stateError);if(!stateError.isEmpty()){error<<stateError<<"\n";return 1;}
         archive::Source source;source.key=sourceKey;source.url=args[3];source.title=args.size()==5?args[4]:sourceKey;
         source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
-        for(const auto& previous:sources)if(previous.key==sourceKey){source=previous;source.url=args[3];if(args.size()==5)source.title=args[4];break;}
-        archive::PlaylistDiscovery discovery(config,logger);const auto snapshot=discovery.discover(source);const auto result=store.reconcile(source,snapshot,&logger);
+        bool alreadyRegistered=false;
+        for(const auto& previous:sources)if(previous.key==sourceKey){
+            alreadyRegistered=true;source=previous;source.url=args[3];if(args.size()==5)source.title=args[4];break;
+        }
+        archive::PlaylistDiscovery discovery(config,logger);const auto snapshot=discovery.discover(source);
+        // First admission is atomic across GUI and CLI: an incomplete provider
+        // snapshot is evidence of failure, not permission to create a durable
+        // source or partial playlist graph.
+        if(!alreadyRegistered&&!snapshot.complete){
+            out<<"source_key="<<sourceKey<<"\ncomplete=false\ncommitted=false\nprojections=not_attempted\n";
+            error<<snapshot.error<<"\n";
+            return 3;
+        }
+        const auto result=store.reconcile(source,snapshot,&logger);
         out<<"source_key="<<sourceKey<<"\ncomplete="<<(snapshot.complete?"true":"false")<<"\nobserved="<<result.observed<<"\nactive="<<result.active<<"\nremoved="<<result.removed<<"\nunavailable="<<result.unavailable<<"\n";
         out<<"committed="<<(result.committed?"true":"false")<<"\nprojections="<<(!result.committed?"not_attempted":result.projectionsCurrent?"current":"dirty")<<"\n";
         if(!result.committed){error<<result.error<<"\n";return 1;}

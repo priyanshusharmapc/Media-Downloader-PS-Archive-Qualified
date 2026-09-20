@@ -69,15 +69,15 @@ public:
 			m_filePath( path ),m_file( m_filePath ),m_logger( logger )
 		{
 		}
-		void write( const QString& ) ;
-		void write( const QJsonDocument&,
+		bool write( const QString& ) ;
+		bool write( const QJsonDocument&,
 			    QJsonDocument::JsonFormat = QJsonDocument::Indented ) ;
-		void write( const QJsonObject&,
+		bool write( const QJsonObject&,
 			    QJsonDocument::JsonFormat = QJsonDocument::Indented ) ;
 		QByteArray readAll() ;
 		QStringList readAllAsLines() ;
 		template< typename Function >
-		static void readAll( const QString& filePath,Logger& logger,Function function )
+		static void readAll( QObject * context,const QString& filePath,Logger& logger,Function function )
 		{
 			class meaw
 			{
@@ -104,7 +104,7 @@ public:
 					QByteArray m_data ;
 				} ;
 				meaw( const QString& file,Function f,Logger& l ) :
-					m_filePath( file ),m_function( std::move( f ) ),m_logger( l )
+					m_filePath( file ),m_function( std::move( f ) ),m_logger( &l )
 				{
 				}
 				result bg()
@@ -124,17 +124,20 @@ public:
 
 						m_function( true,r.data() ) ;
 					}else{
-						engines::file( m_filePath,m_logger ).failToOpenForReading() ;
+						engines::file( m_filePath,*m_logger ).failToOpenForReading() ;
 						m_function( false,r.data() ) ;
 					}
 				}
 			private:
 				QString m_filePath ;
 				Function m_function ;
-				Logger& m_logger ;
+				Logger * m_logger ;
 			} ;
 
-			utils::qthread::run( meaw( filePath,std::move( function ),logger ) ) ;
+			// Both the logger access and arbitrary owner callback are foreground
+			// operations guarded by the caller's QObject lifetime. Background work
+			// owns only the immutable path and never dereferences UI/controller state.
+			utils::qthread::run( context,meaw( filePath,std::move( function ),logger ) ) ;
 		}
 	private:
 		void failToOpenForReading() ;

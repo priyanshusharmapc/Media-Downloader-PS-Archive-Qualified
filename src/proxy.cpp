@@ -19,7 +19,11 @@
 
 #include "proxy.h"
 #include "utils/qprocess.hpp"
+#include "utils/threads.hpp"
 #include "utility.h"
+
+#include <atomic>
+#include <limits>
 
 static QString _find_proxy( const QProcessEnvironment& )
 {
@@ -87,40 +91,46 @@ static void _get_proxy_from_gateway_linux( Context& ctx,const QByteArray& addr,b
 	QFile file( "/proc/net/route" ) ;
 
 	if( !file.open( QIODevice::ReadOnly ) ){
-
-		// A failed gateway lookup must still leave networking in a deliberate
-		// state. Returning here would retain whichever proxy happened to be
-		// active before the user selected the gateway-based configuration.
 		ctx.setNetworkProxy( firstTime ) ;
 		return ;
 	}
 
-	const auto mm = util::split( file.readAll(),'\n' ) ;
+	QByteArray bestGateway ;
+	int bestMetric = std::numeric_limits< int >::max() ;
 
-	for( const auto& it : mm ){
+	for( const auto& line : util::split( file.readAll(),'\n' ) ){
+		const auto fields = line.simplified().split( ' ' ) ;
+		if( fields.size() < 7 || fields[ 1 ] != "00000000" ){
+			continue ;
+		}
 
-		auto s = util::split( it,'\t' ) ;
+		bool gatewayOk = false ;
+		bool flagsOk = false ;
+		bool metricOk = false ;
+		fields[ 2 ].toUInt( &gatewayOk,16 ) ;
+		const auto flags = fields[ 3 ].toUInt( &flagsOk,16 ) ;
+		const auto metric = fields[ 6 ].toInt( &metricOk,10 ) ;
 
-		if( s.size() > 1 && s[ 1 ] == "00000000" ){
+		// Linux route flags: RTF_UP=0x1, RTF_GATEWAY=0x2.
+		if( !gatewayOk || !flagsOk || !metricOk || metric < 0 ||
+		    fields[ 2 ].size() != 8 || ( flags & 0x3u ) != 0x3u ){
+			continue ;
+		}
 
-			const auto& m = s[ 2 ] ;
-
-			if( m.size() == 8 ){
-
-				QString s = addr ;
-
-				s.replace( "${gateway}",_ip_address( m ) ) ;
-
-				ctx.setNetworkProxy( s,firstTime ) ;
-			}else{
-				ctx.setNetworkProxy( firstTime ) ;
-			}
-
-			return ;
+		if( metric < bestMetric ){
+			bestMetric = metric ;
+			bestGateway = fields[ 2 ] ;
 		}
 	}
 
-	ctx.setNetworkProxy( firstTime ) ;
+	if( bestGateway.isEmpty() ){
+		ctx.setNetworkProxy( firstTime ) ;
+		return ;
+	}
+
+	QString expanded = addr ;
+	expanded.replace( "${gateway}",_ip_address( bestGateway ) ) ;
+	ctx.setNetworkProxy( expanded,firstTime ) ;
 }
 
 static void _get_proxy_from_gateway_win( Context& ctx,const QByteArray& addr,bool firstTime )
@@ -141,22 +151,53 @@ static void _get_proxy_from_gateway_win( Context& ctx,const QByteArray& addr,boo
 
 using mm = settings::proxySettings ;
 
+static std::atomic< quint64 > _proxyGeneration{ 0 } ;
+
 void proxy::set( Context& ctx,bool firstTime,const QByteArray& proxyAddress,const mm::type& m )
 {
+	const auto generation = ++_proxyGeneration ;
+
 	if( utility::platformIsWindows() && m.system() ){
-
-		// Keep Context lifetime explicit. The previous detached worker retained a
-		// raw Context& and could call back after MainWindow/tab teardown.
-		const auto proxies = QNetworkProxyFactory::systemProxyForQuery() ;
-		for( const auto& it : proxies ){
-
-			if( !it.hostName().isEmpty() ){
-
-				ctx.setNetworkProxy( it,firstTime ) ;
-				return ;
+		class systemProxyLookup
+		{
+		public:
+			systemProxyLookup( Context& context,bool first,quint64 generation ) :
+				m_ctx( &context ),m_firstTime( first ),m_generation( generation )
+			{
 			}
-		}
-		ctx.setNetworkProxy( firstTime ) ;
+			QList< QNetworkProxy > bg()
+			{
+				return QNetworkProxyFactory::systemProxyForQuery() ;
+			}
+			void fg( QList< QNetworkProxy >&& proxies )
+			{
+				if( m_generation != _proxyGeneration.load() ){
+					return ;
+				}
+
+				// Qt returns alternatives in preference order. Preserve that order,
+				// including an explicit direct connection.
+				for( const auto& proxy : proxies ){
+					if( proxy.type() == QNetworkProxy::NoProxy ||
+					    proxy.type() == QNetworkProxy::DefaultProxy ){
+						m_ctx->setNetworkProxy( m_firstTime ) ;
+						return ;
+					}
+					if( !proxy.hostName().isEmpty() ){
+						m_ctx->setNetworkProxy( proxy,m_firstTime ) ;
+						return ;
+					}
+				}
+				m_ctx->setNetworkProxy( m_firstTime ) ;
+			}
+		private:
+			Context * m_ctx ;
+			bool m_firstTime ;
+			quint64 m_generation ;
+		} ;
+
+		utils::qthread::run( &ctx.mainWidget(),systemProxyLookup( ctx,firstTime,generation ) ) ;
+		return ;
 
 	}else if( m.none() ){
 

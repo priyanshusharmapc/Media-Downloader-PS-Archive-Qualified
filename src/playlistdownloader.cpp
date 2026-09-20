@@ -258,7 +258,7 @@ playlistdownloader::playlistdownloader( Context& ctx ) :
 
 	connect( m_ui.pbPLGetList,&QPushButton::clicked,[ this ](){		
 
-		auto m = m_ui.lineEditPLUrl->text() ;
+		auto m = m_ui.lineEditPLUrl->text().trimmed() ;
 
 		if( !m.isEmpty() ){
 
@@ -1063,9 +1063,15 @@ void playlistdownloader::getList( playlistdownloader::listIterator iter,
 {
 	m_stoppedOnExisting = false ;
 
-	auto url = iter.url() ;
-
-	url = util::split( url,' ',true ).first() ;
+	auto url = iter.url().trimmed() ;
+	const auto tokens = util::split( url,' ',true ) ;
+	if( tokens.isEmpty() || tokens.first().trimmed().isEmpty() ){
+		m_gettingPlaylist = false ;
+		m_ui.pbPLCancel->setEnabled( false ) ;
+		this->enableAll() ;
+		return ;
+	}
+	url = tokens.first().trimmed() ;
 
 	m_ui.lineEditPLUrl->setText( url ) ;
 

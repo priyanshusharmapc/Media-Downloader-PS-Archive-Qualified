@@ -247,6 +247,7 @@ public:
 		QPixmap thumbnail ;
 		std::vector< QByteArray > fileNames ;
 		QString downloadFolder ;
+		QString stableIdentity ;
 		bool splitByChapters = false ;
 		bool banner = false ;
 		bool showFirst = false ;
@@ -271,6 +272,16 @@ public:
 			}
 		}
 
+		return -1 ;
+	}
+	int rowWithIdentity( const QString& identity )
+	{
+		if( identity.isEmpty() )return -1 ;
+		for( size_t m = 0 ; m < m_items.size() ; m++ ){
+			if( m_items[ m ].stableIdentity == identity ){
+				return static_cast< int >( m ) ;
+			}
+		}
 		return -1 ;
 	}
 	bool hasUrl( const QString& url )

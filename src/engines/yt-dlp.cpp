@@ -18,6 +18,7 @@
  */
 
 #include "yt-dlp.h"
+#include "json_media_size.hpp"
 
 #include <QJsonObject>
 #include <QJsonArray>
@@ -1232,39 +1233,25 @@ private:
 	}
 	QString fileSizeRaw( const QJsonObject& e )
 	{
-		auto m = e.value( "filesize" ).toInt( -1 ) ;
-
-		if( m == -1 ){
-
-			m = e.value( "filesize_approx" ).toInt( -1 ) ;
-
-			if( m == -1 ){
-
-				return "0" ;
-			}else{
-				return QString::number( m ) ;
-			}
-		}else{
-			return QString::number( m ) ;
+		qint64 bytes=0 ;
+		if( engineJson::nonNegativeByteCount( e.value( "filesize" ),&bytes ) ){
+			return QString::number( bytes ) ;
 		}
+		if( engineJson::nonNegativeByteCount( e.value( "filesize_approx" ),&bytes ) ){
+			return QString::number( bytes ) ;
+		}
+		return "0" ;
 	}
 	QString fileSize( const QJsonObject& e )
 	{
-		auto m = e.value( "filesize" ).toInt( -1 ) ;
-
-		if( m == -1 ){
-
-			m = e.value( "filesize_approx" ).toInt( -1 ) ;
-
-			if( m == -1 ){
-
-				return "NA" ;
-			}else{
-				return "~" + m_locale.formattedDataSize( m ) ;
-			}
-		}else{
-			return m_locale.formattedDataSize( m ) ;
+		qint64 bytes=0 ;
+		if( engineJson::nonNegativeByteCount( e.value( "filesize" ),&bytes ) ){
+			return m_locale.formattedDataSize( bytes ) ;
 		}
+		if( engineJson::nonNegativeByteCount( e.value( "filesize_approx" ),&bytes ) ){
+			return "~" + m_locale.formattedDataSize( bytes ) ;
+		}
+		return "NA" ;
 	}
 	void append( QStringList& s,const char * str,const QString& sstr,bool formatBitrate )
 	{

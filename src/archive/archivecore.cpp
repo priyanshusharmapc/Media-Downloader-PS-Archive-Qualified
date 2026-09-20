@@ -116,7 +116,8 @@ Representation repFromJson(const QJsonObject& o)
     const auto persistedSize=o.value("verified_size");
     if(persistedSize.isDouble()){
         const auto n=persistedSize.toDouble();
-        if(std::isfinite(n)&&n>=0&&std::floor(n)==n&&n<=static_cast<double>(std::numeric_limits<qint64>::max()))
+        constexpr double qint64ExclusiveUpper=9223372036854775808.0;
+        if(std::isfinite(n)&&n>=0&&std::floor(n)==n&&n<qint64ExclusiveUpper)
             r.verifiedSize=static_cast<qint64>(n);
     }
     r.verificationProfile=o.value("verification_profile").toString();
@@ -311,6 +312,25 @@ bool validateExternalToolStatePaths(const Paths& paths,const QStringList& relati
     for(const auto& relative:relativePaths){
         if(!paths.isSafeRelative(relative))
             return detail::reject(error,"Unsafe external-tool state path refused: "+relative);
+    }
+    return true;
+}
+
+bool validateOwnedStagingTree(const Paths& paths,const QString& root,QString* error)
+{
+    const auto rootRelative=paths.relativeToRoot(root);
+    if(rootRelative.isEmpty()||!paths.isSafeRelative(rootRelative)||!QFileInfo(root).isDir())
+        return detail::reject(error,"Unsafe external-tool staging directory refused: "+root);
+
+    QDirIterator entries(root,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,
+                         QDirIterator::Subdirectories);
+    while(entries.hasNext()){
+        const auto path=entries.next();
+        const auto info=entries.fileInfo();
+        const auto relative=paths.relativeToRoot(path);
+        if(relative.isEmpty()||!paths.isSafeRelative(relative)||info.isSymLink()||
+           (!info.isFile()&&!info.isDir()))
+            return detail::reject(error,"External tool produced an unsafe staging entry: "+path);
     }
     return true;
 }
@@ -658,10 +678,24 @@ bool validateStoreGraph(const Paths& paths,const QJsonArray& sources,const QJson
         const auto metaPath=paths.playlistFile(dir);
         const auto itemsPath=paths.playlistItemsFile(dir);
         const auto historyPath=paths.playlistHistoryFile(dir);
-        const bool managed=QFileInfo::exists(metaPath)||QFileInfo::exists(itemsPath)||QFileInfo::exists(historyPath);
+        const auto retiredPath=QDir(paths.sourceDir(dir)).filePath("retired.json");
+        const bool managed=QFileInfo::exists(metaPath)||QFileInfo::exists(itemsPath)||
+                           QFileInfo::exists(historyPath)||QFileInfo::exists(retiredPath);
         if(!managed)continue;
-        if(!sourceKeys.contains(dir))
-            return detail::reject(error,"Managed playlist directory has no registered source: "+dir);
+
+        const bool registered=sourceKeys.contains(dir);
+        if(!registered){
+            QByteArray retirementBytes;
+            if(!QFileInfo::exists(retiredPath)||!detail::readBytes(retiredPath,&retirementBytes,error))
+                return detail::reject(error,"Managed playlist directory has no registered source or retirement marker: "+dir);
+            QJsonParseError retirementParse;
+            const auto retirement=QJsonDocument::fromJson(retirementBytes,&retirementParse);
+            if(retirementParse.error!=QJsonParseError::NoError||!retirement.isObject()||
+               retirement.object().value("schema_version").toInt()!=1||
+               retirement.object().value("source_key").toString()!=dir||
+               retirement.object().value("retired_at").toString().isEmpty())
+                return detail::reject(error,"Invalid retired playlist marker: "+dir);
+        }
 
         if(QFileInfo::exists(metaPath)){
             QByteArray metaBytes;
@@ -1742,14 +1776,27 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     const auto attempt="download-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
     QString output="Video/%(title).120s [%(artist|UNKNOWN)s] [%(height)sp %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s] ["+attempt+"].%(ext)s";
     const auto previous=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
+
+    // Provider-controlled metadata filenames are written only into an
+    // exclusively-created, unpredictable staging directory. The external
+    // process never receives a predictable Metadata/<title> child where a
+    // pre-existing symlink/junction could redirect writes outside the Archive.
+    QTemporaryDir metadataStaging(QDir(m_store.paths().temp()).filePath("metadata-"+attempt+"-XXXXXX"));
+    if(!metadataStaging.isValid()||!detail::noLinks(metadataStaging.path()))
+        return fail("Cannot create safe metadata staging directory");
+    const auto metadataStageRel=m_store.paths().relativeToRoot(metadataStaging.path());
+    if(metadataStageRel.isEmpty()||!m_store.paths().isSafeRelative(metadataStageRel))
+        return fail("Metadata staging directory is outside the Archive boundary");
+    const auto metadataPrefix=metadataStageRel+"/";
+
     QStringList args={
         "--ignore-config","--no-playlist","--no-overwrites","--output-na-placeholder","NA",
         "-f","bv[height<=1080][vcodec^=avc]+ba[ext=m4a]/bv[height<=1080][vcodec^=avc]+ba/bv[height<=1080]+ba/b[height<=1080]",
         "--paths","temp:Temp","--merge-output-format","mp4","-o",output,
-        "-o","infojson:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/source [%(id)s].%(ext)s",
-        "-o","description:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/description [%(id)s].%(ext)s",
-        "-o","thumbnail:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/thumbnail [%(id)s].%(ext)s",
-        "-o","subtitle:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/Subtitles/%(language)s [%(id)s].%(ext)s",
+        "-o","infojson:"+metadataPrefix+"source [%(id)s].%(ext)s",
+        "-o","description:"+metadataPrefix+"description [%(id)s].%(ext)s",
+        "-o","thumbnail:"+metadataPrefix+"thumbnail [%(id)s].%(ext)s",
+        "-o","subtitle:"+metadataPrefix+"Subtitles/%(language)s [%(id)s].%(ext)s",
         "--download-archive","State/video-archive.txt","--windows-filenames","--embed-metadata","--embed-thumbnail","--embed-chapters",
         "--write-info-json","--write-description","--write-thumbnail","--extractor-args","youtube:skip=translated_subs",
         "--write-subs","--write-auto-subs","--sub-langs","en.*","--sleep-subtitles","1","--embed-subs",
@@ -1796,23 +1843,39 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
         rel=normalized;verify=m_verifier.verifyVideo(rel);
     }
     if(!verify.ok) return fail("Video verification failed: "+verify.errors.join("; "),rel);
-    if(!writeMediaBinding(rel,item,"video",error))return false;
+    QString finalizationError;
+    if(!writeMediaBinding(rel,item,"video",&finalizationError))
+        return fail("Media binding finalization failed: "+finalizationError,rel);
 
     QString metadataPath;
-    const auto metadataRoot=Paths(m_config.archiveRoot).metadata();
-    for(const auto& info:QDir(metadataRoot).entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
-        if(info.fileName().contains("["+item.providerId+"]")&&detail::noLinks(info.absoluteFilePath())){
-            const auto candidate="Metadata/"+info.fileName();
-            if(Paths(m_config.archiveRoot).isSafeRelative(candidate)){
-                metadataPath=candidate;
-                break;
-            }
-        }
+    const auto metadataEntries=QDir(metadataStaging.path()).entryInfoList(
+        QDir::AllEntries|QDir::NoDotAndDotDot|QDir::Hidden|QDir::System);
+    if(!metadataEntries.isEmpty()){
+        QString stagingError;
+        if(!validateOwnedStagingTree(m_store.paths(),metadataStaging.path(),&stagingError))
+            return fail("Metadata staging validation failed: "+stagingError,rel);
+
+        // Generate the canonical destination only after the child has exited.
+        // rename() is the publication boundary: a collision fails instead of
+        // traversing/reusing an attacker-controlled destination.
+        const auto metadataPathCandidate="Metadata/youtube-"+item.providerId+"-"+
+            QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
+        const auto metadataDestination=m_store.paths().absoluteFromRelative(metadataPathCandidate);
+        if(metadataDestination.isEmpty()||QFileInfo::exists(metadataDestination)||
+           !QDir().rename(metadataStaging.path(),metadataDestination))
+            return fail("Unable to publish validated metadata staging directory",rel);
+
+        metadataStaging.setAutoRemove(false);
+        metadataPath=metadataPathCandidate;
     }
 
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
-    stampVerifiedRepresentation(m_store.paths(),done,error); if(error && !error->isEmpty())return false;
-    if(!m_store.updateRepresentation(item.key,"video",done,error,metadataPath))return false;
+    finalizationError.clear();
+    stampVerifiedRepresentation(m_store.paths(),done,&finalizationError);
+    if(!finalizationError.isEmpty())return fail("Video fingerprint finalization failed: "+finalizationError,rel);
+    finalizationError.clear();
+    if(!m_store.updateRepresentation(item.key,"video",done,&finalizationError,metadataPath))
+        return fail("Video completion state could not be committed: "+finalizationError,rel);
     m_logger.event("INFO","verification","video_complete",{{"item_key",item.key},{"path",rel}});
     return true;
 }
@@ -1876,10 +1939,16 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
         rel=normalized;verify=m_verifier.verifyAudio(rel);
     }
     if(!verify.ok)return fail("Audio verification failed: "+verify.errors.join("; "),rel);
-    if(!writeMediaBinding(rel,item,"audio",error))return false;
+    QString finalizationError;
+    if(!writeMediaBinding(rel,item,"audio",&finalizationError))
+        return fail("Media binding finalization failed: "+finalizationError,rel);
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
-    stampVerifiedRepresentation(m_store.paths(),done,error); if(error && !error->isEmpty())return false;
-    if(!m_store.updateRepresentation(item.key,"audio",done,error))return false;
+    finalizationError.clear();
+    stampVerifiedRepresentation(m_store.paths(),done,&finalizationError);
+    if(!finalizationError.isEmpty())return fail("Audio fingerprint finalization failed: "+finalizationError,rel);
+    finalizationError.clear();
+    if(!m_store.updateRepresentation(item.key,"audio",done,&finalizationError))
+        return fail("Audio completion state could not be committed: "+finalizationError,rel);
     m_logger.event("INFO","verification","audio_complete",{{"item_key",item.key},{"path",rel}});
     return true;
 }
@@ -2257,7 +2326,23 @@ bool SyncLock::tryLock(int timeoutMs)
         m_lock=held;return true;
     }
     auto next=std::make_shared<ArchiveLockState>(path);
-    if(!next->file.tryLock(qMax(0,timeoutMs))){m_error="Another Archive operation is active or the lock could not be acquired";return false;}
+    if(!next->file.tryLock(qMax(0,timeoutMs))){
+        qint64 ownerPid=0;QString ownerHost,ownerApp;
+        const bool haveOwner=next->file.getLockInfo(&ownerPid,&ownerHost,&ownerApp);
+
+        // With staleLockTime(0), Qt will not remove an old lock by age. Its
+        // explicit stale-removal API still performs the strong dead-owner
+        // checks needed after a crash. Never remove a lock that may be live.
+        if(next->file.error()==QLockFile::LockFailedError &&
+           next->file.removeStaleLockFile() &&
+           next->file.tryLock(qMax(0,timeoutMs))){
+            m_lock=next;archiveLocks[path]=next;m_acquiredFreshly=true;m_error.clear();return true;
+        }
+
+        m_error="Another Archive operation is active or the lock could not be acquired";
+        if(haveOwner)m_error+=QString(" (pid %1, host %2, app %3)").arg(ownerPid).arg(ownerHost,ownerApp);
+        return false;
+    }
     m_lock=next;archiveLocks[path]=next;m_acquiredFreshly=true;m_error.clear();return true;
 }
 void SyncLock::unlock(){QMutexLocker guard(&archiveLocksMutex);m_lock.reset();m_acquiredFreshly=false;}
