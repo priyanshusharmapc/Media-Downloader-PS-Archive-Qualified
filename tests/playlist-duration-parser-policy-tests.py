@@ -11,10 +11,13 @@ end=source.index("qint64 engines::engine::baseEngine::timer::elapsedTime()",star
 body=source[start:end]
 
 assert "util::split( e,':',false )" in body
-assert "return 60 * minutes + seconds" in body
-assert "return 3600 * hours + 60 * minutes + seconds" in body
+assert "60LL * minutes + seconds" in body
+assert "3600LL * hours + 60LL * minutes + seconds" in body
 assert "minutes >= 60 || seconds >= 60" in body
 assert "seconds >= 60" in body
 assert "number < 0" in body
 assert "3600 * _toNumber( m[ 0 ] ) + 360 * _toNumber( m[ 1 ] )" not in body
 print("playlist duration parser policy: PASS")
+
+assert "std::numeric_limits< int >::max()" in body
+assert body.count("const qint64 total") >= 4
