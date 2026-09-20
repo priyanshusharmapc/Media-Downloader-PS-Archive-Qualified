@@ -855,8 +855,13 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 	class events
 	{
 	public:
-		events( playlistdownloader& p,const engines::engine& engine,int index,bool dr ) :
+		events( playlistdownloader& p,
+			const engines::engine& defaultEngine,
+			const engines::engine& engine,
+			int index,
+			bool dr ) :
 			m_parent( p ),
+			m_defaultEngine( defaultEngine ),
 			m_engine( engine ),
 			m_index( index ),
 			m_downloadRecursively( dr ),
@@ -934,10 +939,11 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 
 			if( m != -1 ){
 
-				m_parent.downloadRecursively( m_engine,m,m_downloadRecursively ) ;
+				m_parent.downloadRecursively( m_defaultEngine,m,m_downloadRecursively ) ;
 			}
 		}
 		playlistdownloader& m_parent ;
+		const engines::engine& m_defaultEngine ;
 		const engines::engine& m_engine ;
 		int m_index ;
 		bool m_downloadRecursively ;
