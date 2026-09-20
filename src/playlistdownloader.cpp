@@ -27,6 +27,7 @@
 #include <QClipboard>
 #include <QMetaObject>
 #include <QSaveFile>
+#include <QLockFile>
 #include <QMessageBox>
 
 playlistdownloader::playlistdownloader( Context& ctx ) :
@@ -1681,20 +1682,21 @@ bool playlistdownloader::subscription::load()
 
 	m_loaded = true ;
 	m_storeValid = true ;
+	m_baseline.clear() ;
 
 	if( !QFile::exists( m_path ) ){
 		return true ;
 	}
 
 	QFile f( m_path ) ;
-
 	if( !f.open( QIODevice::ReadOnly ) ){
 		m_storeValid = false ;
 	}else{
 		const auto bytes = f.readAll() ;
+		m_baseline = bytes ;
+
 		QJsonParseError error ;
 		const auto doc = QJsonDocument::fromJson( bytes,&error ) ;
-
 		if( error.error != QJsonParseError::NoError || !doc.isArray() ){
 			m_storeValid = false ;
 		}else{
@@ -1706,7 +1708,8 @@ bool playlistdownloader::subscription::load()
 				}
 				const auto object = value.toObject() ;
 				const auto options = object.value( "getListOptions" ) ;
-				if( !object.value( "uiName" ).isString() || !object.value( "url" ).isString() ||
+				if( !object.value( "uiName" ).isString() ||
+				    !object.value( "url" ).isString() ||
 				    ( !options.isUndefined() && !options.isString() ) ){
 					m_storeValid = false ;
 					break ;
@@ -1717,7 +1720,8 @@ bool playlistdownloader::subscription::load()
 	}
 
 	if( !m_storeValid ){
-		m_ui.setToolTip( QObject::tr( "Subscriptions could not be loaded. Existing subscription data was preserved and editing is disabled." ) ) ;
+		m_ui.setToolTip( QObject::tr(
+			"Subscriptions could not be loaded. Existing subscription data was preserved and editing is disabled." ) ) ;
 	}
 
 	return m_storeValid ;
@@ -1744,18 +1748,40 @@ bool playlistdownloader::subscription::save()
 		return false ;
 	}
 
-	QSaveFile f( m_path ) ;
-	if( !f.open( QIODevice::WriteOnly ) ){
+	QLockFile lock( m_path + ".lock" ) ;
+	lock.setStaleLockTime( 30000 ) ;
+	if( !lock.tryLock( 10000 ) ){
+		return false ;
+	}
+
+	QByteArray current ;
+	if( QFile::exists( m_path ) ){
+		QFile existing( m_path ) ;
+		if( !existing.open( QIODevice::ReadOnly ) ){
+			return false ;
+		}
+		current = existing.readAll() ;
+	}
+
+	// Detect a concurrent valid edit instead of overwriting a stale full
+	// snapshot. The caller already restores its local model and surfaces a
+	// save warning when this transaction returns false.
+	if( current != m_baseline ){
 		return false ;
 	}
 
 	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
-	if( f.write( data ) != data.size() ){
+	QSaveFile f( m_path ) ;
+	f.setDirectWriteFallback( false ) ;
+	if( !f.open( QIODevice::WriteOnly ) ||
+	    f.write( data ) != data.size() ||
+	    !f.commit() ){
 		f.cancelWriting() ;
 		return false ;
 	}
 
-	return f.commit() ;
+	m_baseline = data ;
+	return true ;
 }
 
 void playlistdownloader::banner::updateProgress( const QString& progress )
