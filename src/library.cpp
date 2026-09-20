@@ -228,8 +228,12 @@ void library::retranslateUi()
 
 void library::tabEntered()
 {
-	if( m_settings.enableLibraryTab() && m_table.rowCount() == 0 ){
+	if( m_settings.enableLibraryTab() ){
 
+		// A previous tab exit may have cancelled population and left a partial
+		// table plus m_continue == false. Always start a fresh directory read
+		// when the Library becomes active instead of treating rowCount as a
+		// completion marker.
 		this->showContents( m_currentPath ) ;
 	}
 }
