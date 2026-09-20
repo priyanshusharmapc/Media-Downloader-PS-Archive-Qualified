@@ -21,8 +21,10 @@ QString message(const char* text)
 
 QString settingsPath()
 {
+#ifdef MDPS_ARCHIVE_TEST_HOOKS
     const auto testRoot=qEnvironmentVariable("ARCHIVE_TEST_CONFIG_ROOT");
     if(!testRoot.isEmpty())return QDir(testRoot).filePath("archive-mode.ini");
+#endif
     auto directory=QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
     if(directory.isEmpty())directory=QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     if(directory.isEmpty())directory=QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation)).filePath("MediaDownloader");
