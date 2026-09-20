@@ -13,7 +13,7 @@ body=source[start:end]
 assert "if( max <= 0 )" in body
 assert "history.clear()" in body
 assert "while( history.size() > max )" in body
-assert "input.isEmpty() || history.contains( input )" in body
+assert "input.trimmed().isEmpty() || history.contains( input )" in body
 assert "while( history.size() >= max )" in body
 assert "history.size() == max" not in body
 
