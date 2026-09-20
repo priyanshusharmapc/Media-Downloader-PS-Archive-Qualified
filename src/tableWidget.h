@@ -814,13 +814,23 @@ private:
 			bool m_column ;
 		} ;
 
-		QStringList selectedIds ;
-
-		for( int row = 0 ; row < m_table.rowCount() ; ++row ){
-
-			if( this->isSelected( row ) ){
-				selectedIds.append( m_table.item( row,0 )->text() ) ;
+		struct sortableItem
+		{
+			sortableItem( Stuff&& s,bool selected ) :
+				stuff( std::move( s ) ),wasSelected( selected )
+			{
 			}
+			Stuff stuff ;
+			bool wasSelected ;
+		} ;
+
+		std::vector< sortableItem > rows ;
+		rows.reserve( m_stuff.size() ) ;
+
+		for( size_t row = 0 ; row < m_stuff.size() ; ++row ){
+
+			rows.emplace_back( std::move( m_stuff[ row ] ),
+					   this->isSelected( static_cast< int >( row ) ) ) ;
 		}
 
 		// Rebuilding the table is an implementation detail of sorting. Block
@@ -828,25 +838,27 @@ private:
 		// rewritten while rows temporarily disappear.
 		QSignalBlocker blocker( m_table ) ;
 
-		auto stuff = std::move( m_stuff ) ;
-
-		std::sort( stuff.begin(),stuff.end(),meaw( ascending,column ) ) ;
+		meaw comparer( ascending,column ) ;
+		std::sort( rows.begin(),rows.end(),[ & ]( const sortableItem& a,const sortableItem& b ){
+			return comparer( a.stuff,b.stuff ) ;
+		} ) ;
 
 		this->clear() ;
 
-		for( auto& it : stuff ){
+		for( auto& item : rows ){
 
-			int row = this->addRow( std::move( it ) ) ;
+			int row = this->addRow( std::move( item.stuff ) ) ;
 
 			this->fromStuff( this->stuffAtLast(),Forwader( row,*this ) ) ;
 
-			if( selectedIds.contains( m_table.item( row,0 )->text() ) ){
+			if( item.wasSelected ){
 
 				for( int col = 0 ; col < m_table.columnCount() ; ++col ){
 					m_table.item( row,col )->setSelected( true ) ;
 				}
 			}
 		}
+
 	}
 	template< typename Rows >
 	void filterTable( Rows& rows,int column,QMenu& m )
