@@ -27,3 +27,10 @@ assert "m_continue = true ;" not in posix.split("private:",1)[0]
 # Standalone enumeration still initializes its own token.
 assert "std::atomic_bool s{ true }" in entries
 print("Library delete cancellation scope policy: PASS")
+
+# The UI cancellation control must actually lower the shared operation token.
+assert "pbLibraryCancel" in library
+assert "m_continue = false" in library
+# No recursive delete continuation may run after the foreground cancellation gate.
+fg=delete_body[delete_body.index("void fg( bool s )"):]
+assert fg.index("if( !m_parent.m_continue )") < fg.index("m_parent.deleteEntries( m_items.move() )")
