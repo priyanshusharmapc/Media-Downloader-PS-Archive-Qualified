@@ -124,7 +124,12 @@ namespace utils
 				m_exec( [ this ](){ this->run() ; } ),
 				m_lockFile( m_info.socketPath + ".lock" )
 			{
-				m_lockFile.lock() ;
+				m_lockOwned = m_lockFile.lock() ;
+				if( !m_lockOwned ){
+					std::cerr << "Failed to acquire single-instance startup lock: "
+						  << static_cast< int >( m_lockFile.error() ) << std::endl ;
+					m_info.app.exit( 1 ) ;
+				}
 			}
 			~oneinstance()
 			{
@@ -141,6 +146,8 @@ namespace utils
 		private:
 			void run()
 			{
+				if( !m_lockOwned )return ;
+
 				if( QFile::exists( m_info.socketPath ) ){
 
 					QObject::connect( &m_localSocket,&QLocalSocket::connected,[ this ](){
@@ -184,22 +191,31 @@ namespace utils
 			}
 			void start()
 			{
-				m_mainApp = std::make_unique< typename AppInfo::appType >( std::move( m_info.args ) ) ;
-
-				m_mainApp->start( std::move( m_info.data ) ) ;
-
 				QObject::connect( &m_localServer,&QLocalServer::newConnection,[ this ](){
 
 					auto s = m_localServer.nextPendingConnection() ;
 
 					QObject::connect( s,&QLocalSocket::readyRead,[ this,s ]{
 
-						m_mainApp->hasEvent( s->readAll() ) ;
+						if( m_mainApp ){
+							m_mainApp->hasEvent( s->readAll() ) ;
+						}
 						s->deleteLater() ;
 					} ) ;
 				} ) ;
 
-				m_localServer.listen( m_info.socketPath ) ;
+				// The single-instance contract is not established until the IPC
+				// endpoint is actually listening. Keep the startup lock held and
+				// fail startup rather than exposing a full GUI with no listener.
+				if( !m_localServer.listen( m_info.socketPath ) ){
+					std::cerr << "Failed to establish single-instance listener: "
+						  << m_localServer.errorString().toStdString() << std::endl ;
+					m_info.app.exit( 1 ) ;
+					return ;
+				}
+
+				m_mainApp = std::make_unique< typename AppInfo::appType >( std::move( m_info.args ) ) ;
+				m_mainApp->start( std::move( m_info.data ) ) ;
 
 				m_lockFile.unlock() ;
 			}
@@ -210,6 +226,7 @@ namespace utils
 			InstanceArgs m_iargs ;
 			details::exec m_exec ;
 			QLockFile m_lockFile ;
+			bool m_lockOwned = false ;
 		} ;
 
 		class AppTypeInterface
