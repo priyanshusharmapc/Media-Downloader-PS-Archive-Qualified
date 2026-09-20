@@ -1858,7 +1858,17 @@ void yt_dlp::yt_dlplFilter::setFileName( const QByteArray& fileName,bool ownedBy
 
 		if( ownedByInvocation ){
 
-			_add( m_ownedFileNames,normalized ) ;
+			const QDir root( m_parent.Settings().downloadFolder() ) ;
+			const auto candidate = QDir::cleanPath( root.absoluteFilePath( QString::fromUtf8( normalized ) ) ) ;
+			const auto relative = root.relativeFilePath( candidate ) ;
+			const bool contained = relative != ".." && !relative.startsWith( "../" ) && !QDir::isAbsolutePath( relative ) ;
+
+			// Cancellation cleanup is destructive. Only outputs proven to live
+			// inside the configured download root and absent before creation are
+			// eligible for final-path cleanup.
+			if( contained && !QFileInfo::exists( candidate ) ){
+				_add( m_ownedFileNames,normalized ) ;
+			}
 		}
 	}
 }
