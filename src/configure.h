@@ -196,6 +196,7 @@ private:
 		void save() ;
 		bool isEmpty( const QString& ) ;
 		void replace( const QString& engineName,const QString& oldOptions,const QString& newOptions ) ;
+		void replace( const QJsonObject& oldObject,const QString& newOptions ) ;
 		QJsonObject addOpt( const QString& engineName,const QString& options ) ;
 		QJsonObject add( const QString& url,const QString& opts,const QString& engineName ) ;
 		QJsonObject add( const configure::downloadDefaultOptions::opts& ) ;
@@ -413,6 +414,9 @@ private:
 	presetOptions m_presetOptions ;
 	downloadDefaultOptions m_downloadDefaultOptions ;
 	downloadDefaultOptions m_downloadEngineDefaultOptions ;
+	QString m_textEncodingEngine ;
+	QString m_editOptionEngine ;
+	QJsonObject m_editOptionIdentity ;
 	bool m_scaleButtonPressed = false ;
 };
 
