@@ -1611,6 +1611,10 @@ playlistdownloader::subscription::subscription( const Context& e,
 
 void playlistdownloader::subscription::add( const QString& uiName,const QString& url,const QString& Opts )
 {
+	if( !this->load() ){
+		return ;
+	}
+
 	for( const auto& it : util::asConst( m_array ) ){
 
 		subscription::entry m( it )  ;
@@ -1632,6 +1636,10 @@ void playlistdownloader::subscription::add( const QString& uiName,const QString&
 
 void playlistdownloader::subscription::remove( int s )
 {
+	if( !this->load() ){
+		return ;
+	}
+
 	m_array.removeAt( s ) ;
 	m_table.removeRow( s ) ;
 
@@ -1641,6 +1649,7 @@ void playlistdownloader::subscription::remove( int s )
 void playlistdownloader::subscription::setVisible( bool e )
 {
 	if( e ){
+		this->load() ;
 
 		m_table.clear() ;
 
@@ -1665,27 +1674,59 @@ void playlistdownloader::subscription::setVisible( bool e )
 	}
 }
 
-utility::vector< playlistdownloader::subscription::entry > playlistdownloader::subscription::entries()
+bool playlistdownloader::subscription::load()
 {
-	if( m_array.isEmpty() && QFile::exists( m_path ) ){
+	if( m_loaded ){
+		return m_storeValid ;
+	}
 
-		QFile f( m_path ) ;
+	m_loaded = true ;
+	m_storeValid = true ;
 
-		if( f.open( QIODevice::ReadOnly ) ){
+	if( !QFile::exists( m_path ) ){
+		return true ;
+	}
 
-			auto m = f.readAll() ;
+	QFile f( m_path ) ;
 
-			if( !m.isEmpty() ){
+	if( !f.open( QIODevice::ReadOnly ) ){
+		m_storeValid = false ;
+	}else{
+		const auto bytes = f.readAll() ;
+		QJsonParseError error ;
+		const auto doc = QJsonDocument::fromJson( bytes,&error ) ;
 
-				auto e = utility::jsonDoc( m ) ;
-
-				if( e.valid() ){
-
-					m_array = e.toArray() ;
+		if( error.error != QJsonParseError::NoError || !doc.isArray() ){
+			m_storeValid = false ;
+		}else{
+			const auto array = doc.array() ;
+			for( const auto& value : array ){
+				if( !value.isObject() ){
+					m_storeValid = false ;
+					break ;
+				}
+				const auto object = value.toObject() ;
+				const auto options = object.value( "getListOptions" ) ;
+				if( !object.value( "uiName" ).isString() || !object.value( "url" ).isString() ||
+				    ( !options.isUndefined() && !options.isString() ) ){
+					m_storeValid = false ;
+					break ;
 				}
 			}
+			if( m_storeValid )m_array = array ;
 		}
 	}
+
+	if( !m_storeValid ){
+		m_ui.setToolTip( QObject::tr( "Subscriptions could not be loaded. Existing subscription data was preserved and editing is disabled." ) ) ;
+	}
+
+	return m_storeValid ;
+}
+
+utility::vector< playlistdownloader::subscription::entry > playlistdownloader::subscription::entries()
+{
+	this->load() ;
 
 	utility::vector< subscription::entry > e ;
 
@@ -1699,6 +1740,10 @@ utility::vector< playlistdownloader::subscription::entry > playlistdownloader::s
 
 void playlistdownloader::subscription::save()
 {
+	if( !m_storeValid ){
+		return ;
+	}
+
 	QFile f( m_path ) ;
 
 	if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
