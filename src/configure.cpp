@@ -33,6 +33,8 @@
 #include <QFile>
 #include <QDesktopServices>
 #include <QClipboard>
+#include <QSaveFile>
+#include <QMessageBox>
 
 configure::configure( const Context& ctx ) :
 	m_ctx( ctx ),
@@ -1443,8 +1445,15 @@ void configure::addEngine( const QByteArray& d,const QString& n )
 
 void configure::saveOptions()
 {
-	m_downloadDefaultOptions.save() ;
-	m_downloadEngineDefaultOptions.save() ;
+	const auto defaultOptionsSaved = m_downloadDefaultOptions.save() ;
+	const auto engineDefaultsSaved = m_downloadEngineDefaultOptions.save() ;
+
+	if( !defaultOptionsSaved || !engineDefaultsSaved ){
+
+		QMessageBox::warning( &m_mainWindow,
+				      tr( "Save Failed" ),
+				      tr( "Default download options could not be saved. The previous file was preserved." ) ) ;
+	}
 
 	auto m = m_ui.cbConfigureShowMetaDataInBatchDownloader->isChecked() ;
 
@@ -1600,7 +1609,12 @@ void configure::savePresetOptions()
 		}
 	}
 
-	m_presetOptions.save() ;
+	if( !m_presetOptions.save() ){
+
+		QMessageBox::warning( &m_mainWindow,
+				      tr( "Save Failed" ),
+				      tr( "Preset options could not be saved. The previous file was preserved." ) ) ;
+	}
 }
 
 void configure::showOptions()
@@ -1880,14 +1894,21 @@ configure::presetOptions::presetOptions( const Context& ctx,settings& ) :
 	}
 }
 
-void configure::presetOptions::save()
+bool configure::presetOptions::save()
 {
-	QFile f( m_path ) ;
+	QSaveFile f( m_path ) ;
 
-	if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-		f.write( QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ) ;
+	if( !f.open( QIODevice::WriteOnly ) ){
+		return false ;
 	}
+
+	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
+	if( f.write( data ) != data.size() ){
+		f.cancelWriting() ;
+		return false ;
+	}
+
+	return f.commit() ;
 }
 
 void configure::presetOptions::clear()
@@ -2091,14 +2112,21 @@ configure::downloadDefaultOptions::downloadDefaultOptions( const Context& ctx,co
 	}
 }
 
-void configure::downloadDefaultOptions::save()
+bool configure::downloadDefaultOptions::save()
 {
-	QFile f( m_path ) ;
+	QSaveFile f( m_path ) ;
 
-	if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-		f.write( QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ) ;
+	if( !f.open( QIODevice::WriteOnly ) ){
+		return false ;
 	}
+
+	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
+	if( f.write( data ) != data.size() ){
+		f.cancelWriting() ;
+		return false ;
+	}
+
+	return f.commit() ;
 }
 
 void configure::setVisibilityEditConfigFeature( bool e )
