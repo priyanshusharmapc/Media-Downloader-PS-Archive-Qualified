@@ -30,6 +30,7 @@
 #include <QProcess>
 #include <QDateTime>
 #include <QNetworkProxy>
+#include <QLockFile>
 
 #include <vector>
 #include <functional>
@@ -310,32 +311,23 @@ public:
 			const auto current = this->add( m_dataPath,"archiveFile-" + name + ext ) ;
 
 			if( name == "yt-dlp" ){
+				// Legacy migration mutates the same durable deduplication state used
+				// by downloads and Clear Archive. Serialize it across app instances.
+				QLockFile migrationLock( current + ".lock" ) ;
+				migrationLock.setStaleLockTime( 30000 ) ;
+				if( !migrationLock.tryLock( 10000 ) ){
+					return current ;
+				}
 
 				const auto legacy = this->add( m_dataPath,"subscriptions_archive_file.txt" ) ;
-
-				// A pre-existing current archive is already authoritative. Do
-				// not let an obsolete legacy file displace or merge into it.
 				if( QFile::exists( current ) ){
-
 					return current ;
 				}
 
 				if( QFile::exists( legacy ) ){
-
-					if( QFile::rename( legacy,current ) ){
-
+					if( QFile::rename( legacy,current ) || QFile::exists( current ) ){
 						return current ;
 					}
-
-					// A target can appear between the existence check and rename
-					// (another process/session may complete migration first). Prefer
-					// that now-authoritative current archive before falling back.
-					if( QFile::exists( current ) ){
-						return current ;
-					}
-
-					// Migration is best-effort, but deduplication state is not:
-					// keep using the known-good legacy archive if promotion fails.
 					return legacy ;
 				}
 			}
