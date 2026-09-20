@@ -200,7 +200,7 @@ void tabManager::mainThreadClipboardHandler()
 
 	if( e && e->hasText() ){
 
-		auto m = e->text() ;
+		auto m = e->text().trimmed() ;
 
 		if( utility::isHttpUrl( m ) || m.startsWith( "yt-dlp " ) ){
 
@@ -250,11 +250,12 @@ void tabManager::bgThreadClipboardHandler()
 		}
 		void fg( const QString& e )
 		{
+			const auto candidate = e.trimmed() ;
 			if( m_timer.notTimedOut() ){
 
-				if( utility::isHttpUrl( e ) || e.startsWith( "yt-dlp " ) ){
+				if( utility::isHttpUrl( candidate ) || candidate.startsWith( "yt-dlp " ) ){
 
-					m_parent.m_batchdownloader.clipboardData( e,true ) ;
+					m_parent.m_batchdownloader.clipboardData( candidate,true ) ;
 				}
 			}else{
 				auto a = QObject::tr( "Warning: Skipping Clipboard Content" ) ;
