@@ -1063,19 +1063,24 @@ bool utility::Terminator::terminate( QProcess& exe )
 
 	}else if( utility::platformIsLinux() ){
 
+		const auto rootPid = QString::number( exe.processId() ) ;
+
 		class meaw
 		{
 		public:
-			meaw( QProcess& exe ) : m_exe( exe )
+			meaw( QProcess * exe,QString rootPid ) :
+				m_exe( exe ),m_rootPid( std::move( rootPid ) )
 			{
 			}
 			void bg()
 			{
-				this->terminate( QString::number( m_exe.processId() ) ) ;
+				// Background traversal owns only the pid value. QProcess may be
+				// destroyed while this worker is running.
+				this->terminate( m_rootPid ) ;
 			}
 			void fg()
 			{
-				m_exe.terminate() ;
+				m_exe->terminate() ;
 			}
 		private:
 			void terminate( const QString& id )
@@ -1098,17 +1103,21 @@ bool utility::Terminator::terminate( QProcess& exe )
 
 							this->terminate( it ) ;
 
-							QProcess exe ;
-							exe.start( "kill",{ "-s","SIGTERM",it } ) ;
-							exe.waitForFinished( -1 ) ;
+							QProcess child ;
+							child.start( "kill",{ "-s","SIGTERM",it } ) ;
+							if( !child.waitForFinished( 5000 ) ){
+								child.kill() ;
+								child.waitForFinished( 1000 ) ;
+							}
 						}
 					}
 				}
 			}
-			QProcess& m_exe ;
+			QProcess * m_exe ;
+			QString m_rootPid ;
 		} ;
 
-		utils::qthread::run( meaw( exe ) ) ;
+		utils::qthread::run( &exe,meaw( &exe,rootPid ) ) ;
 	}else{
 		exe.terminate() ;
 	}
