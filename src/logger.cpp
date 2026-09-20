@@ -26,6 +26,7 @@
 #include "engines/yt-dlp.h"
 
 #include "context.hpp"
+#include <QLockFile>
 
 Logger::Logger( QPlainTextEdit& e,QWidget *,settings& s ) :
 	m_logWindow( nullptr,s,*this ),
@@ -139,10 +140,14 @@ bool Logger::clearDownloadHistory()
 
 		const auto& e = m_ctx->Engines().engineDirPaths().downloadHistoryFilePath() ;
 
-		// Use the same history-file guard as readers/writers so a successful
-		// clear cannot race an append or a mapped/read snapshot.
+		// Serialize across both threads and supported application instances.
 		utility::archiveData::guardHistoryFile() ;
-		const auto removed = QFile::exists( e ) && QFile::remove( e ) ;
+		QLockFile lock( e + ".lock" ) ;
+		lock.setStaleLockTime( 30000 ) ;
+		bool removed = false ;
+		if( lock.tryLock( 10000 ) ){
+			removed = QFile::exists( e ) && QFile::remove( e ) ;
+		}
 		utility::archiveData::unGuardHistoryFile() ;
 
 		return removed ;
