@@ -492,20 +492,11 @@ if(APPLE)
     install( TARGETS MediaDownloader BUNDLE DESTINATION . COMPONENT Runtime )
 
     file( COPY src/media-downloader.icns DESTINATION  "MediaDownloader.app/Contents/Resources/" )
-    file( COPY translations/ar.qm DESTINATION        "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/de_DE.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/en_US.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/es_ES.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/fr_FR.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/it_IT.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/ja_JP.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/nl_NL.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/pl_PL.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/pt_BR.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/ru_RU.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/sv_SE.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/tr_TR.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/zh_CN.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
+    # Keep the macOS bundle in parity with the translation directory instead
+    # of maintaining a hand-written locale allow-list that can silently drift.
+    file(GLOB MD_TRANSLATION_FILES "${CMAKE_CURRENT_SOURCE_DIR}/translations/*.qm")
+    file(COPY ${MD_TRANSLATION_FILES}
+         DESTINATION "MediaDownloader.app/Contents/Resources/translations/")
 
     file( COPY changelog DESTINATION                 "MediaDownloader.app/Contents/Resources/" )
 endif()
