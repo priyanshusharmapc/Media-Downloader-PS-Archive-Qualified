@@ -325,6 +325,24 @@ bool tableWidget::isRunning( int row ) const
 	return reportFinished::finishedStatus::isRunning( *this,row  ) ;
 }
 
+bool tableWidget::allEntriesTerminal( int firstRow ) const
+{
+	using status = reportFinished::finishedStatus ;
+
+	for( int row = firstRow ; row < m_table.rowCount() ; ++row ){
+
+		const auto& state = this->runningState( row ) ;
+
+		if( !status::finishedWithSuccess( state ) &&
+		    !status::finishedWithError( state ) &&
+		    !status::finishedCancelled( state ) ){
+			return false ;
+		}
+	}
+
+	return m_table.rowCount() > firstRow ;
+}
+
 bool tableWidget::finishedWithSuccess( int row ) const
 {
 	return reportFinished::finishedStatus::finishedWithSuccess( *this,row ) ;

@@ -2229,7 +2229,9 @@ namespace utility
 				engine.runCommandOnDownloadedFile( fileNames,downloadFolder ) ;
 			}
 
-			if( f.done() ){
+			const auto firstJobRow = tabName == "playlist" ? 1 : 0 ;
+
+			if( f.done() && table.allEntriesTerminal( firstJobRow ) ){
 
 				auto a = s.commandWhenAllFinished() ;
 
@@ -2237,9 +2239,10 @@ namespace utility
 
 					auto args = util::splitPreserveQuotes( a ) ;
 
-					auto exe = args.takeAt( 0 ) ;
-
-					QProcess::startDetached( exe,args ) ;
+					if( !args.isEmpty() ){
+						auto exe = args.takeAt( 0 ) ;
+						QProcess::startDetached( exe,args ) ;
+					}
 				}
 			}
 		}
