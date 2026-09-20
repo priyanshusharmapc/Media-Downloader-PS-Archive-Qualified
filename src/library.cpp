@@ -566,8 +566,13 @@ void library::deleteAll()
 		void fg()
 		{
 			if( m_parent->m_deleteContinue == m_continue ){
+				const auto completed = m_continue->load() ;
 				m_parent->m_deleteContinue.reset() ;
-				m_parent->showContents( m_parent->m_currentPath ) ;
+				if( completed ){
+					m_parent->showContents( m_parent->m_currentPath ) ;
+				}else{
+					m_parent->enableAll() ;
+				}
 			}
 		}
 	private:
