@@ -837,7 +837,7 @@ private:
 
 				auto m = m_table.item( row,column )->text() ;
 
-				if( !m.isEmpty() && !l.contains( m ) ){
+				if( !m.trimmed().isEmpty() && !l.contains( m ) ){
 
 					l.append( m ) ;
 				}
@@ -875,7 +875,7 @@ private:
 
 			// Empty cells are valid transient/permanent table state, but they do
 			// not form a usable named filter bucket and must never be indexed.
-			if( it.isEmpty() ){
+			if( it.trimmed().isEmpty() ){
 
 				continue ;
 			}
