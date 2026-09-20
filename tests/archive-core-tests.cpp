@@ -1,4 +1,7 @@
 #include "../src/archive/archivecore.h"
+#include "archive-history-contract-tests.h"
+#include "archive-missing-playlist-tests.h"
+#include "archive-process-tests.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -38,6 +41,10 @@ PlaylistItem byPlaylistKey(const QVector<PlaylistItem>& items,const QString& key
 int main(int argc,char** argv)
 {
     QCoreApplication app(argc,argv);
+    const int fixtureResult=archive_process_tests::fixture(app.arguments());if(fixtureResult>=0)return fixtureResult;
+    QString processError;check(archive_process_tests::run(&processError),processError);
+    QString historyError;check(archive_history_tests::run(&historyError),historyError);
+    QString missingError;check(archive_missing_playlist_tests::run(&missingError),missingError);
     QTemporaryDir temp; check(temp.isValid(),"temporary directory");
     Paths paths(temp.path()); Store store(paths); QString error;
     check(store.initialize(&error),"initialize: "+error);

@@ -15,3 +15,18 @@ This list distinguishes implementation, focused regression and final qualificati
 | MDPS-AUDIT-009 | IMPLEMENTED | TESTED: superscript and ordinary reserved device names | QUALIFIED by focused/CI tests |
 | MDPS-AUDIT-010 | IMPLEMENTED | TESTED: verifier/hash documentation corrected | QUALIFIED by final documentation QA |
 | MDPS-AUDIT-011 | IMPLEMENTED | TESTED: executable source mode preservation | QUALIFIED by source tree mode review |
+
+## AUDIT2 remediation status
+
+Issue #2 remains the immutable discovery ledger. Issue #3 is the living coordination ledger. The table below records the status of the fixes carried by PR #203 and does not rewrite discovery-time evidence.
+
+| ID | Implementation | Regression evidence | Pull request | CI qualification | Integration |
+|---|---|---|---|---|---|
+| MDPS-AUDIT2-033 | SOURCE FIX COMPLETE | Pre-fix failure reproduced; local normal and ASan/UBSan suites pass | #203 | BLOCKED BEFORE RUNNER EXECUTION | NOT MERGED |
+| MDPS-AUDIT2-034 | SOURCE FIX COMPLETE | Pre-fix failure reproduced; local normal and ASan/UBSan suites pass | #203 | BLOCKED BEFORE RUNNER EXECUTION | NOT MERGED |
+| MDPS-AUDIT2-035 | SOURCE FIX COMPLETE | Pre-fix failure reproduced; local normal and ASan/UBSan suites pass | #203 | BLOCKED BEFORE RUNNER EXECUTION | NOT MERGED |
+| MDPS-AUDIT2-036 | SOURCE FIX COMPLETE | Pre-fix failure reproduced; local normal and ASan/UBSan suites pass | #203 | BLOCKED BEFORE RUNNER EXECUTION | NOT MERGED |
+
+Batch evidence: 58/58 normal CTest entries and 58/58 ASan/UBSan entries passed in the restored local environment. Exact-head Linux and Windows qualification has not executed because both GitHub Actions jobs failed before acquiring a runner and returned no executable steps. Therefore these entries remain `PR-OPEN`, not `FIXED` or `INTEGRATED` under issue #3's status vocabulary.
+
+Detailed implementation, compatibility boundaries, reproduction commands and retained log digests: `docs/remediation/033-036-archive-integrity.md`.
