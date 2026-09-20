@@ -1560,6 +1560,8 @@ void utility::saveDownloadList( const Context& ctx,QMenu& m,tableWidget& tableWi
 					auto obj = it.toObject() ;
 
 					auto title = obj.value( "title" ).toString() ;
+					title.replace( "\r\n","\n" ) ;
+					title.replace( '\r','\n' ) ;
 					auto url   = obj.value( "url" ).toString().toUtf8() ;
 
 					// TXT lists are line-oriented and the importer treats every
