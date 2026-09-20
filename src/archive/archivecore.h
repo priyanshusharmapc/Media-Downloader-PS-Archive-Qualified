@@ -193,7 +193,8 @@ public:
     bool appendHistory(const QString& sourceKey,const QJsonObject& event,QString* error = nullptr) const;
     bool writeAllProjections(QString* error = nullptr) const;
     bool writeProjections(const QString& sourceKey,QString* error = nullptr) const;
-    bool updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error = nullptr);
+    bool updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error = nullptr,
+                              const QString& metadataPath = {});
     bool beginRepresentationBatch(QString* error = nullptr);
     bool commitRepresentationBatch(QString* error = nullptr);
     void cancelRepresentationBatch();
