@@ -205,6 +205,30 @@ bool isUnavailable(const QString& a)
     return a=="deleted"||a=="private"||a=="unavailable"||a=="login_required"||a=="members_only"||a=="geo_blocked"||a=="copyright_blocked";
 }
 
+bool isSourceAccessible(const QString& availability)
+{
+    // Revival requires positive provider evidence. Discovery normalizes all
+    // ordinary accessible states (including unlisted) to "public"; unknown or
+    // future/unrecognized tokens must not clear external-recovery state.
+    return availability=="public";
+}
+
+void updateRecoveryStatus(CanonicalItem& item)
+{
+    const bool incomplete=item.video.state!="complete" || item.audio.state!="complete";
+
+    if(!incomplete){
+        item.recoveryStatus="not_required";
+    }else if(isUnavailable(item.availability)){
+        item.recoveryStatus="unrecovered";
+    }else if(isSourceAccessible(item.availability)){
+        // External recovery is no longer required when the ordinary provider
+        // source is positively accessible again. Missing representations are
+        // regular Sync work, not stale missing.csv recovery work.
+        item.recoveryStatus="not_required";
+    }
+}
+
 bool isTransientText(QString s)
 {
     s=s.toLower();
@@ -780,8 +804,7 @@ bool Store::updateRepresentation(const QString& itemKey,const QString& kind,cons
             if(kind=="video") item.video=representation;
             else if(kind=="audio") item.audio=representation;
             else { if(error) *error="Unknown representation kind"; return false; }
-            if(item.video.state=="complete"&&item.audio.state=="complete") item.recoveryStatus="not_required";
-            else if(isUnavailable(item.availability)) item.recoveryStatus="unrecovered";
+            updateRecoveryStatus(item);
             return saveCanonicalItems(items,error);
         }
     }
@@ -801,6 +824,7 @@ bool Store::updateCanonicalMetadata(const QString& itemKey,const QString& title,
             if(!availability.isEmpty()) item.availability=availability;
             if(!originalUrl.isEmpty()) item.originalUrl=originalUrl;
             item.lastSeen=nowIso();
+            updateRecoveryStatus(item);
             return saveCanonicalItems(items,error);
         }
     }
@@ -952,8 +976,7 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             if(!p.url.isEmpty()) c.originalUrl=p.url;
             c.availability=p.availability; c.lastSeen=scanTime;
             if(c.firstSeen.isEmpty()) c.firstSeen=p.firstSeen;
-            if(isUnavailable(p.availability) && (c.video.state!="complete" || c.audio.state!="complete")) c.recoveryStatus="unrecovered";
-            if(c.video.state=="complete"&&c.audio.state=="complete") c.recoveryStatus="not_required";
+            updateRecoveryStatus(c);
         }
         if(isUnavailable(p.availability)) ++summary.unavailable;
         result.append(p);
@@ -1754,7 +1777,7 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* 
         Representation done;done.state="complete";done.path=destRel;done.origin="external_recovery";done.verifiedAt=nowIso();
         if(kind=="video")target.video=done;else target.audio=done;
     }
-    target.recoveryStatus=target.video.state=="complete"&&target.audio.state=="complete"?"not_required":(isUnavailable(target.availability)?"unrecovered":target.recoveryStatus);
+    updateRecoveryStatus(target);
     const auto canonical=vectorToArray(items,canonicalToJson);if(!detail::arrayShape(canonical,"canonical",error))return false;
     for(auto it=inputHashes.begin();it!=inputHashes.end();++it)if(detail::fileDigest(it.key(),error)!=it.value())return detail::reject(error,"Submitted media changed during normalization");
     const auto manifestHash=detail::digest(manifestBytes);
