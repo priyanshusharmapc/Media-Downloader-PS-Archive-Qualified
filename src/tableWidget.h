@@ -924,6 +924,11 @@ private:
 
 		for( const auto& it : l ){
 
+			// Empty or whitespace-only cells cannot form a named filter bucket.
+			if( it.trimmed().isEmpty() ){
+				continue ;
+			}
+
 			auto s = it ;
 			s[ 0 ] = s[ 0 ].toUpper() ;
 
