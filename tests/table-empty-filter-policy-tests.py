@@ -10,9 +10,9 @@ start=source.index("void filterTable")
 end=source.index("void arrangeTable",start)
 body=source[start:end]
 
-assert "if( !m.isEmpty() && !l.contains( m ) )" in body
+assert "if( !m.trimmed().isEmpty() && !l.contains( m ) )" in body
 loop=body.index("for( const auto& it : l )")
-guard=body.index("if( it.isEmpty() )",loop)
+guard=body.index("if( it.trimmed().isEmpty() )",loop)
 indexing=body.index("s[ 0 ] = s[ 0 ].toUpper()",guard)
 assert loop < guard < indexing
 print("table empty-filter policy: PASS")
