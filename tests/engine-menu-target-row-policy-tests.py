@@ -11,8 +11,12 @@ for name in ["batchdownloader.cpp","playlistdownloader.cpp"]:
     start=source.index(anchor)
     end=source.index("auto subMenu",start)
     body=source[start:end]
-    assert "[ this,row ]" in body
+    assert "engineTargetUrl" in body
+    assert "engineTargetText" in body
+    assert "[ this,row,engineTargetUrl,engineTargetText ]" in body
     assert "row < 0 || row >= m_table.rowCount()" in body
+    assert "m_table.url( row ) != engineTargetUrl" in body
+    assert "m_table.entryAt( row ).uiText != engineTargetText" in body
     assert "setDownloadingOptions( u,row,ac->objectName() )" in body
     assert "m_table.currentRow()" not in body
 print("Context-menu engine target-row policy: PASS")
