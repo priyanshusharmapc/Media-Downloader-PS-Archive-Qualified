@@ -91,6 +91,7 @@ library::library( const Context& ctx ) :
 			if( directoryMatches && expectedCount > 0 && rows.size() == static_cast< size_t >( expectedCount ) ){
 				this->disableAll() ;
 				m_ui.pbLibraryCancel->setEnabled( true ) ;
+				m_continue = true ;
 				this->deleteEntries( rows ) ;
 			}
 		}
@@ -318,6 +319,10 @@ bool library::hasMultipleSelections()
 
 bool library::deletePath( const QString& m )
 {
+	if( !m_continue ){
+		return true ;
+	}
+
 	QFileInfo mm( m ) ;
 
 	if( mm.isSymLink() ){
@@ -338,7 +343,7 @@ bool library::deletePath( const QString& m )
 
 void library::deleteEntries( library::iter items )
 {
-	if( items.empty() ){
+	if( !m_continue || items.empty() ){
 
 		return this->enableAll() ;
 	}
@@ -361,8 +366,12 @@ void library::deleteEntries( library::iter items )
 		}
 		void fg( bool s )
 		{
-			if( !s ){
+			if( !m_parent.m_continue ){
+				m_parent.enableAll() ;
+				return ;
+			}
 
+			if( !s ){
 				m_parent.m_table.removeRow( m_row ) ;
 			}
 
@@ -431,6 +440,7 @@ void library::deleteEntry( int row )
 		this->disableAll() ;
 
 		m_ui.pbLibraryCancel->setEnabled( true ) ;
+		m_continue = true ;
 
 		this->deleteEntries( row ) ;
 	}
@@ -441,6 +451,7 @@ void library::deleteAll()
 	this->disableAll() ;
 
 	m_ui.pbLibraryCancel->setEnabled( true ) ;
+	m_continue = true ;
 
 	class meaw
 	{
@@ -738,6 +749,7 @@ void library::arrangeEntries( int )
 
 void library::showContents( const QString& path )
 {
+	m_continue = true ;
 	m_table.get().setHorizontalHeaderItem( 1,new QTableWidgetItem( m_currentPath ) ) ;
 
 	this->disableAll() ;
