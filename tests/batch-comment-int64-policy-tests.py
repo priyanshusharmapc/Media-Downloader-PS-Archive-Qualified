@@ -11,8 +11,9 @@ source = (p.parse_args().source_root / "src/batchdownloader.cpp").read_text(enco
 assert "bool _commentInt64" in source
 assert "std::isfinite" in source
 assert "std::floor( number ) != number" in source
-assert "std::numeric_limits< qint64 >::min()" in source
-assert "std::numeric_limits< qint64 >::max()" in source
+assert "constexpr double min = -9223372036854775808.0" in source
+assert "constexpr double upperExclusive = 9223372036854775808.0" in source
+assert "number >= upperExclusive" in source
 
 start = source.index("void _add_comments")
 end = source.index("void batchdownloader::saveComments", start)
