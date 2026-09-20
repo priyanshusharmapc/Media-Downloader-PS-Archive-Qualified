@@ -28,6 +28,7 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QSet>
 #include <QSplitter>
 #include <QStorageInfo>
@@ -755,6 +756,26 @@ void ArchiveTab::removePlaylist()
     if(!archive::ui::rootAvailable(m_root)){refreshAll();return;}
     archive::Paths paths(m_root);archive::SyncLock lock(paths);if(!lock.tryLock()){QMessageBox::warning(m_page,tr("Archive"),lock.errorString());return;}
     archive::Store store(paths);QString error;auto sources=store.loadSources(&error);if(!error.isEmpty()){QMessageBox::critical(m_page,tr("Archive"),error);return;}
+
+    // Preserve a durable retirement marker before removing the registry owner.
+    // If the subsequent registry commit fails, the source is still registered
+    // and the marker is harmless. If it succeeds, graph validation can
+    // distinguish intentional historical playlist files from corruption.
+    const auto sourceDir=paths.sourceDir(source.key);
+    if(QFileInfo(sourceDir).isDir()){
+        const auto markerPath=QDir(sourceDir).filePath("retired.json");
+        const auto markerBytes=QJsonDocument(QJsonObject{
+            {"schema_version",1},{"source_key",source.key},
+            {"retired_at",QDateTime::currentDateTime().toString(Qt::ISODateWithMs)},
+            {"reason","user_unregistered"}
+        }).toJson(QJsonDocument::Indented);
+        QSaveFile marker(markerPath);marker.setDirectWriteFallback(false);
+        if(!marker.open(QIODevice::WriteOnly)||marker.write(markerBytes)!=markerBytes.size()||!marker.commit()){
+            QMessageBox::critical(m_page,tr("Remove Playlist"),tr("Could not preserve the playlist retirement marker. No source was removed."));
+            return;
+        }
+    }
+
     for(int i=sources.size()-1;i>=0;--i)if(sources[i].key==source.key)sources.remove(i);
     if(!store.saveSources(sources,&error)){QMessageBox::critical(m_page,tr("Remove Playlist"),error);return;}
     archive::ActivityLogger logger(paths);logger.event("INFO","source","playlist_unregistered",{{"source_key",source.key}});lock.unlock();refreshAll();
