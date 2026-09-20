@@ -298,9 +298,11 @@ namespace utils
 			{
 				using handle_t = handle< Reply,Progress > ;
 
-				this->setupReply( s,std::move( reply ),std::move( progress ),[]( handle_t& h,qint64 r,qint64 t ){
-
-					h.progress( r,t ) ;
+				this->setupReply( s,std::move( reply ),std::move( progress ),[]( handle_t&,qint64,qint64 ){
+					// downloadProgress only updates counters in setupReply(). The
+					// consumer callback is driven by readyRead/final drain so callers
+					// that use progress::data() cannot consume response bytes from a
+					// signal that does not guarantee data readiness.
 				} ) ;
 			}
 			template< typename Reply >
