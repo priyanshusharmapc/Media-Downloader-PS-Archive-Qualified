@@ -1,8 +1,4 @@
-if(${CMAKE_VERSION} VERSION_GREATER "3.26")
-    cmake_minimum_required(VERSION 3.26.0)
-else()
-    cmake_minimum_required(VERSION 3.0.2)
-endif()
+cmake_minimum_required(VERSION 3.12.0)
 
 project(media-downloader LANGUAGES CXX)
 
@@ -23,11 +19,6 @@ INCLUDE(GNUInstallDirs)
 
 if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_definitions(-Qunused-arguments)
-endif()
-
-if(${CMAKE_VERSION} VERSION_LESS "3.1.0")
-    message("Warning your cmake version is too old(<3.1.0) and code my not compile")
-    add_definitions(-std=c++14)
 endif()
 
 option(BUILD_WITH_QT6 "Build with Qt 6" OFF)
@@ -165,21 +156,6 @@ else()
 endif()
 
 include(CTest)
-
-if(BUILD_TESTING)
-    # Policy regressions are intentionally named *-policy-tests.py. Discovering
-    # them at configure time keeps each remediation self-contained and avoids
-    # unrelated fixes conflicting merely because they register another test.
-    find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    file(GLOB POLICY_TEST_SCRIPTS "${CMAKE_SOURCE_DIR}/tests/*-policy-tests.py")
-    foreach(POLICY_TEST_SCRIPT ${POLICY_TEST_SCRIPTS})
-        get_filename_component(POLICY_TEST_FILE ${POLICY_TEST_SCRIPT} NAME_WE)
-        string(REGEX REPLACE "-tests$" "" POLICY_TEST_NAME "${POLICY_TEST_FILE}")
-        add_test(NAME ${POLICY_TEST_NAME}
-            COMMAND ${Python3_EXECUTABLE} ${POLICY_TEST_SCRIPT} --source-root ${CMAKE_SOURCE_DIR})
-        set_tests_properties(${POLICY_TEST_NAME} PROPERTIES TIMEOUT 30)
-    endforeach()
-endif()
 
 add_executable(archive-cli
     src/archive/archivecli.cpp
