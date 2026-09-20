@@ -30,6 +30,9 @@
 #include <QFile>
 #include <QSaveFile>
 
+#include <cmath>
+#include <limits>
+
 batchdownloader::batchdownloader( const Context& ctx ) :
 	m_ctx( ctx ),
 	m_settings( m_ctx.Settings() ),
@@ -1283,6 +1286,32 @@ static QJsonArray _saveComments( const QJsonArray& arr )
 	return result ;
 }
 
+bool _commentInt64( const QJsonValue& value,qint64& out )
+{
+	if( !value.isDouble() ){
+		return false ;
+	}
+
+	const auto number = value.toDouble() ;
+
+	if( !std::isfinite( number ) || std::floor( number ) != number ){
+		return false ;
+	}
+
+	// qint64::max() cannot be represented exactly as a double. The nearest
+	// double is 2^63, which is already outside qint64, so use an exclusive
+	// upper limit rather than rounding max upward and casting out of range.
+	constexpr double min = -9223372036854775808.0 ;
+	constexpr double upperExclusive = 9223372036854775808.0 ;
+
+	if( number < min || number >= upperExclusive ){
+		return false ;
+	}
+
+	out = static_cast< qint64 >( number ) ;
+	return true ;
+}
+
 template< typename Array,typename Table >
 void _add_comments( const Array& arr,Table& table )
 {
@@ -1294,15 +1323,18 @@ void _add_comments( const Array& arr,Table& table )
 		auto txt       = obj.value( "text" ).toString() ;
 		auto author    = obj.value( "author" ).toString() ;
 		auto comment   = QObject::tr( "Author: %1" ).arg( author ) ;
-		auto likeCount = QString::number( obj.value( "like_count" ).toInt() ) ;
+		qint64 likeCountValue = 0 ;
+		_commentInt64( obj.value( "like_count" ),likeCountValue ) ;
+		auto likeCount = QString::number( likeCountValue ) ;
 		auto timestamp = obj.value( "timestamp" ) ;
 
 		comment += "\n" + QObject::tr( "Like Count: %1" ).arg( likeCount ) ;
 
-		if( !timestamp.isUndefined() ){
+		qint64 timestampValue = 0 ;
 
-			auto a = timestamp.toInt() ;
-			auto b = utility::fromSecsSinceEpoch( a ) ;
+		if( !timestamp.isUndefined() && _commentInt64( timestamp,timestampValue ) ){
+
+			auto b = utility::fromSecsSinceEpoch( timestampValue ) ;
 
 			if( !b.isEmpty() ){
 
@@ -1745,9 +1777,11 @@ auto _make_sort( const char * key,Table& table,Cmp cmp )
 					m_key( key ),m_obj( std::move( obj ) )
 				{
 				}
-				operator int() const
+				operator qint64() const
 				{
-					return m_obj.value( m_key ).toInt() ;
+					qint64 value = 0 ;
+					_commentInt64( m_obj.value( m_key ),value ) ;
+					return value ;
 				}
 				QJsonObject toObject() const
 				{
@@ -1786,11 +1820,11 @@ void batchdownloader::sortComments()
 
 	connect( m.addAction( tr( "Sort By Date Ascending" ) ),
 		 &QAction::triggered,
-		 _make_sort( "timestamp",m_tableWidgetBDList,std::less<int>() ) ) ;
+		 _make_sort( "timestamp",m_tableWidgetBDList,std::less<qint64>() ) ) ;
 
 	connect( m.addAction( tr( "Sort By Date Descending" ) ),
 		 &QAction::triggered,
-		 _make_sort( "timestamp",m_tableWidgetBDList,std::greater<int>() ) ) ;
+		 _make_sort( "timestamp",m_tableWidgetBDList,std::greater<qint64>() ) ) ;
 
 	connect( m.addAction( tr( "Sort By Likes" ) ),
 		 &QAction::triggered,
