@@ -1590,6 +1590,10 @@ ValidationResult RecoveryImporter::validate(const QString& packageDir) const
     r.packageId=o.value("package_id").toString();
     if(!detail::sourceKeySafe(r.packageId)||r.packageId!=dirInfo.fileName())r.errors<<"package_id must match its safe directory name (letters, digits, underscore or hyphen, 1 to 160 characters)";
     if(detail::sourceKeySafe(r.packageId)&&QFileInfo::exists(QDir(m_store.paths().importsAccepted()).filePath(r.packageId)))r.errors<<"An accepted package already has this identity; existing evidence is immutable";
+    // Archive Mode owns this filename after acceptance. Rejecting it before
+    // any package mutation prevents submitted evidence from being overwritten.
+    if(QFileInfo::exists(QDir(packageDir).filePath("receipt.json")))
+        r.errors<<"receipt.json is reserved for the Archive-generated package receipt";
     if(!o.value("target").isObject())r.errors<<"target must be an object";
     const auto target=o.value("target").toObject();
     const auto itemKeyValue=target.value("item_key");
@@ -1714,7 +1718,7 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* 
     if(detail::fileDigest(QDir(absolute).filePath("manifest.json"),error)!=manifestHash)return detail::reject(error,"Submitted manifest changed during normalization");
     // Bind every included package file, not just the manifest. Evidence remains inspectable in Accepted.
     QJsonObject evidenceHashes;QDirIterator files(absolute,QDir::Files|QDir::Hidden,QDirIterator::Subdirectories);
-    while(files.hasNext()){const auto file=files.next();const auto rel=QDir(absolute).relativeFilePath(file);if(rel=="receipt.json")continue;
+    while(files.hasNext()){const auto file=files.next();const auto rel=QDir(absolute).relativeFilePath(file);
         if(!detail::relativeSafe(rel)||!detail::noLinks(file))return detail::reject(error,"Unsafe file in recovery package");
         const auto hash=detail::fileDigest(file,error);if(hash.isEmpty())return false;evidenceHashes[rel]=hash;
     }
@@ -1773,11 +1777,18 @@ int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bo
         }
         error=validation.errors.join("; ");
         if(!detail::sourceKeySafe(name)||!detail::noLinks(dir)){if(failures)failures->append(name+": "+error);continue;}
-        QJsonObject receipt{{"schema_version",1},{"package_id",name},{"result","rejected"},{"rejected_at",nowIso()},{"reason",error}};
-        QString receiptError;
-        if(!m_store.writeReceipt(dir,receipt,&receiptError)){if(failures)failures->append(name+": "+receiptError);continue;}
+        const QJsonObject receipt{{"schema_version",1},{"package_id",name},{"result","rejected"},{"rejected_at",nowIso()},{"reason",error}};
         const auto dest=QDir(m_store.paths().importsRejected()).filePath(name+"-"+QUuid::createUuid().toString(QUuid::WithoutBraces));
-        if(!QDir().rename(dir,dest))error+="; rejection move failed, package remains Pending";
+        if(!QDir().rename(dir,dest)){
+            error+="; rejection move failed, package remains Pending";
+        }else{
+            // Rejected packages are forensic input. Keep their bytes exactly as
+            // submitted and place our diagnostic receipt beside, not inside,
+            // the moved directory.
+            QString receiptError;
+            if(!detail::writeBytes(dest+".receipt.json",QJsonDocument(receipt).toJson(QJsonDocument::Indented),&receiptError))
+                error+="; rejection receipt could not be written: "+receiptError;
+        }
         if(failures)failures->append(name+": "+error);
         m_logger.event("WARNING","import","recovery_package_rejected",{{"package_id",name},{"reason",error}});
     }
