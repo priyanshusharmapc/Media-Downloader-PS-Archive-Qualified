@@ -710,12 +710,18 @@ const QByteArray& lux::lux_dlFilter::setFileName( Logger::Data& e,const QByteArr
 			m_tmp += "\n" + fileName ;
 
 			e.addFileName( fileName ) ;
-		}else{
-			utils::qthread::run( [ = ](){ QFile::rename( old,New ) ; } ) ;
+		}else if( old == New || QFile::rename( old,New ) ){
 
+			// Publish the requested filename only after the filesystem mutation
+			// is known to have completed successfully.
 			e.addFileName( fileNameCmd ) ;
-
 			m_tmp = fileNameCmd ;
+		}else{
+			m_tmp = "ERROR: Failed To Rename Downloaded File" ;
+			m_tmp += "\n" + fileName ;
+
+			// The old path is still the authoritative completed artifact.
+			e.addFileName( fileName ) ;
 		}
 
 		return m_tmp ;
