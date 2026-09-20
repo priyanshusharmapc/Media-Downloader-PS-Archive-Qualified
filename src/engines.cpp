@@ -814,7 +814,7 @@ void engines::removeEngine( const QString& ee,int id )
 {
 	auto e = ee + ".json" ;
 
-	const auto& engine = this->getCompleteEngineByPath( e ) ;
+	const auto& engine = this->getEngineByName( ee ) ;
 
 	if( engine ){
 
@@ -831,7 +831,11 @@ void engines::removeEngine( const QString& ee,int id )
 		// record. If it cannot be removed, keep the in-memory backend and its
 		// defaults untouched so the UI never claims a removal that will be
 		// reversed at the next startup.
-		const auto definitionError = utility::removeFile( definitionPath ) ;
+		QString definitionError ;
+		const QFileInfo definitionInfo( definitionPath ) ;
+		if( definitionInfo.exists() || definitionInfo.isSymLink() ){
+			definitionError = utility::removeFile( definitionPath ) ;
+		}
 		if( !definitionError.isEmpty() ){
 
 			m_logger.add( QObject::tr( "Failed To Remove Plugin Definition: %1: %2" ).arg( definitionPath,definitionError ),id ) ;
