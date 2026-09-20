@@ -9,4 +9,11 @@ end=s.index("class scaleUi",start)
 body=s[start:end]
 assert body.count("m_settings.openUrl") >= 3
 assert '"file:///" +' not in body
+settings=(Path(__file__).resolve().parents[1]/"src/settings.cpp").read_text(encoding="utf-8")
+open_start=settings.index("void settings::openUrl")
+open_end=settings.index("settings::~settings()",open_start)
+open_body=settings[open_start:open_end]
+assert "e.trimmed().isEmpty()" in open_body
+assert "QUrl::fromLocalFile( e )" in open_body
 print("Configure local-file URL policy: PASS")
+
