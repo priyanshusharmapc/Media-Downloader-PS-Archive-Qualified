@@ -142,14 +142,14 @@ public:
 			void run( const QString& exe,const QStringList& args ) const ;
 			QStringList setVLCoptions( const QStringList& m ) const ;
 			QStringList m_urls ;
-			const settings::mediaPlayer::PlayerOpts& m_playerOpts ;
+			settings::mediaPlayer::PlayerOpts m_playerOpts ;
 			Logger& m_logger ;
-			const QString& m_appDataPath ;
-			const QJsonObject& m_obj ;
+			QString m_appDataPath ;
+			QJsonObject m_obj ;
 			settings& m_settings ;
 		} ;
 
-		mediaPlayer( settings&,const std::vector< settings::mediaPlayer::PlayerOpts >&,Logger& ) ;
+		mediaPlayer( settings&,std::vector< settings::mediaPlayer::PlayerOpts >,Logger& ) ;
 		const std::vector< settings::mediaPlayer::PlayerOpts >& opts() const
 		{
 			return m_playerOpts ;
@@ -166,7 +166,7 @@ public:
 			return { urls,m_logger,opts,appDataPath,obj,m_settings } ;
 		}
 	private:
-		const std::vector< settings::mediaPlayer::PlayerOpts >& m_playerOpts ;
+		std::vector< settings::mediaPlayer::PlayerOpts > m_playerOpts ;
 		Logger& m_logger ;
 		settings& m_settings ;
 	} ;
@@ -347,15 +347,15 @@ public:
 			}
 			const QStringList& args() const
 			{
-				return m_args ;
+				return *m_args ;
 			}
 			bool valid() const
 			{
-				return !m_args.isEmpty() ;
+				return !m_args->isEmpty() ;
 			}
 			void checkAvailability() const ;
 		private:
-			mutable QStringList m_args ;
+			mutable std::shared_ptr< QStringList > m_args = std::make_shared< QStringList >() ;
 		} ;
 
 		const VLC& getVLC() const ;
