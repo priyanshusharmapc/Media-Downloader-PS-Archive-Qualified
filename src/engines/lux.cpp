@@ -199,8 +199,10 @@ bool lux::foundNetworkUrl( const QString& s )
 			return s.contains( "Windows_i386" ) ;
 		}else if( cpu.aarch64() ){
 			return s.contains( "Windows_arm64" ) ;
-		}else{
+		}else if( cpu.x86_64() ){
 			return s.contains( "Windows_x86_64" ) ;
+		}else{
+			return false ;
 		}
 
 	}else if( utility::platformIsLinux() ){
@@ -209,15 +211,21 @@ bool lux::foundNetworkUrl( const QString& s )
 			return s.contains( "Linux_i386" ) ;
 		}else if( cpu.aarch64() ){
 			return s.contains( "Linux_arm64" ) ;
-		}else{
+		}else if( cpu.x86_64() ){
 			return s.contains( "Linux_x86_64" ) ;
+		}else{
+			return false ;
 		}
 
 	}else if( utility::platformIsOSX() ){
 
-		return cpu.aarch64() ?
-			s.contains( "Darwin_arm64.tar.gz" ) :
-			s.contains( "Darwin_x86_64.tar.gz" ) ;
+		if( cpu.aarch64() ){
+			return s.contains( "Darwin_arm64.tar.gz" ) ;
+		}else if( cpu.x86_64() ){
+			return s.contains( "Darwin_x86_64.tar.gz" ) ;
+		}else{
+			return false ;
+		}
 	}else{
 		return false ;
 	}
