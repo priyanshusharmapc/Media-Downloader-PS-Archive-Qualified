@@ -31,6 +31,7 @@
 #include <QClipboard>
 #include <QMimeData>
 #include <QFileDialog>
+#include <QMessageBox>
 #include <QSysInfo>
 #include <QFile>
 #include <QSaveFile>
@@ -1618,7 +1619,10 @@ void utility::saveDownloadList( const Context& ctx,QMenu& m,tableWidget& tableWi
 
 				auto m = QJsonDocument( e ).toJson( QJsonDocument::Indented ) ;
 
-				engines::file( s,ctx.logger() ).write( m ) ;
+				if( !engines::file( s,ctx.logger() ).write( m ) ){
+					QMessageBox::critical( &ctx.mainWidget(),QObject::tr( "Save List To File" ),
+						QObject::tr( "Failed to save the list. The previous file was preserved." ) ) ;
+				}
 			}else{
 				QByteArray m ;
 
@@ -1640,7 +1644,10 @@ void utility::saveDownloadList( const Context& ctx,QMenu& m,tableWidget& tableWi
 					m.append( url + "\n\n" ) ;
 				}
 
-				engines::file( s,ctx.logger() ).write( m ) ;
+				if( !engines::file( s,ctx.logger() ).write( QString::fromUtf8( m ) ) ){
+					QMessageBox::critical( &ctx.mainWidget(),QObject::tr( "Save List To File" ),
+						QObject::tr( "Failed to save the list. The previous file was preserved." ) ) ;
+				}
 			}
 		}
 	} ) ;
