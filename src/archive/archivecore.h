@@ -193,13 +193,19 @@ public:
     bool appendHistory(const QString& sourceKey,const QJsonObject& event,QString* error = nullptr) const;
     bool writeAllProjections(QString* error = nullptr) const;
     bool writeProjections(const QString& sourceKey,QString* error = nullptr) const;
-    bool updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error = nullptr);
+    bool updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error = nullptr,
+                              const QString& metadataPath = {});
+    bool beginRepresentationBatch(QString* error = nullptr);
+    bool commitRepresentationBatch(QString* error = nullptr);
+    void cancelRepresentationBatch();
     bool updateCanonicalMetadata(const QString& itemKey,const QString& title,const QString& uploader,
                                  const QString& availability,const QString& originalUrl,QString* error = nullptr);
     ReconcileSummary reconcile(Source& source,const Snapshot& snapshot,ActivityLogger* logger = nullptr);
     bool writeReceipt(const QString& packageDir,const QJsonObject& receipt,QString* error = nullptr) const;
 private:
     Paths m_paths;
+    bool m_representationBatchActive = false;
+    QVector<CanonicalItem> m_representationBatchItems;
 };
 
 class ToolResolver
@@ -242,7 +248,7 @@ class MediaExecutor
 {
 public:
     MediaExecutor(RuntimeConfig config,Store& store,ActivityLogger& logger);
-    bool syncItem(const CanonicalItem& item,bool wantVideo,bool wantAudio,QString* error = nullptr);
+    bool syncItem(const CanonicalItem& item,bool wantVideo,bool wantAudio,QString* error = nullptr,bool rebuildProjections = true);
     bool syncItems(const QVector<CanonicalItem>& items,const std::function<bool()>& shouldStop,
                    QStringList* failures = nullptr);
 private:
@@ -274,6 +280,7 @@ public:
     // warnings separately, so callers never label an Accepted package Pending.
     int ingestPending(QStringList* failures = nullptr,const std::function<bool()>& shouldStop = {},QStringList* warnings = nullptr);
 private:
+    ValidationResult validateSnapshot(const QString& packageDir,const QByteArray& manifestBytes) const;
     bool normalizeVideo(const QString& input,const QString& output,QString* error) const;
     bool normalizeAudio(const QString& input,const QString& output,QString* error) const;
     RuntimeConfig m_config;

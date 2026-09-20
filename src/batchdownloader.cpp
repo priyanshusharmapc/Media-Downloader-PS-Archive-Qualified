@@ -2083,7 +2083,14 @@ void batchdownloader::tableItemDoubleClicked( QTableWidgetItem& item )
 
 	if( !m.isEmpty() ){
 
-		auto crow = m_table.currentRow() ;
+		const auto crow = m_listTargetRow ;
+
+		// The chooser belongs to the row that opened it. Selection can change
+		// independently while the chooser is visible, so revalidate row + URL.
+		if( crow < 0 || crow >= m_table.rowCount() || m_table.url( crow ) != m_listTargetUrl ){
+
+			return ;
+		}
 
 		if( m_listType == batchdownloader::listType::SUBTITLES ){
 
@@ -2129,7 +2136,12 @@ void batchdownloader::batchDownloaderSet()
 
 		this->saveComments( arr,e ) ;
 	}else{
-		auto crow = m_table.currentRow() ;
+		const auto crow = m_listTargetRow ;
+
+		if( crow < 0 || crow >= m_table.rowCount() || m_table.url( crow ) != m_listTargetUrl ){
+
+			return ;
+		}
 
 		if( m_listType == batchdownloader::listType::SUBTITLES ){
 
@@ -2583,6 +2595,17 @@ void batchdownloader::showList( batchdownloader::listType listType,
 {
 	QStringList args ;
 
+	// The chooser is an operation on the row it was opened for. Main-table
+	// selection may change while the chooser remains visible, so retain both
+	// the row and URL identity and fail closed if that row is later replaced.
+	if( listType == batchdownloader::listType::COMMENTS ){
+		m_listTargetRow = -1 ;
+		m_listTargetUrl.clear() ;
+	}else{
+		m_listTargetRow = row ;
+		m_listTargetUrl = row >= 0 && row < m_table.rowCount() ? m_table.url( row ) : QString() ;
+	}
+
 	auto& table = m_tableWidgetBDList.get() ;
 
 	table.setHorizontalHeaderLabels( engine.horizontalHeaderLabels() ) ;
@@ -2718,8 +2741,9 @@ void batchdownloader::showList( batchdownloader::listType listType,
 		events( batchdownloader& p,
 			batchdownloader::listType l,
 			const engines::engine& engine,
-			int row ) :
-			m_parent( p ),m_listType( l ),m_engine( engine ),m_row( row )
+			int row,
+			QString url ) :
+			m_parent( p ),m_listType( l ),m_engine( engine ),m_row( row ),m_url( std::move( url ) )
 		{
 		}
 		const engines::engine& engine()
@@ -2781,6 +2805,13 @@ void batchdownloader::showList( batchdownloader::listType listType,
 
 				m_parent.showComments( a ) ;
 			}else{
+				// Async media-property completion still belongs to the original
+				// row/URL. Never cache formats into a replacement row.
+				if( m_row < 0 || m_row >= m_parent.m_table.rowCount() ||
+				    m_parent.m_table.url( m_row ) != m_url ){
+					return ;
+				}
+
 				auto& logger = m_parent.m_ctx.logger() ;
 
 				auto ee = m_engine.mediaProperties( logger,a ) ;
@@ -2823,6 +2854,7 @@ void batchdownloader::showList( batchdownloader::listType listType,
 		const engines::engine& m_engine ;
 		QByteArray m_listData ;
 		int m_row ;
+		QString m_url ;
 	} ;
 
 	auto term = m_terminator.setUp( m_ui.pbCancelBatchDownloder,&QPushButton::clicked,-1 ) ;
@@ -2836,7 +2868,7 @@ void batchdownloader::showList( batchdownloader::listType listType,
 
 	BatchLoggerWrapper< outPut > logger( m_ctx.logger(),logs,outPut( *this,listType ) ) ;
 
-	events ev( *this,listType,engine,row ) ;
+	events ev( *this,listType,engine,row,url ) ;
 
 	auto ctx = utility::make_ctx( m_ctx,ev.move(),logger.move(),term.move(),ch ) ;
 

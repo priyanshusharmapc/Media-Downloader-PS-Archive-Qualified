@@ -74,7 +74,7 @@ private:
 	{
 	public:
 		presetOptions( const Context&,settings& ) ;
-		void save() ;
+		bool save() ;
 		void clear() ;
 		void setDefaults() ;
 		QString optionsTranslated( const QString& ) ;
@@ -193,7 +193,7 @@ private:
 			QJsonObject m_qJsonObject ;
 		} ;
 		downloadDefaultOptions( const Context&,const QString& ) ;
-		void save() ;
+		bool save() ;
 		bool isEmpty( const QString& ) ;
 		void replace( const QString& engineName,const QString& oldOptions,const QString& newOptions ) ;
 		void replace( const QJsonObject& oldObject,const QString& newOptions ) ;

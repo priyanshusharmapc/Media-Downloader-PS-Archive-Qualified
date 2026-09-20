@@ -194,7 +194,15 @@ void ArchiveTab::buildUi()
     auto* right=new QWidget(splitter); auto* rightLayout=new QVBoxLayout(right); rightLayout->setContentsMargins(0,0,0,0);
     m_healthLabel=new QLabel(tr("No playlist selected"),right); m_healthLabel->setWordWrap(true); rightLayout->addWidget(m_healthLabel);
     auto* filterRow=new QHBoxLayout; m_search=new QLineEdit(right); m_search->setPlaceholderText(tr("Search archive items…"));
-    m_filter=new QComboBox(right); m_filter->addItems({tr("All"),tr("Protected"),tr("Needs Sync"),tr("Missing"),tr("Unavailable"),tr("Removed"),tr("Failed"),tr("Interrupted")});
+    m_filter=new QComboBox(right);
+    m_filter->addItem(tr("All"),QStringLiteral("all"));
+    m_filter->addItem(tr("Protected"),QStringLiteral("protected"));
+    m_filter->addItem(tr("Needs Sync"),QStringLiteral("needs_sync"));
+    m_filter->addItem(tr("Missing"),QStringLiteral("missing"));
+    m_filter->addItem(tr("Unavailable"),QStringLiteral("unavailable"));
+    m_filter->addItem(tr("Removed"),QStringLiteral("removed"));
+    m_filter->addItem(tr("Failed"),QStringLiteral("failed"));
+    m_filter->addItem(tr("Interrupted"),QStringLiteral("interrupted"));
     filterRow->addWidget(m_search,1); filterRow->addWidget(m_filter); rightLayout->addLayout(filterRow);
     m_table=new QTableWidget(right); m_table->setColumnCount(6); m_table->setHorizontalHeaderLabels({tr("#"),tr("Title"),tr("Availability"),tr("Video"),tr("Audio"),tr("Status")});
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows); m_table->setSelectionMode(QAbstractItemView::SingleSelection); m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
@@ -236,7 +244,7 @@ void ArchiveTab::wireUi()
     QObject::connect(m_syncAll,&QPushButton::clicked,this,&ArchiveTab::syncAll);
     QObject::connect(m_retry,&QPushButton::clicked,this,&ArchiveTab::retryFailed);
     QObject::connect(m_stop,&QPushButton::clicked,this,&ArchiveTab::stopAfterCurrent);
-    QObject::connect(m_sources,&QListWidget::currentRowChanged,[this]{refreshTable();refreshDetails();});
+    QObject::connect(m_sources,&QListWidget::currentRowChanged,[this]{updateActionState();refreshTable();refreshDetails();});
     QObject::connect(m_table,&QTableWidget::itemSelectionChanged,this,&ArchiveTab::refreshDetails);
     QObject::connect(m_search,&QLineEdit::textChanged,this,&ArchiveTab::refreshTable);
     QObject::connect(m_filter,QOverload<int>::of(&QComboBox::currentIndexChanged),[this](int){refreshTable();});
@@ -427,6 +435,7 @@ void ArchiveTab::refreshSources()
     const auto current=selectedSourceKey(); archive::Store store{archive::Paths(m_root)}; const auto sources=store.loadSources(); m_sources->blockSignals(true);m_sources->clear();int selected=-1;
     for(int i=0;i<sources.size();++i){auto* item=new QListWidgetItem(sources[i].title.isEmpty()?sources[i].key:sources[i].title,m_sources);item->setData(Qt::UserRole,sources[i].key);item->setToolTip(sources[i].url);if(sources[i].key==current)selected=i;}
     if(selected<0&&m_sources->count()>0)selected=0;if(selected>=0)m_sources->setCurrentRow(selected);m_sources->blockSignals(false);
+    updateActionState();
 }
 
 archive::Source ArchiveTab::selectedSource() const
@@ -435,7 +444,8 @@ archive::Source ArchiveTab::selectedSource() const
     const auto key=selectedSourceKey(); archive::Store store{archive::Paths(m_root)};for(const auto& s:store.loadSources())if(s.key==key)return s;return {};
 }
 QString ArchiveTab::selectedSourceKey() const{auto* i=m_sources?m_sources->currentItem():nullptr;return i?i->data(Qt::UserRole).toString():QString();}
-QString ArchiveTab::selectedItemKey() const{const auto rows=m_table?m_table->selectionModel()->selectedRows():QModelIndexList{};if(rows.isEmpty())return {};auto* i=m_table->item(rows.first().row(),0);return i?i->data(Qt::UserRole).toString():QString();}
+QString ArchiveTab::selectedItemKey() const{const auto rows=m_table?m_table->selectionModel()->selectedRows():QModelIndexList{};if(rows.isEmpty())return {};auto* i=m_table->item(rows.first().row(),0);return i?i->data(Qt::UserRole+1).toString():QString();}
+QString ArchiveTab::selectedEntryKey() const{const auto rows=m_table?m_table->selectionModel()->selectedRows():QModelIndexList{};if(rows.isEmpty())return {};auto* i=m_table->item(rows.first().row(),0);return i?i->data(Qt::UserRole).toString():QString();}
 
 QVector<archive::CanonicalItem> ArchiveTab::itemsForSource(const archive::Source& source) const
 {
@@ -446,52 +456,221 @@ QVector<archive::CanonicalItem> ArchiveTab::itemsForSource(const archive::Source
 void ArchiveTab::refreshTable()
 {
     if(!m_ready||!m_table||!archive::ui::rootAvailable(m_root))return;
-    const auto source=selectedSource();const archive::Paths paths(m_root);archive::Store store{paths};
-    const auto playlist=store.loadPlaylistItems(source.key);const auto all=store.loadCanonicalItems();QHash<QString,archive::CanonicalItem> map;for(const auto& c:all)map[c.key]=c;
-    const auto search=m_search->text().trimmed();const auto filter=m_filter->currentText();int protectedCount=0,needs=0,unavailable=0,removed=0;
+
+    const auto selectedEntry=selectedEntryKey();
+    const auto source=selectedSource();
+    if(source.key.isEmpty()){
+        m_stateReadable=true;
+        m_table->setRowCount(0);
+        m_healthLabel->setText(tr("No playlist selected"));
+        updateActionState();
+        return;
+    }
+
+    const archive::Paths paths(m_root);
+    archive::Store store{paths};
+
+    QString playlistError;
+    const auto playlist=store.loadPlaylistItems(source.key,&playlistError);
+    if(!playlistError.isEmpty()){
+        m_stateReadable=false;
+        m_table->setRowCount(0);
+        m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();
+        const auto message=tr("Playlist state error: %1").arg(playlistError);
+        m_healthLabel->setText(message);m_statusLabel->setText(message);
+        updateActionState();
+        return;
+    }
+
+    QString canonicalError;
+    const auto all=store.loadCanonicalItems(&canonicalError);
+    if(!canonicalError.isEmpty()){
+        m_stateReadable=false;
+        m_table->setRowCount(0);
+        m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();
+        const auto message=tr("Canonical state error: %1").arg(canonicalError);
+        m_healthLabel->setText(message);m_statusLabel->setText(message);
+        updateActionState();
+        return;
+    }
+
+    m_stateReadable=true;
+    QHash<QString,archive::CanonicalItem> map;for(const auto& item:all)map[item.key]=item;
+    const auto search=m_search->text().trimmed();
+    auto filter=m_filter->currentData().toString();
+    static const QSet<QString> knownFilters={"all","protected","needs_sync","missing","unavailable","removed","failed","interrupted"};
+    if(!knownFilters.contains(filter))filter="all";
+
+    int protectedCount=0,needs=0,unavailable=0,removed=0,selectedRow=-1;
     m_table->setRowCount(0);
     for(const auto& p:playlist){
-        const bool has=map.contains(p.itemKey);const auto c=has?map[p.itemKey]:archive::CanonicalItem{};
-        const auto video=has?representationHealth(paths,c.video):RepresentationHealth{};
-        const auto audio=has?representationHealth(paths,c.audio):RepresentationHealth{};
-        const auto status=healthAdjustedStatus(p,has?&c:nullptr,paths);
+        const bool has=map.contains(p.itemKey);
+        const auto item=has?map[p.itemKey]:archive::CanonicalItem{};
+        const auto video=has?representationHealth(paths,item.video):RepresentationHealth{};
+        const auto audio=has?representationHealth(paths,item.audio):RepresentationHealth{};
+        const auto status=healthAdjustedStatus(p,has?&item:nullptr,paths);
+
         if(status=="Protected")++protectedCount;
         if(status.contains("Needs")||status=="Missing"||status=="Failed"||status=="Interrupted"||status=="Verification Stale")++needs;
-        if(p.availability!="public")++unavailable;if(p.membership=="removed")++removed;
+        if(p.availability!="public")++unavailable;
+        if(p.membership=="removed")++removed;
+
         if(!search.isEmpty()&&!p.title.contains(search,Qt::CaseInsensitive)&&!p.providerId.contains(search,Qt::CaseInsensitive))continue;
-        if(filter!="All"){
-            bool match=false;if(filter=="Protected")match=status=="Protected";else if(filter=="Needs Sync")match=status=="Needs Sync"||status=="Verification Stale";else if(filter=="Missing")match=status=="Missing";else if(filter=="Unavailable")match=p.availability!="public";else if(filter=="Removed")match=p.membership=="removed";else match=status==filter;if(!match)continue;
+
+        if(filter!="all"){
+            bool match=false;
+            if(filter=="protected")match=status=="Protected";
+            else if(filter=="needs_sync")match=status=="Needs Sync"||status=="Verification Stale";
+            else if(filter=="missing")match=!has||status=="Missing"||video.label=="Missing"||audio.label=="Missing";
+            else if(filter=="unavailable")match=p.availability!="public";
+            else if(filter=="removed")match=p.membership=="removed";
+            else if(filter=="failed")match=status=="Failed"||item.recoveryStatus=="failed";
+            else if(filter=="interrupted")match=status=="Interrupted"||item.recoveryStatus=="interrupted";
+            if(!match)continue;
         }
-        const int r=m_table->rowCount();m_table->insertRow(r);auto* pos=new QTableWidgetItem(p.position<0?QStringLiteral("-"):QString::number(p.position));pos->setData(Qt::UserRole,p.itemKey);m_table->setItem(r,0,pos);m_table->setItem(r,1,new QTableWidgetItem(p.title));m_table->setItem(r,2,new QTableWidgetItem(p.availability));m_table->setItem(r,3,new QTableWidgetItem(has?representationDisplay(c.video,video):"missing"));m_table->setItem(r,4,new QTableWidgetItem(has?representationDisplay(c.audio,audio):"missing"));m_table->setItem(r,5,new QTableWidgetItem(status));
+
+        const int row=m_table->rowCount();
+        m_table->insertRow(row);
+        auto* pos=new QTableWidgetItem(p.position<0?QStringLiteral("-"):QString::number(p.position));
+        pos->setData(Qt::UserRole,p.entryKey);
+        pos->setData(Qt::UserRole+1,p.itemKey);
+        m_table->setItem(row,0,pos);
+        m_table->setItem(row,1,new QTableWidgetItem(p.title));
+        m_table->setItem(row,2,new QTableWidgetItem(p.availability));
+        m_table->setItem(row,3,new QTableWidgetItem(has?representationDisplay(item.video,video):"missing"));
+        m_table->setItem(row,4,new QTableWidgetItem(has?representationDisplay(item.audio,audio):"missing"));
+        m_table->setItem(row,5,new QTableWidgetItem(status));
+        if(!selectedEntry.isEmpty()&&p.entryKey==selectedEntry)selectedRow=row;
     }
-    m_healthLabel->setText(source.key.isEmpty()?tr("No playlist selected"):tr("%1  |  All %2  |  Protected %3  |  Needs Work %4  |  Unavailable %5  |  Removed %6  |  Last scan %7").arg(source.title.isEmpty()?source.key:source.title).arg(playlist.size()).arg(protectedCount).arg(needs).arg(unavailable).arg(removed).arg(pretty(source.lastScanAt)));
+
+    if(selectedRow>=0)m_table->selectRow(selectedRow);
+    m_healthLabel->setText(tr("%1  |  All %2  |  Protected %3  |  Needs Work %4  |  Unavailable %5  |  Removed %6  |  Last scan %7")
+        .arg(source.title.isEmpty()?source.key:source.title).arg(playlist.size()).arg(protectedCount).arg(needs).arg(unavailable).arg(removed).arg(pretty(source.lastScanAt)));
+    updateActionState();
 }
 
 void ArchiveTab::refreshDetails()
 {
     if(!m_ready||!archive::ui::rootAvailable(m_root))return;
-    const auto source=selectedSource();const auto key=selectedItemKey();archive::Store store{archive::Paths(m_root)};archive::PlaylistItem p;archive::CanonicalItem c;bool hp=false,hc=false;for(const auto& x:store.loadPlaylistItems(source.key))if(x.itemKey==key){p=x;hp=true;break;}for(const auto& x:store.loadCanonicalItems())if(x.key==key){c=x;hc=true;break;}
-    if(!hp){m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();return;}
-    m_sourceDetails->setPlainText(tr("Title: %1\nYouTube ID: %2\nOriginal URL: %3\nPlaylist position: %4\nMembership: %5\nAvailability: %6\nFirst seen: %7\nLast seen: %8").arg(p.title,pretty(p.providerId),pretty(p.url)).arg(p.position).arg(p.membership,p.availability,pretty(p.firstSeen),pretty(p.lastSeen)));
-    const archive::Paths paths(m_root);const auto video=hc?representationHealth(paths,c.video):RepresentationHealth{};const auto audio=hc?representationHealth(paths,c.audio):RepresentationHealth{};
-    if(hc)m_archiveDetails->setPlainText(tr("Canonical key: %1\nVideo: %2\nVideo path: %3\nVideo origin: %4\nAudio: %5\nAudio path: %6\nAudio origin: %7\nMetadata: %8").arg(c.key,representationDisplay(c.video,video),pretty(c.video.path),pretty(c.video.origin),representationDisplay(c.audio,audio),pretty(c.audio.path),pretty(c.audio.origin),pretty(c.metadataPath)));
-    const auto history=readText(paths.playlistHistoryFile(source.key));QStringList matching;for(const auto& line:history.split('\n'))if(line.contains(key))matching<<line;m_historyDetails->setPlainText(matching.join("\n"));
-    if(hc)m_recoveryDetails->setPlainText(tr("Recovery status: %1\nCurrent availability: %2\nVideo integrity: %3\nAudio integrity: %4\nExternal recovery is submitted through State/ArchiveMode/Imports/Pending according to ARCHIVE_AGENT.md.").arg(c.recoveryStatus,c.availability,video.label,audio.label));
+
+    const auto source=selectedSource();
+    const auto itemKey=selectedItemKey();
+    const auto entryKey=selectedEntryKey();
+    if(source.key.isEmpty()||itemKey.isEmpty()||entryKey.isEmpty()){
+        m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();
+        return;
+    }
+
+    archive::Store store{archive::Paths(m_root)};
+    QString playlistError;
+    const auto playlist=store.loadPlaylistItems(source.key,&playlistError);
+    QString canonicalError;
+    const auto canonical=store.loadCanonicalItems(&canonicalError);
+    if(!playlistError.isEmpty()||!canonicalError.isEmpty()){
+        m_stateReadable=false;
+        const auto message=tr("Archive state error: %1").arg(!playlistError.isEmpty()?playlistError:canonicalError);
+        m_sourceDetails->setPlainText(message);m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();
+        m_statusLabel->setText(message);updateActionState();return;
+    }
+
+    m_stateReadable=true;
+    archive::PlaylistItem occurrence;archive::CanonicalItem item;bool haveOccurrence=false,haveItem=false;
+    for(const auto& candidate:playlist)if(candidate.entryKey==entryKey){occurrence=candidate;haveOccurrence=true;break;}
+    for(const auto& candidate:canonical)if(candidate.key==itemKey){item=candidate;haveItem=true;break;}
+
+    if(!haveOccurrence||occurrence.itemKey!=itemKey){
+        m_sourceDetails->clear();m_archiveDetails->clear();m_historyDetails->clear();m_recoveryDetails->clear();
+        if(haveOccurrence)m_statusLabel->setText(tr("Archive selection identity mismatch; refresh the view."));
+        updateActionState();
+        return;
+    }
+
+    m_sourceDetails->setPlainText(tr("Title: %1\nYouTube ID: %2\nOriginal URL: %3\nPlaylist position: %4\nMembership: %5\nAvailability: %6\nFirst seen: %7\nLast seen: %8")
+        .arg(occurrence.title,pretty(occurrence.providerId),pretty(occurrence.url)).arg(occurrence.position)
+        .arg(occurrence.membership,occurrence.availability,pretty(occurrence.firstSeen),pretty(occurrence.lastSeen)));
+
+    const archive::Paths paths(m_root);
+    const auto video=haveItem?representationHealth(paths,item.video):RepresentationHealth{};
+    const auto audio=haveItem?representationHealth(paths,item.audio):RepresentationHealth{};
+    if(haveItem)m_archiveDetails->setPlainText(tr("Canonical key: %1\nVideo: %2\nVideo path: %3\nVideo origin: %4\nAudio: %5\nAudio path: %6\nAudio origin: %7\nMetadata: %8")
+        .arg(item.key,representationDisplay(item.video,video),pretty(item.video.path),pretty(item.video.origin),
+             representationDisplay(item.audio,audio),pretty(item.audio.path),pretty(item.audio.origin),pretty(item.metadataPath)));
+
+    const auto history=readText(paths.playlistHistoryFile(source.key));
+    QStringList matching;
+    for(const auto& line:history.split('\n')){
+        if(line.trimmed().isEmpty())continue;
+        QJsonParseError pe;
+        const auto doc=QJsonDocument::fromJson(line.toUtf8(),&pe);
+        if(pe.error!=QJsonParseError::NoError||!doc.isObject())continue;
+        const auto object=doc.object();
+        const auto eventEntry=object.value("entry_key").toString();
+        if((!eventEntry.isEmpty()&&eventEntry==entryKey)||(eventEntry.isEmpty()&&object.value("item_key").toString()==itemKey))
+            matching<<line;
+    }
+    m_historyDetails->setPlainText(matching.join("\n"));
+
+    if(haveItem)m_recoveryDetails->setPlainText(tr("Recovery status: %1\nCurrent availability: %2\nVideo integrity: %3\nAudio integrity: %4\nExternal recovery is submitted through State/ArchiveMode/Imports/Pending according to ARCHIVE_AGENT.md.")
+        .arg(item.recoveryStatus,item.availability,video.label,audio.label));
+    updateActionState();
 }
 
 void ArchiveTab::refreshActivity()
 {
-    if(!archive::ui::rootAvailable(m_root))return;const auto base=archive::Paths(m_root).activityLogs();QDir d(base);const auto days=d.entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name|QDir::Reversed);QStringList lines;for(const auto& day:days){QDir dd(d.filePath(day));const auto files=dd.entryList(QDir::Files,QDir::Time);for(const auto& f:files){for(const auto& line:readText(dd.filePath(f)).split('\n')){if(line.trimmed().isEmpty())continue;QJsonParseError pe;const auto doc=QJsonDocument::fromJson(line.toUtf8(),&pe);if(pe.error==QJsonParseError::NoError&&doc.isObject()){const auto o=doc.object();lines<<QString("%1  %2  %3").arg(o.value("timestamp").toString(),o.value("event").toString(),QString::fromUtf8(QJsonDocument(o.value("details").toObject()).toJson(QJsonDocument::Compact)));}else lines<<line;if(lines.size()>=200)break;}if(lines.size()>=200)break;}if(lines.size()>=200)break;}std::reverse(lines.begin(),lines.end());m_activity->setPlainText(lines.join("\n"));
+    if(!archive::ui::rootAvailable(m_root))return;
+    const auto base=archive::Paths(m_root).activityLogs();
+    QDir daysRoot(base);
+    const auto days=daysRoot.entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name|QDir::Reversed);
+    QStringList lines;
+
+    for(const auto& day:days){
+        QDir dayDir(daysRoot.filePath(day));
+        const auto files=dayDir.entryList(QDir::Files,QDir::Name|QDir::Reversed);
+        for(const auto& file:files){
+            const auto fileLines=readText(dayDir.filePath(file)).split('\n');
+            for(int i=fileLines.size()-1;i>=0&&lines.size()<200;--i){
+                const auto& line=fileLines[i];
+                if(line.trimmed().isEmpty())continue;
+                QJsonParseError pe;
+                const auto doc=QJsonDocument::fromJson(line.toUtf8(),&pe);
+                if(pe.error==QJsonParseError::NoError&&doc.isObject()){
+                    const auto object=doc.object();
+                    lines<<QString("%1  %2  %3").arg(object.value("timestamp").toString(),object.value("event").toString(),
+                        QString::fromUtf8(QJsonDocument(object.value("details").toObject()).toJson(QJsonDocument::Compact)));
+                }else{
+                    lines<<line;
+                }
+            }
+            if(lines.size()>=200)break;
+        }
+        if(lines.size()>=200)break;
+    }
+
+    std::reverse(lines.begin(),lines.end());
+    m_activity->setPlainText(lines.join("\n"));
 }
 
 void ArchiveTab::updateActionState()
 {
-    // Busy state and root readiness are separate: ending a worker must never
-    // re-enable archive mutations after a drive has disappeared. Browse stays
-    // available for recovery when idle, including a fresh installation.
-    const bool ready=m_controlsEnabled&&!m_busy&&m_ready&&archive::ui::rootAvailable(m_root);
-    const QList<QWidget*> controls={m_add,m_remove,m_scan,m_syncSelected,m_syncAll,m_retry,m_more,m_sources,m_search,m_filter};
-    for(auto* widget:controls)widget->setEnabled(ready);
+    // Root/readability and worker ownership are independent gates. Global
+    // controls are available for a healthy Archive, while source-scoped
+    // actions require an actual selected source.
+    const bool ready=m_controlsEnabled&&!m_busy&&m_ready&&m_stateReadable&&archive::ui::rootAvailable(m_root);
+    const bool sourceSelected=ready&&!selectedSourceKey().isEmpty();
+
+    const QList<QWidget*> globalControls={m_add,m_syncAll,m_more,m_sources,m_search,m_filter};
+    for(auto* widget:globalControls)widget->setEnabled(ready);
+
+    const QList<QWidget*> sourceControls={m_remove,m_scan,m_syncSelected,m_retry};
+    for(auto* widget:sourceControls)widget->setEnabled(sourceSelected);
+
+    if(m_openRootAction)m_openRootAction->setEnabled(ready);
+    if(m_openPlaylistAction)m_openPlaylistAction->setEnabled(sourceSelected);
+    if(m_openCatalogAction)m_openCatalogAction->setEnabled(ready);
+    if(m_openMissingAction)m_openMissingAction->setEnabled(ready);
+    if(m_importsAction)m_importsAction->setEnabled(ready);
+    if(m_openLogsAction)m_openLogsAction->setEnabled(ready);
+
     m_browse->setEnabled(m_controlsEnabled&&!m_busy);
     m_stop->setEnabled(m_busy);
 }
@@ -538,12 +717,22 @@ void ArchiveTab::addPlaylist()
     QString error;if(!ensureReady(&error)){QMessageBox::critical(m_page,tr("Archive"),error);return;}
     bool ok=false;const auto url=QInputDialog::getText(m_page,tr("Add Playlist"),tr("YouTube playlist URL:"),QLineEdit::Normal,{},&ok).trimmed();if(!ok||url.isEmpty())return;
     const auto key=archive::sourceKeyFromUrl(url);if(key.isEmpty()){QMessageBox::warning(m_page,tr("Add Playlist"),tr("Enter a valid YouTube playlist URL containing a list ID."));return;}
+    const auto canonicalUrl=QStringLiteral("https://www.youtube.com/playlist?list=")+key;
     const auto title=QInputDialog::getText(m_page,tr("Add Playlist"),tr("Display name:"),QLineEdit::Normal,key,&ok).trimmed();if(!ok)return;
     if(!archive::ui::rootAvailable(m_root)){refreshAll();return;}
     archive::Paths paths(m_root);archive::SyncLock lock(paths);if(!lock.tryLock()){QMessageBox::warning(m_page,tr("Archive"),lock.errorString());return;}
     archive::Store store(paths);auto sources=store.loadSources(&error);if(!error.isEmpty()){QMessageBox::critical(m_page,tr("Archive"),error);return;}
-    for(const auto& source:sources)if(source.key==key){QMessageBox::information(m_page,tr("Add Playlist"),tr("This playlist is already registered."));return;}
-    archive::Source source;source.key=key;source.url=url;source.title=title.isEmpty()?key:title;source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
+    for(const auto& existing:sources)if(existing.key==key){
+        for(int i=0;i<m_sources->count();++i){
+            if(m_sources->item(i)->data(Qt::UserRole).toString()==key){
+                m_sources->setCurrentRow(i);
+                break;
+            }
+        }
+        QMessageBox::information(m_page,tr("Add Playlist"),tr("This playlist is already registered."));
+        return;
+    }
+    archive::Source source;source.key=key;source.url=canonicalUrl;source.title=title.isEmpty()?key:title;source.addedAt=QDateTime::currentDateTime().toString(Qt::ISODateWithMs);
     lock.unlock();
 
     // A syntactically valid URL is only a candidate until provider discovery
@@ -568,7 +757,18 @@ void ArchiveTab::removePlaylist()
 
 void ArchiveTab::scanSelected(){const auto s=selectedSource();if(!s.key.isEmpty())runSources({s},false,tr("Scanning %1").arg(s.title));}
 void ArchiveTab::syncSelected(){const auto s=selectedSource();if(!s.key.isEmpty())runSources({s},true,tr("Syncing %1").arg(s.title));}
-void ArchiveTab::retryFailed(){syncSelected();}
+void ArchiveTab::retryFailed()
+{
+    const auto source=selectedSource();
+    if(source.key.isEmpty()||m_busy)return;
+
+    QString error;
+    if(!ensureReady(&error)){m_statusLabel->setText(error);return;}
+
+    m_stopRequested=false;
+    const auto name=tr("Retrying failed work for %1").arg(source.title.isEmpty()?source.key:source.title);
+    runAsync(name,[this,source]{return operationRetryFailed(source);});
+}
 void ArchiveTab::syncAll()
 {
     if(m_busy)return;
@@ -664,6 +864,79 @@ QString ArchiveTab::operationScanOrSync(QVector<archive::Source> sources,bool do
     result["failures"]=QJsonArray::fromStringList(failures);
     result["warning_count"]=warnings.size();result["warnings"]=QJsonArray::fromStringList(warnings);
     logger.event(totalFailures||!warnings.isEmpty()?"WARNING":"INFO","application",doDownloads?"sync_session_completed":"scan_session_completed",result);
+    return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
+}
+
+QString ArchiveTab::operationRetryFailed(const archive::Source& source)
+{
+    QString error;
+    if(!archive::ui::initializeRoot(m_root,&error))return QString("ERROR:")+error;
+
+    archive::Paths paths(m_root);
+    archive::Store store(paths);
+    archive::ActivityLogger logger(paths);
+    archive::SyncLock lock(paths);
+    if(!lock.tryLock())return "ERROR:"+lock.errorString();
+
+    const auto playlist=store.loadPlaylistItems(source.key,&error);
+    if(!error.isEmpty())return "ERROR:"+error;
+    const auto canonical=store.loadCanonicalItems(&error);
+    if(!error.isEmpty())return "ERROR:"+error;
+
+    QHash<QString,archive::CanonicalItem> map;
+    for(const auto& item:canonical)map[item.key]=item;
+
+    const auto retryable=[](const QString& state){
+        return state=="failed"||state=="interrupted";
+    };
+
+    QSet<QString> eligibleKeys;
+    for(const auto& occurrence:playlist){
+        if(occurrence.membership!="active"||!map.contains(occurrence.itemKey))continue;
+        const auto& item=map[occurrence.itemKey];
+        if(retryable(item.video.state)||retryable(item.audio.state))eligibleKeys.insert(occurrence.itemKey);
+    }
+
+    const auto eligible=eligibleKeys.size();
+    int processed=0,failuresCount=0;
+    QStringList failures;
+    logger.event("INFO","application","retry_failed_started",{{"source_key",source.key},{"eligible",eligible}});
+
+    QSet<QString> processedKeys;
+    for(const auto& occurrence:playlist){
+        if(m_stopRequested.load())break;
+        if(occurrence.membership!="active"||!map.contains(occurrence.itemKey)||processedKeys.contains(occurrence.itemKey))continue;
+
+        const auto item=map[occurrence.itemKey];
+        const bool retryVideo=retryable(item.video.state);
+        const bool retryAudio=retryable(item.audio.state);
+        if(!retryVideo&&!retryAudio)continue;
+
+        processedKeys.insert(occurrence.itemKey);
+        ++processed;
+        const auto itemName=occurrence.title.isEmpty()?occurrence.itemKey:occurrence.title;
+        postOperationProgress(tr("Retry failed media"),tr("%1 | item %2/%3").arg(itemName).arg(processed).arg(eligible),processed-1,eligible,failuresCount);
+
+        archive::MediaExecutor executor(runtimeConfig(),store,logger);
+        QString itemError;
+        if(!executor.syncItem(item,retryVideo,retryAudio,&itemError)){
+            ++failuresCount;
+            failures<<occurrence.itemKey+": "+itemError;
+        }
+
+        postOperationProgress(tr("Retry failed media"),tr("Processed %1/%2").arg(processed).arg(eligible),processed,eligible,failuresCount);
+    }
+
+    lock.unlock();
+
+    QJsonObject result;
+    result["observed"]=eligible;
+    result["completed_items"]=processed-failuresCount;
+    result["failure_count"]=failuresCount;
+    result["warning_count"]=0;
+    result["stopped"]=m_stopRequested.load();
+    result["failures"]=QJsonArray::fromStringList(failures);
+    logger.event(failuresCount?"WARNING":"INFO","application","retry_failed_completed",result);
     return QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact));
 }
 

@@ -65,6 +65,7 @@ private:
     archive::Source selectedSource() const;
     QString selectedSourceKey() const;
     QString selectedItemKey() const;
+    QString selectedEntryKey() const;
     QVector<archive::CanonicalItem> itemsForSource(const archive::Source& source) const;
     void addPlaylist();
     void removePlaylist();
@@ -81,6 +82,7 @@ private:
     void runSources(const QVector<archive::Source>& sources,bool doDownloads,const QString& operationName);
     void runAsync(const QString& operationName,const std::function<QString()>& fn);
     QString operationScanOrSync(QVector<archive::Source> sources,bool doDownloads,bool requireCompleteBeforeFirstCommit=false);
+    QString operationRetryFailed(const archive::Source& source);
 
     QTabWidget& m_hostTabs;
     QWidget* m_page=nullptr;
@@ -137,6 +139,7 @@ private:
     QString m_root;
     bool m_busy=false;
     bool m_ready=false;
+    bool m_stateReadable=true;
     bool m_controlsEnabled=true;
     std::atomic_bool m_stopRequested{false};
 };

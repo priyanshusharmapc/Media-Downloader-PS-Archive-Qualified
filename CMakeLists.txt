@@ -561,6 +561,22 @@ if(BUILD_TESTING)
     set_tests_properties(download-folder-preservation-policy PROPERTIES TIMEOUT 30)
     add_test(NAME proxy-url-parser-policy COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/proxy-url-parser-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
     set_tests_properties(proxy-url-parser-policy PROPERTIES TIMEOUT 30)
+
+    # Remediation policy regressions are intentionally discovered from the
+    # source tree so every audit fix that adds *-policy-tests.py is exercised by
+    # CTest. Keep the two historical explicit entries above for stable names and
+    # skip them here to avoid duplicate execution.
+    file(GLOB MDPS_POLICY_TESTS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tests/*-policy-tests.py")
+    foreach(MDPS_POLICY_TEST IN LISTS MDPS_POLICY_TESTS)
+        get_filename_component(MDPS_POLICY_NAME "${MDPS_POLICY_TEST}" NAME_WE)
+        if(NOT MDPS_POLICY_NAME STREQUAL "download-folder-preservation-policy-tests"
+           AND NOT MDPS_POLICY_NAME STREQUAL "proxy-url-parser-policy-tests")
+            string(REPLACE "-tests" "" MDPS_POLICY_NAME "${MDPS_POLICY_NAME}")
+            add_test(NAME ${MDPS_POLICY_NAME}
+                     COMMAND ${Python3_EXECUTABLE} ${MDPS_POLICY_TEST} --source-root ${CMAKE_SOURCE_DIR})
+            set_tests_properties(${MDPS_POLICY_NAME} PROPERTIES TIMEOUT 30)
+        endif()
+    endforeach()
     add_test(NAME archive-integration COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/archive-integration-tests.py --cli $<TARGET_FILE:archive-cli> --fake-tool $<TARGET_FILE:archive-fake-tool>)
     set_tests_properties(archive-integration PROPERTIES TIMEOUT 180)
     if(WIN32)
