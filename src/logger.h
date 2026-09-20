@@ -25,7 +25,6 @@
 #include <QStringList>
 #include <QTableWidgetItem>
 #include <QDebug>
-#include <QTime>
 
 #include "logwindow.h"
 #include "util.hpp"
@@ -43,12 +42,26 @@ public:
 		QString formattedDataSize( qint64 ) const ;
 		static QString secondsToString( int s )
 		{
-			if( s < 3600 ){
+			// Duration formatting must not use QTime because QTime wraps at 24h.
+			// Negative/unknown values are clamped to zero instead of wrapping.
+			const auto total = s > 0 ? s : 0 ;
+			const auto seconds = total % 60 ;
+			const auto totalMinutes = total / 60 ;
+			const auto minutes = totalMinutes % 60 ;
 
-				return QTime( 0,0,0,0 ).addSecs( s ).toString( "mm:ss" ) ;
-			}else{
-				return QTime( 0,0,0,0 ).addSecs( s ).toString( "hh:mm:ss" ) ;
+			if( total < 3600 ){
+
+				return QString( "%1:%2" )
+					.arg( totalMinutes,2,10,QChar( '0' ) )
+					.arg( seconds,2,10,QChar( '0' ) ) ;
 			}
+
+			const auto hours = total / 3600 ;
+
+			return QString( "%1:%2:%3" )
+				.arg( hours,2,10,QChar( '0' ) )
+				.arg( minutes,2,10,QChar( '0' ) )
+				.arg( seconds,2,10,QChar( '0' ) ) ;
 		}
 	private:
 		QLocale m_locale ;
