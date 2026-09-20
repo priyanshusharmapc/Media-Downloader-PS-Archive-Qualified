@@ -23,6 +23,7 @@
 
 #include <QHeaderView>
 #include <QBuffer>
+#include <QUuid>
 
 void tableWidget::setDownloadingOptions( tableWidget::type type,
 					 int row,
@@ -221,6 +222,12 @@ void tableWidget::replace( tableWidget::entry e,int r,sizeHint s )
 {
 	auto row = static_cast< size_t >( r ) ;
 
+	// Repainting/replacing row content must not create a new asynchronous job
+	// identity. Removed rows disappear with their token; newly added rows receive
+	// a fresh token, preventing stale callbacks from binding to a re-added URL.
+	if( e.stableIdentity.isEmpty() ){
+		e.stableIdentity = m_items[ row ].stableIdentity ;
+	}
 	m_items[ row ] = e.move() ;
 
 	auto label = new QLabel() ;
@@ -262,6 +269,10 @@ int tableWidget::addRow()
 
 int tableWidget::addItem( tableWidget::entry e,tableWidget::sizeHint s )
 {
+	if( e.stableIdentity.isEmpty() ){
+		e.stableIdentity = QUuid::createUuid().toString( QUuid::WithoutBraces ) ;
+	}
+
 	auto row = m_table.rowCount() ;
 
 	if( e.showFirst && row ){
