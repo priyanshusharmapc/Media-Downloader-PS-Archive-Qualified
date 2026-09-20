@@ -1601,6 +1601,12 @@ void settings::mediaPlayer::action::operator()() const
 				auto duration = m_obj.value( "duration" ).toString().toUtf8() ;
 				auto title    = m_obj.value( "title" ).toString().toUtf8() ;
 
+				// EXTINF metadata is line-oriented. Provider-controlled title text
+				// must never be able to terminate the metadata line and inject a
+				// second URL or playlist directive into the external-player handoff.
+				title.replace( '\r',' ' ) ;
+				title.replace( '\n',' ' ) ;
+
 				QByteArray aa = "#EXTM3U\n\n" ;
 
 				if( duration != "0" && !title.contains( "NA" ) ){
