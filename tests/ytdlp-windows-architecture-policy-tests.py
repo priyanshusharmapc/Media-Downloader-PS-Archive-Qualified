@@ -14,11 +14,14 @@ assert "cpu.aarch64()" in selector
 assert "_Windows32BitBinaryName()" in selector
 assert "_WindowsArm64BinaryName()" in selector
 assert "_Windows64BitBinaryName()" in selector
+assert "cpu.x86_64()" in selector
+assert "return {} ;" in selector
 
 start=source.index("void yt_dlp::checkIfBinaryExist")
 end=source.index("static const char * _jsonFullArguments",start)
 bootstrap=source[start:end]
 assert "const auto binaryName = _WindowsBinaryName()" in bootstrap
+assert "if( binaryName.isEmpty() )" in bootstrap
 assert 'destPath += "/" + binaryName' in bootstrap
 assert 'thirdPartyBinPath + "/ytdlp/" + binaryName' in bootstrap
 assert 'thirdPartyBinPath + "/ytdlp/" + _Windows32BitBinaryName()' not in bootstrap
