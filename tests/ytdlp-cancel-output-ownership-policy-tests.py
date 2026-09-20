@@ -26,6 +26,10 @@ set_start = cpp.index("void yt_dlp::yt_dlplFilter::setFileName")
 set_body = cpp[set_start:]
 assert "_add( m_fileNames,normalized )" in set_body
 assert "if( ownedByInvocation )" in set_body
+assert "root.relativeFilePath( candidate )" in set_body
+assert 'relative.startsWith( "../" )' in set_body
+assert "!QDir::isAbsolutePath( relative )" in set_body
+assert "!QFileInfo::exists( candidate )" in set_body
 assert "_add( m_ownedFileNames,normalized )" in set_body
 assert set_body.index("_add( m_fileNames,normalized )") < set_body.index("if( ownedByInvocation )") < set_body.index("_add( m_ownedFileNames,normalized )")
 
