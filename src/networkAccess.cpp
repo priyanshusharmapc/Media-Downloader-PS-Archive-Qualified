@@ -665,6 +665,11 @@ void networkAccess::extractMediaDownloader( networkAccess::updateMDOptions md ) 
 				return oldStage ;
 			}
 
+			const QFileInfo attemptInfo( m_md.extractStagePath ) ;
+			if( attemptInfo.exists() || attemptInfo.isSymLink() ){
+				return QObject::tr( "Updater extraction path unexpectedly already exists: %1" ).arg( m_md.extractStagePath ) ;
+			}
+
 			if( !QDir().mkpath( m_md.extractStagePath ) ){
 				return QObject::tr( "Failed to create unique updater extraction directory: %1" ).arg( m_md.extractStagePath ) ;
 			}
