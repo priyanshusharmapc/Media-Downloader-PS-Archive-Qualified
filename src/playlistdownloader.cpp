@@ -665,9 +665,14 @@ void playlistdownloader::customContextMenuRequested()
 		}
 	}
 
-	connect( mm,&QMenu::triggered,[ this,row ]( QAction * ac ){
+	const auto engineTargetUrl = row >= 0 && row < m_table.rowCount() ? m_table.url( row ) : QString() ;
+	const auto engineTargetText = row >= 0 && row < m_table.rowCount() ? m_table.entryAt( row ).uiText : QString() ;
 
-		if( row < 0 || row >= m_table.rowCount() ){
+	connect( mm,&QMenu::triggered,[ this,row,engineTargetUrl,engineTargetText ]( QAction * ac ){
+
+		if( row < 0 || row >= m_table.rowCount() ||
+		    m_table.url( row ) != engineTargetUrl ||
+		    m_table.entryAt( row ).uiText != engineTargetText ){
 			return ;
 		}
 
