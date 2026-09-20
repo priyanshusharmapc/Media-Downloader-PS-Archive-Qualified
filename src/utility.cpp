@@ -1277,6 +1277,10 @@ void utility::wait( int time )
 
 void utility::openDownloadFolderPath( const QString& url )
 {
+	if( url.trimmed().isEmpty() ){
+		return ;
+	}
+
 	if( utility::platformIsWindows() ){
 
 		QProcess::startDetached( "explorer.exe",{ QDir::toNativeSeparators( url ) } ) ;
