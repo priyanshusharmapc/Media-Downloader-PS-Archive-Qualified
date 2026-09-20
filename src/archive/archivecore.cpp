@@ -316,6 +316,25 @@ bool validateExternalToolStatePaths(const Paths& paths,const QStringList& relati
     return true;
 }
 
+bool validateOwnedStagingTree(const Paths& paths,const QString& root,QString* error)
+{
+    const auto rootRelative=paths.relativeToRoot(root);
+    if(rootRelative.isEmpty()||!paths.isSafeRelative(rootRelative)||!QFileInfo(root).isDir())
+        return detail::reject(error,"Unsafe external-tool staging directory refused: "+root);
+
+    QDirIterator entries(root,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,
+                         QDirIterator::Subdirectories);
+    while(entries.hasNext()){
+        const auto path=entries.next();
+        const auto info=entries.fileInfo();
+        const auto relative=paths.relativeToRoot(path);
+        if(relative.isEmpty()||!paths.isSafeRelative(relative)||info.isSymLink()||
+           (!info.isFile()&&!info.isDir()))
+            return detail::reject(error,"External tool produced an unsafe staging entry: "+path);
+    }
+    return true;
+}
+
 QStringList withoutDownloadArchive(QStringList args)
 {
     for(int i=0;i<args.size();++i){
@@ -1757,14 +1776,27 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     const auto attempt="download-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
     QString output="Video/%(title).120s [%(artist|UNKNOWN)s] [%(height)sp %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s] ["+attempt+"].%(ext)s";
     const auto previous=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
+
+    // Provider-controlled metadata filenames are written only into an
+    // exclusively-created, unpredictable staging directory. The external
+    // process never receives a predictable Metadata/<title> child where a
+    // pre-existing symlink/junction could redirect writes outside the Archive.
+    QTemporaryDir metadataStaging(QDir(m_store.paths().temp()).filePath("metadata-"+attempt+"-XXXXXX"));
+    if(!metadataStaging.isValid()||!detail::noLinks(metadataStaging.path()))
+        return fail("Cannot create safe metadata staging directory");
+    const auto metadataStageRel=m_store.paths().relativeToRoot(metadataStaging.path());
+    if(metadataStageRel.isEmpty()||!m_store.paths().isSafeRelative(metadataStageRel))
+        return fail("Metadata staging directory is outside the Archive boundary");
+    const auto metadataPrefix=metadataStageRel+"/";
+
     QStringList args={
         "--ignore-config","--no-playlist","--no-overwrites","--output-na-placeholder","NA",
         "-f","bv[height<=1080][vcodec^=avc]+ba[ext=m4a]/bv[height<=1080][vcodec^=avc]+ba/bv[height<=1080]+ba/b[height<=1080]",
         "--paths","temp:Temp","--merge-output-format","mp4","-o",output,
-        "-o","infojson:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/source [%(id)s].%(ext)s",
-        "-o","description:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/description [%(id)s].%(ext)s",
-        "-o","thumbnail:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/thumbnail [%(id)s].%(ext)s",
-        "-o","subtitle:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/Subtitles/%(language)s [%(id)s].%(ext)s",
+        "-o","infojson:"+metadataPrefix+"source [%(id)s].%(ext)s",
+        "-o","description:"+metadataPrefix+"description [%(id)s].%(ext)s",
+        "-o","thumbnail:"+metadataPrefix+"thumbnail [%(id)s].%(ext)s",
+        "-o","subtitle:"+metadataPrefix+"Subtitles/%(language)s [%(id)s].%(ext)s",
         "--download-archive","State/video-archive.txt","--windows-filenames","--embed-metadata","--embed-thumbnail","--embed-chapters",
         "--write-info-json","--write-description","--write-thumbnail","--extractor-args","youtube:skip=translated_subs",
         "--write-subs","--write-auto-subs","--sub-langs","en.*","--sleep-subtitles","1","--embed-subs",
@@ -1816,15 +1848,25 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
         return fail("Media binding finalization failed: "+finalizationError,rel);
 
     QString metadataPath;
-    const auto metadataRoot=Paths(m_config.archiveRoot).metadata();
-    for(const auto& info:QDir(metadataRoot).entryInfoList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
-        if(info.fileName().contains("["+item.providerId+"]")&&detail::noLinks(info.absoluteFilePath())){
-            const auto candidate="Metadata/"+info.fileName();
-            if(Paths(m_config.archiveRoot).isSafeRelative(candidate)){
-                metadataPath=candidate;
-                break;
-            }
-        }
+    const auto metadataEntries=QDir(metadataStaging.path()).entryInfoList(
+        QDir::AllEntries|QDir::NoDotAndDotDot|QDir::Hidden|QDir::System);
+    if(!metadataEntries.isEmpty()){
+        QString stagingError;
+        if(!validateOwnedStagingTree(m_store.paths(),metadataStaging.path(),&stagingError))
+            return fail("Metadata staging validation failed: "+stagingError,rel);
+
+        // Generate the canonical destination only after the child has exited.
+        // rename() is the publication boundary: a collision fails instead of
+        // traversing/reusing an attacker-controlled destination.
+        const auto metadataPathCandidate="Metadata/youtube-"+item.providerId+"-"+
+            QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
+        const auto metadataDestination=m_store.paths().absoluteFromRelative(metadataPathCandidate);
+        if(metadataDestination.isEmpty()||QFileInfo::exists(metadataDestination)||
+           !QDir().rename(metadataStaging.path(),metadataDestination))
+            return fail("Unable to publish validated metadata staging directory",rel);
+
+        metadataStaging.setAutoRemove(false);
+        metadataPath=metadataPathCandidate;
     }
 
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
