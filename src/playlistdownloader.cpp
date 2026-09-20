@@ -694,14 +694,14 @@ void playlistdownloader::customContextMenuRequested()
 
 	connect( subMenu,&QMenu::triggered,[ this,row ]( QAction * ac ){
 
-		auto m = util::split( ac->objectName(),'\n',true ) ;
+		const auto m = ac->objectName().split( '\n',Qt::KeepEmptyParts ) ;
 
 		auto u = tableWidget::type::DownloadOptions ;
 
-		if( m.size() > 1 ){
+		if( m.size() >= 2 ){
 
 			m_table.setDownloadingOptions( u,row,m[ 0 ],m[ 1 ] ) ;
-		}else{
+		}else if( m.size() == 1 ){
 			m_table.setDownloadingOptions( u,row,m[ 0 ] ) ;
 		}
 	} ) ;
