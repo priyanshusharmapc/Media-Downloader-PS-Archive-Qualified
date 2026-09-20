@@ -689,9 +689,12 @@ void networkAccess::finished( networkAccess::Opts opts ) const
 
 		// Failed or rejected component payloads are not recovery evidence. Remove
 		// the temporary file immediately instead of leaking it until a retry.
-		const auto cleanupError = utility::removeFile( opts.filePath ) ;
-		if( !cleanupError.isEmpty() ){
-			this->failedToRemove( engine.name(),opts.filePath,cleanupError,opts.id ) ;
+		const QFileInfo rejectedPayload( opts.filePath ) ;
+		if( rejectedPayload.exists() && rejectedPayload.isFile() ){
+			const auto cleanupError = utility::removeFile( opts.filePath ) ;
+			if( !cleanupError.isEmpty() ){
+				this->failedToRemove( engine.name(),opts.filePath,cleanupError,opts.id ) ;
+			}
 		}
 
 		m_tabManager.enableAll() ;
