@@ -763,6 +763,10 @@ private:
 	QLineEdit m_lineEdit ;
 	QPixmap m_defaultVideoThumbnail ;
 	batchdownloader::listType m_listType ;
+	// Stable chooser ownership. Selection changes must not redirect an open
+	// media-options/subtitle panel to another batch row.
+	int m_listTargetRow = -1 ;
+	QString m_listTargetUrl ;
 	utility::Terminator m_terminator ;
 	widgetOverMainTable m_widgetOverMainTable ;
 	QByteArray m_downloadingComments ;
