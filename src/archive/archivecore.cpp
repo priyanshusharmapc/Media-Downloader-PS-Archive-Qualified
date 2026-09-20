@@ -924,8 +924,12 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
     QHash<QString,int> priorIndex;
     QHash<QString,QVector<int>> priorPlaceholders;
     QHash<QString,int> priorOccurrences;
+    QHash<QString,QVector<int>> priorResolvedOccurrences;
+    QSet<QString> knownEntryKeys;
     for(int i=0;i<prior.size();++i){
         ++priorOccurrences[prior[i].itemKey];
+        knownEntryKeys.insert(prior[i].entryKey);
+        if(!prior[i].providerId.isEmpty())priorResolvedOccurrences[prior[i].itemKey].append(i);
         // loadPlaylistItems has already validated or explicitly migrated every
         // occurrence identity. Never synthesize identities silently here.
         priorIndex[prior[i].entryKey]=i;
@@ -941,7 +945,7 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
     const auto record=[&](const QJsonObject& event){history+=QJsonDocument(event).toJson(QJsonDocument::Compact)+"\n";};
     QVector<PlaylistItem> result;
     QSet<QString> observedKeys;
-    QHash<QString,int> observedOccurrences;
+    QHash<QString,int> nextOccurrence=priorOccurrences;
     const auto scanTime=snapshot.scannedAt.isEmpty()?nowIso():snapshot.scannedAt;
     QSet<int> matchedPrior;
 
@@ -999,7 +1003,33 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
                 // the promotion from appearing as a removal plus a new row.
                 p.entryKey=prior[promotedPrior].entryKey;
             }else{
-                p.entryKey=p.itemKey+"#"+QString::number(++observedOccurrences[p.itemKey]);
+                QVector<int> candidates;
+                for(const auto candidate:priorResolvedOccurrences.value(p.itemKey))
+                    if(!matchedPrior.contains(candidate))candidates.append(candidate);
+
+                QVector<int> positionMatches;
+                for(const auto candidate:candidates)
+                    if(prior[candidate].position==p.position||prior[candidate].lastPosition==p.position)
+                        positionMatches.append(candidate);
+
+                int occurrencePrior=-1;
+                if(positionMatches.size()==1)occurrencePrior=positionMatches.front();
+                else if(positionMatches.isEmpty()&&candidates.size()==1)occurrencePrior=candidates.front();
+
+                if(occurrencePrior>=0){
+                    matchedPrior.insert(occurrencePrior);
+                    p.entryKey=prior[occurrencePrior].entryKey;
+                }else{
+                    // Multiple indistinguishable unmatched duplicates without a
+                    // unique positional match are genuinely ambiguous. Do not
+                    // rotate their historical IDs according to this scan's
+                    // ordinal. Allocate a fresh occurrence identity and leave
+                    // unmatched historical rows to the normal removed policy.
+                    do{
+                        p.entryKey=p.itemKey+"#"+QString::number(++nextOccurrence[p.itemKey]);
+                    }while(knownEntryKeys.contains(p.entryKey));
+                    knownEntryKeys.insert(p.entryKey);
+                }
             }
         }
         observedKeys.insert(p.entryKey);
