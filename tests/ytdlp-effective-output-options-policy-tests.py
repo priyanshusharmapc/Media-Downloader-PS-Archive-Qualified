@@ -14,7 +14,10 @@ assert body.count(base_call) == 1
 scan='for( int m = s.ourOptions.size() - 1 ; m > -1 ; m-- )'
 assert base_call in body and scan in body
 assert body.index(base_call) < body.index(scan)
-assert 'this->parseMetadata( mm,e,"%(playlist_index)s",w )' in body
-assert 'this->parseMetadata( mm,e,"%(playlist_title)s",s.playlist_title )' in body
+assert 'option == "-o" || option == "--output"' in body
+assert 'option.startsWith( "--output=" )' in body
+assert 'outputTemplate = option.mid( 9 )' in body
+assert 'this->parseMetadata( mm,outputTemplate,"%(playlist_index)s",w )' in body
+assert 'this->parseMetadata( mm,outputTemplate,"%(playlist_title)s",s.playlist_title )' in body
 assert 's.ourOptions.append( mm )' in body
 print("yt-dlp effective output-template metadata policy: PASS")
