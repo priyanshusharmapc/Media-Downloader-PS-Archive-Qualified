@@ -2852,87 +2852,59 @@ QString engines::engine::baseEngine::timer::stringElapsedTime( qint64 millisecon
 
 QString engines::engine::baseEngine::timer::duration( qint64 milliseconds )
 {
-	auto seconds = milliseconds / 1000;
-	milliseconds = milliseconds % 1000;
-	auto minutes = seconds / 60 ;
-	seconds      = seconds % 60 ;
-	auto hours   = minutes / 60 ;
-	minutes      = minutes % 60 ;
+	if( milliseconds < 0 )milliseconds = 0 ;
+	const qint64 totalSeconds = milliseconds / 1000 ;
+	const qint64 hours = totalSeconds / 3600 ;
+	const qint64 minutes = ( totalSeconds / 60 ) % 60 ;
+	const qint64 seconds = totalSeconds % 60 ;
 
-	QTime time ;
-	time.setHMS( int( hours ),int( minutes ),int( seconds ),int( milliseconds ) ) ;
-
-	return time.toString( "hh:mm:ss" ) ;
+	// This is an elapsed duration, not a time-of-day. QTime wraps/invalidates
+	// hours outside 0..23, so format total hours arithmetically.
+	return QString( "%1:%2:%3" )
+		.arg( hours,2,10,QChar( '0' ) )
+		.arg( minutes,2,10,QChar( '0' ) )
+		.arg( seconds,2,10,QChar( '0' ) ) ;
 }
 
 int engines::engine::baseEngine::timer::toSeconds( const QString& e )
 {
-	auto _toNumber = []( const QString& value,int& out ){
-
-		bool ok = false ;
-		const auto number = value.toInt( &ok ) ;
-
-		if( !ok || number < 0 ){
-
-			return false ;
-		}
-
-		out = number ;
-		return true ;
+	auto parse = []( const QString& value,qint64& out ){
+		bool ok=false ;
+		const auto number=value.toLongLong( &ok ) ;
+		if( !ok || number < 0 )return false ;
+		out=number ;return true ;
+	} ;
+	auto checked = []( qint64 hours,qint64 minutes,qint64 seconds ){
+		if( hours > std::numeric_limits< int >::max() / 3600LL )return 0 ;
+		const qint64 total = hours * 3600LL + minutes * 60LL + seconds ;
+		return total > std::numeric_limits< int >::max() ? 0 : static_cast< int >( total ) ;
 	} ;
 
 	if( e.endsWith( "m" ) ){
-
-		auto s = e ;
-		s.chop( 1 ) ;
-
-		int minutes = 0 ;
-
-		return _toNumber( s,minutes ) ? 60 * minutes : 0 ;
+		auto s=e;s.chop( 1 );qint64 minutes=0 ;
+		if( !parse( s,minutes ) || minutes > std::numeric_limits< int >::max() / 60LL )return 0 ;
+		return static_cast< int >( minutes * 60LL ) ;
 	}
 
-	// Keep empty fields so malformed text such as "1::2" cannot be silently
-	// reinterpreted as a valid two-component duration.
-	const auto parts = util::split( e,':',false ) ;
-
-	if( parts.size() == 3 ){
-
-		int hours = 0 ;
-		int minutes = 0 ;
-		int seconds = 0 ;
-
-		if( !_toNumber( parts[ 0 ],hours ) ||
-		    !_toNumber( parts[ 1 ],minutes ) ||
-		    !_toNumber( parts[ 2 ],seconds ) ||
-		    minutes >= 60 || seconds >= 60 ){
-
-			return 0 ;
-		}
-
-		return 3600 * hours + 60 * minutes + seconds ;
-
-	}else if( parts.size() == 2 ){
-
-		int minutes = 0 ;
-		int seconds = 0 ;
-
-		if( !_toNumber( parts[ 0 ],minutes ) ||
-		    !_toNumber( parts[ 1 ],seconds ) ||
-		    seconds >= 60 ){
-
-			return 0 ;
-		}
-
-		return 60 * minutes + seconds ;
-
-	}else if( parts.size() == 1 ){
-
-		// Preserve the historical one-component interpretation as hours.
-		int hours = 0 ;
-		return _toNumber( parts[ 0 ],hours ) ? 3600 * hours : 0 ;
-	}else{
-		return 0 ;
+	const auto parts=util::split( e,':',false ) ;
+	if( parts.size()==3 ){
+		qint64 hours=0,minutes=0,seconds=0 ;
+		if( !parse( parts[0],hours ) || !parse( parts[1],minutes ) || !parse( parts[2],seconds ) ||
+		    minutes>=60 || seconds>=60 )return 0 ;
+		return checked( hours,minutes,seconds ) ;
 	}
+	if( parts.size()==2 ){
+		qint64 minutes=0,seconds=0 ;
+		if( !parse( parts[0],minutes ) || !parse( parts[1],seconds ) || seconds>=60 )return 0 ;
+		if( minutes > std::numeric_limits< int >::max() / 60LL )return 0 ;
+		const qint64 total=minutes*60LL+seconds ;
+		return total > std::numeric_limits< int >::max() ? 0 : static_cast< int >( total ) ;
+	}
+	if( parts.size()==1 ){
+		qint64 hours=0 ;
+		return parse( parts[0],hours ) ? checked( hours,0,0 ) : 0 ;
+	}
+	return 0 ;
 }
 
 qint64 engines::engine::baseEngine::timer::elapsedTime()
