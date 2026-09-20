@@ -3343,7 +3343,12 @@ void utility::archiveData::addToHistory( QJsonObject obj )
 
 QByteArray utility::archiveData::logHistoryData( const Context& ctx )
 {
-	QFile file( ctx.Engines().engineDirPaths().downloadHistoryFilePath() ) ;
+	return utility::archiveData::logHistoryData( ctx.Engines().engineDirPaths().downloadHistoryFilePath() ) ;
+}
+
+QByteArray utility::archiveData::logHistoryData( const QString& filePath )
+{
+	QFile file( filePath ) ;
 
 	utility::archiveData::guardHistoryFile() ;
 
