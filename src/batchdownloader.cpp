@@ -991,10 +991,12 @@ void batchdownloader::getMetaData( const engines::engine& eng,const Items::entry
 		m_table.replace( e.move(),row ) ;
 	}
 
-	util::Timer( 1000,[ this,url,uiText ]( int counter ){
+	const auto identity = m_table.entryAt( row ).stableIdentity ;
+
+	util::Timer( 1000,[ this,identity,uiText ]( int counter ){
 
 		using ff = reportFinished::finishedStatus ;
-		const auto row = m_table.rowWithUrl( url ) ;
+		const auto row = m_table.rowWithIdentity( identity ) ;
 		if( row < 0 ){
 			return true ;
 		}
@@ -1020,7 +1022,7 @@ void batchdownloader::getMetaData( const engines::engine& eng,const Items::entry
 
 	m_table.selectLast() ;
 
-	this->showThumbnail( eng,row,url ) ;
+	this->showThumbnail( eng,row,url,identity ) ;
 }
 
 void batchdownloader::updateMetaData( const QString& url,int row )
@@ -2183,7 +2185,8 @@ void batchdownloader::updateTitleBar()
 
 void batchdownloader::showThumbnail( const engines::engine& engine,
 				    int index,
-				    const QString& url )
+				    const QString& url,
+				    const QString& identity )
 {			
 	class events
 	{
@@ -2192,11 +2195,13 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 			const engines::engine& engine,
 			int index,
 			const QString& url,
+			const QString& identity,
 			BatchLoggerWrapper< batchdownloader::defaultLogger > logger ) :
 			m_parent( p ),
 			m_engine( engine ),
 			m_index( index ),
 			m_url( url ),
+			m_identity( identity ),
 			m_logger( logger )
 		{
 		}
@@ -2206,7 +2211,7 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 		}
 		void done( engines::ProcessExitState,const std::vector< QByteArray >& )
 		{
-			const auto row = m_parent.m_table.rowWithUrl( m_url ) ;
+			const auto row = m_parent.m_table.rowWithIdentity( m_identity ) ;
 			if( row < 0 ){
 				return ;
 			}
@@ -2275,6 +2280,7 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 		const engines::engine& m_engine ;
 		int m_index ;
 		QString m_url ;
+		QString m_identity ;
 		BatchLoggerWrapper< batchdownloader::defaultLogger > m_logger ;
 	} ;
 
@@ -2301,7 +2307,7 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 	args.append( m_table.url( index ) ) ;
 
 	auto ctx = utility::make_ctx( m_ctx,
-				      events( *this,engine,index,url,wrapper ),
+				      events( *this,engine,index,url,identity,wrapper ),
 				      wrapper,
 				      m_terminator.setUp(),
 				      QProcess::ProcessChannel::StandardOutput ) ;
@@ -2900,7 +2906,7 @@ void batchdownloader::addItemUi( int index,bool enableAll,const utility::MediaEn
 
 void batchdownloader::networkData( utility::networkReply m )
 {
-	const auto row = m_table.rowWithUrl( m.identity() ) ;
+	const auto row = m_table.rowWithIdentity( m.identity() ) ;
 	if( row < 0 ){
 		return ;
 	}
@@ -2951,7 +2957,7 @@ void batchdownloader::addItem( int index,bool enableAll,const utility::MediaEntr
 
 		auto h = media.referer().toUtf8() ;
 
-		m_ctx.network().get( u,networkCtx( media,index ),this,m,g,h ) ;
+		m_ctx.network().get( u,networkCtx( media,index,m_table.entryAt( index ).stableIdentity ),this,m,g,h ) ;
 	}else{
 		this->addItemUi( index,enableAll,media ) ;
 	}
