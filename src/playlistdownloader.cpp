@@ -85,12 +85,19 @@ playlistdownloader::playlistdownloader( Context& ctx ) :
 	connect( m_ui.pbClearArchiveFile,&QPushButton::clicked,[ this ](){
 
 		const auto& engine = this->defaultEngine() ;
+		const auto path = m_ctx.Engines().engineDirPaths().archiveFilePath( engine ) ;
 
-		auto m = m_ctx.Engines().engineDirPaths().archiveFilePath( engine ) ;
+		QLockFile lock( path + ".lock" ) ;
+		lock.setStaleLockTime( 30000 ) ;
+		if( !lock.tryLock( 0 ) ){
+			QMessageBox::warning( &m_mainWindow,tr( "Archive In Use" ),
+				tr( "The internal download archive is being used by another application instance. It was not cleared." ) ) ;
+			return ;
+		}
 
-		if( QFile::exists( m ) ){
-
-			QFile::remove( m ) ;
+		if( QFile::exists( path ) && !QFile::remove( path ) ){
+			QMessageBox::warning( &m_mainWindow,tr( "Clear Archive Failed" ),
+				tr( "The internal download archive could not be removed. Its previous contents were preserved." ) ) ;
 		}
 	} ) ;
 
@@ -849,6 +856,36 @@ void playlistdownloader::download( const engines::engine& engine )
 	engine.updateVersionInfo( m_ctx,meaw( *this,engine ) ) ;
 }
 
+bool playlistdownloader::acquireInternalArchiveLock( const engines::engine& engine,int id )
+{
+	if( !m_ctx.Settings().useInternalArchiveFile() ){
+		return true ;
+	}
+
+	const auto path = m_ctx.Engines().engineDirPaths().archiveFilePath( engine ) ;
+	if( m_internalArchiveLocks.contains( path ) ){
+		return true ;
+	}
+
+	auto lock = std::make_shared< QLockFile >( path + ".lock" ) ;
+	lock->setStaleLockTime( 30000 ) ;
+	if( !lock->tryLock( 0 ) ){
+		m_ctx.logger().add(
+			QObject::tr( "Internal download archive is busy in another application instance: %1" ).arg( path ),id ) ;
+		return false ;
+	}
+
+	m_internalArchiveLocks.insert( path,std::move( lock ) ) ;
+	return true ;
+}
+
+void playlistdownloader::releaseInternalArchiveLocksIfIdle()
+{
+	if( m_table.noneAreRunning() ){
+		m_internalArchiveLocks.clear() ;
+	}
+}
+
 void playlistdownloader::downloadRecursively( const engines::engine& eng,int index,bool downloadRecursively )
 {	
 	class events
@@ -964,6 +1001,15 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 
 	auto logs   = m_settings.getLogsLimits() ;
 	auto id     = utility::loggerID() ;
+
+	// yt-dlp owns the archive file directly for the process lifetime. Hold a
+	// cross-process ownership lock for the complete local active-download
+	// window so another instance cannot clear, migrate or concurrently mutate
+	// the same deduplication state.
+	if( !this->acquireInternalArchiveLock( engine,id ) ){
+		if( m_table.noneAreRunning() )this->enableAll() ;
+		return ;
+	}
 	auto ff     = engine.filter( id ) ;
 	auto logger = make_loggerBatchDownloader( ff.move(),m_ctx.logger(),updater,error,id,logs ) ;
 
@@ -1482,6 +1528,8 @@ void playlistdownloader::reportFinishedStatus( const reportFinished& f,
 	}
 
 	if( m_table.noneAreRunning() ){
+
+		this->releaseInternalArchiveLocksIfIdle() ;
 
 		if( m_settings.desktopNotifyOnAllDownloadComplete() ){
 
