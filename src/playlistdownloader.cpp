@@ -393,11 +393,12 @@ void playlistdownloader::tabEntered()
 		m_ui.pbPLDownload->setEnabled( m_table.rowCount() > 0 ) ;
 	}
 
-	auto m = m_ui.cbEngineTypePD->currentText() ;
+	if( !m_ui.lineEditPLUrlOptions->isModified() ){
 
-	auto mm = m_settings.lastUsedOption( m,settings::tabName::playlist ) ;
-
-	m_ui.lineEditPLUrlOptions->setText( mm ) ;
+		auto m = m_ui.cbEngineTypePD->currentText() ;
+		auto mm = m_settings.lastUsedOption( m,settings::tabName::playlist ) ;
+		m_ui.lineEditPLUrlOptions->setText( mm ) ;
+	}
 
 	m_ui.lineEditPLUrl->setFocus() ;
 }
