@@ -194,9 +194,38 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $out = Join-Path $env:GITHUB_WORKSPACE 'portable/Media-Downloader-PS'
-          $process = Start-Process -FilePath "$out/media-downloader.exe" -WorkingDirectory $out -PassThru
+          $logDir = Join-Path $env:RUNNER_TEMP 'portable-gui-smoke'
+          New-Item -ItemType Directory -Force $logDir | Out-Null
+          Get-ChildItem $out -Recurse | Select-Object FullName,Length | Format-Table -AutoSize | Out-String -Width 4096 | Set-Content (Join-Path $logDir 'tree.txt')
+          Write-Host "tree written $(Join-Path $logDir 'tree.txt')"
+          $required = @(
+            'media-downloader.exe',
+            'platforms/qwindows.dll',
+            'Qt6Core.dll',
+            'Qt6Gui.dll',
+            'Qt6Widgets.dll',
+            'libstdc++-6.dll',
+            'libgcc_s_seh-1.dll',
+            'libwinpthread-1.dll'
+          )
+          foreach ($rel in $required) {
+            $p = Join-Path $out $rel
+            if (!(Test-Path -LiteralPath $p)) { Write-Host "MISSING $rel" } else { Write-Host "PRESENT $rel size=$((Get-Item -LiteralPath $p).Length)" }
+          }
+          Write-Host 'PRE-EXISTING PROCESSES'
+          Get-Process | Where-Object { $_.Name -match 'media-downloader' } | Format-Table Id,Name,StartTime -AutoSize | Out-String | Write-Host
+          Write-Host 'SESSION (quser is noise; winlogon is the pause predicate)'
+          quser 2>&1 | Write-Host
+          Get-Process winlogon -ErrorAction SilentlyContinue | Format-Table Id,ProcessName | Out-String | Write-Host
+          $env:QT_DEBUG_PLUGINS = '1'
+          $env:QT_LOGGING_RULES = 'qt.qpa.*=true'
+          $env:QT_ASSUME_STDERR_HAS_CONSOLE = '1'
+          $process = Start-Process -FilePath (Join-Path $out 'media-downloader.exe') -WorkingDirectory $out -PassThru
           Start-Sleep -Seconds 5
           $process.Refresh()
+          Write-Host "HasExited=$($process.HasExited) ExitCode=$(if ($process.HasExited) { $process.ExitCode } else { 'running' })"
+          $dumps = Join-Path $env:LOCALAPPDATA 'CrashDumps'
+          if (Test-Path -LiteralPath $dumps) { Get-ChildItem -LiteralPath $dumps | ForEach-Object { Write-Host $_.FullName } }
           if ($process.HasExited) { throw "Portable GUI exited during smoke test with code $($process.ExitCode)" }
           Stop-Process -Id $process.Id -Force
       - name: Packaged yt-dlp FFmpeg FFprobe end-to-end runtime smoke
