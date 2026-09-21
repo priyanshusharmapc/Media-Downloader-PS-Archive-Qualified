@@ -25,6 +25,7 @@
 #include "settings.h"
 #include "utils/threads.hpp"
 #include "context.hpp"
+#include "archive/archiveprocess.h"
 
 #include <QFile>
 
@@ -55,6 +56,25 @@ static QString _sslLibraryVersionString()
 
 namespace
 {
+utils::qprocess::outPut runBoundedExtractor( const QString& program,const QStringList& args )
+{
+    // Update extractors operate on untrusted archives. Give them a generous
+    // but finite deadline and reuse Archive's process-tree containment so a
+    // hung extractor or child cannot pin update state forever.
+    constexpr int extractionTimeoutMs = 5 * 60 * 1000 ;
+    const auto result = archive::detail::runContainedProcess(
+        program,args,QString(),extractionTimeoutMs ) ;
+
+    auto status = result.ok ? utils::qprocess::outPut::ExitStatus::NormalExit
+                            : utils::qprocess::outPut::ExitStatus::Crashed ;
+    auto error = result.standardError.toUtf8() ;
+    if( !result.error.isEmpty() ){
+        if( !error.isEmpty() )error += "\n" ;
+        error += result.error.toUtf8() ;
+    }
+    return { result.exitCode,status,result.standardOutput.toUtf8(),error } ;
+}
+
 bool updatePathExists( const QString& path )
 {
     const QFileInfo info( path ) ;
@@ -605,6 +625,7 @@ void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils:
 
 		this->failedToExtract( md.exeArgs,result,md.id ) ;
 		cleanupStage() ;
+        m_tabManager.enableAll() ;
 	}
 }
 
@@ -717,19 +738,19 @@ void networkAccess::extractMediaDownloader( networkAccess::updateMDOptions md ) 
 			}
 
 			auto args = QStringList{ "-x","-f",m_md.tmpFile,"-C",m_md.extractStagePath } ;
-			auto mode = QProcess::MergedChannels ;
 			m_md.exeArgs = { exe,args } ;
 
 			QPointer< QWidget > guard( &m_parent->m_ctx.mainWidget() ) ;
 			const auto * parent = m_parent ;
 			auto moved = m_md.move() ;
 
-			utils::qprocess::run( exe,args,mode,
-				[ guard,parent,md = std::move( moved ) ]( const utils::qprocess::outPut& output ) mutable {
-					if( guard ){
-						parent->emDownloader( std::move( md ),output ) ;
-					}
-				} ) ;
+            utils::qthread::run(
+                [ exe,args ](){ return runBoundedExtractor( exe,args ) ; },
+                [ guard,parent,md = std::move( moved ) ]( utils::qprocess::outPut&& output ) mutable {
+                    if( guard ){
+                        parent->emDownloader( std::move( md ),output ) ;
+                    }
+                } ) ;
 		}
 	private:
 		const networkAccess * m_parent ;
@@ -1030,14 +1051,28 @@ void networkAccess::finished( networkAccess::Opts opts ) const
                 return ;
             }
 
+            // Prove the staged payload can be activated before the live
+            // destination is touched. Rename preserves mode bits on POSIX.
+            if( !utility::setPermissions( opts.file.src() ) ){
+                opts.reportFailed() ;
+                opts.networkError.add( QObject::tr( "Downloaded engine could not be made executable" ) ) ;
+                engine.setBroken() ;
+                this->printVersion( opts.move(),true ) ;
+                return ;
+            }
+
             QString cleanupWarning ;
             const auto m = promoteUpdatePath( opts.file.src(),opts.exeBinPath,&cleanupWarning ) ;
 
             if( m.isEmpty() ){
 
-                // Promotion is the commit point. A failure restores the prior
-                // destination before this update attempt is reported as bad.
-                utility::setPermissions( opts.exeBinPath ) ;
+                if( !utility::setPermissions( opts.exeBinPath ) ){
+                    opts.reportFailed() ;
+                    opts.networkError.add( QObject::tr( "Promoted engine is not executable" ) ) ;
+                    engine.setBroken() ;
+                    this->printVersion( opts.move(),true ) ;
+                    return ;
+                }
 
                 engine.updateCmdPath( m_ctx.logger(),opts.exeBinPath ) ;
 
@@ -1095,6 +1130,15 @@ void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
         return ;
     }
 
+    if( !utility::setPermissions( stagedExecutable ) ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Extracted engine executable could not be made executable" ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
+
     QString treeError ;
     if( !utility::updaterTreeIsSafe( opts.updateStagePath,&treeError ) ){
         removeUpdatePath( opts.updateStagePath ) ;
@@ -1128,13 +1172,15 @@ void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
 
     if( !cleanupWarning.isEmpty() )this->post( engine.name(),cleanupWarning,opts.id ) ;
 
-    if( engine.archiveContainsFolder() ){
-        auto exe = engine.updateCmdPath( m_ctx.logger(),opts.tempPath ) ;
-        QFile file( exe ) ;
-        file.setPermissions( file.permissions() | QFileDevice::ExeOwner ) ;
-    }else{
-        QFile file( opts.exeBinPath ) ;
-        file.setPermissions( file.permissions() | QFileDevice::ExeOwner ) ;
+    const auto finalExecutable = engine.archiveContainsFolder()
+        ? engine.updateCmdPath( m_ctx.logger(),opts.tempPath )
+        : opts.exeBinPath ;
+    if( !utility::setPermissions( finalExecutable ) ){
+        this->post( engine.name(),QObject::tr( "Promoted engine failed executable-permission verification" ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
     }
 
     // The downloaded archive is no longer required after a fully successful
@@ -1248,12 +1294,13 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 		QPointer< QWidget > guard( &m_ctx.mainWidget() ) ;
 		const auto * parent = this ;
 		auto moved = opts.move() ;
-		utils::qprocess::run( exe,args,QProcess::SeparateChannels,
-			[ guard,parent,opts = std::move( moved ) ]( const utils::qprocess::outPut& output ) mutable {
-				if( guard ){
-					parent->extractArchiveOuput( std::move( opts ),output ) ;
-				}
-			} ) ;
+        utils::qthread::run(
+            [ exe,args ](){ return runBoundedExtractor( exe,args ) ; },
+            [ guard,parent,opts = std::move( moved ) ]( utils::qprocess::outPut&& output ) mutable {
+                if( guard ){
+                    parent->extractArchiveOuput( std::move( opts ),output ) ;
+                }
+            } ) ;
 	}
 }
 
