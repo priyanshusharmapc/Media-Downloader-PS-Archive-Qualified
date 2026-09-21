@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedArtifactSha256,
     [Parameter(Mandatory=$true)][ValidatePattern('^qualification-[0-9a-f]{40}$')][string]$ExpectedReleaseTag,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9]+$')][string]$ExpectedRunId,
-    [Parameter(Mandatory=$true)][ValidatePattern('^[^/\\s]+/[^/\\s]+$')][string]$ExpectedRepository,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[^\s/]+/[^\s/]+$')][string]$ExpectedRepository,
     [Parameter(Mandatory=$true)][string]$ArtifactZipPath,
     [switch]$AllowExistingArchive
 )

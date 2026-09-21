@@ -679,7 +679,7 @@ class ArchiveIntegration(NormalizationCleanupCases, unittest.TestCase):
         shutil.copytree(Path(FFMPEG).parent, ffbin)
         commit = 'a' * 40
         run_id = '123456789'
-        repository = 'example/qualified-repo'
+        repository = 'priyanshusharmapc/Media-Downloader-PS-Archive-Qualified'
         release_tag = 'qualification-' + commit
         (self.package / 'build-identity.json').write_text(json.dumps({
             'repository': repository, 'commit': commit, 'run_id': run_id,
