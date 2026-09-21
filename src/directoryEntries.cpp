@@ -22,6 +22,7 @@
 #include "utils/miscellaneous.hpp"
 
 #include <QDir>
+#include <QFile>
 
 #include <cstring>
 #include <cwchar>
@@ -269,7 +270,12 @@ class dManager
 {
 public:
 	dManager( const QString& path,std::atomic_bool& c ) :
-		m_path( path.toUtf8().constData() ),
+		m_path( QFile::encodeName( path ).constData() ),
+		m_continue( c )
+	{
+	}
+	dManager( const QByteArray& nativePath,std::atomic_bool& c ) :
+		m_path( nativePath.constData(),static_cast< size_t >( nativePath.size() ) ),
 		m_continue( c )
 	{
 	}
@@ -358,14 +364,31 @@ private:
 				// symlinks and allowed Library navigation to cross its filesystem
 				// ownership boundary.
 				if( lstat( s.data(),&m ) == 0 ){
+                    const QByteArray nativeName( name,static_cast< int >( std::strlen( name ) ) ) ;
+                    auto displayName = QString::fromUtf8( nativeName.constData(),nativeName.size() ) ;
+
+                    // A POSIX filename may be arbitrary bytes. If UTF-8 cannot
+                    // round-trip it exactly, render an unambiguous escaped form
+                    // while retaining nativeName as the authoritative identity.
+                    if( displayName.toUtf8() != nativeName ){
+                        displayName.clear() ;
+                        for( const auto byte : nativeName ){
+                            const auto value = static_cast< unsigned char >( byte ) ;
+                            if( value >= 0x20 && value < 0x7f && value != '\\' ){
+                                displayName += QChar( value ) ;
+                            }else{
+                                displayName += QString( "\\x%1" ).arg( value,2,16,QLatin1Char( '0' ) ) ;
+                            }
+                        }
+                    }
 
 					if( S_ISREG( m.st_mode ) ){
 
-						entries.addFile( m.st_mtime,name ) ;
+						entries.addFile( m.st_mtime,displayName,nativeName ) ;
 
 					}else if( S_ISDIR( m.st_mode ) ){
 
-						entries.addFolder( m.st_mtime,name ) ;
+						entries.addFolder( m.st_mtime,displayName,nativeName ) ;
 					}
 				}
 			}
@@ -424,3 +447,15 @@ void directoryManager::removeDirectory( const QString& e,std::atomic_bool& s )
 {
 	return dManager( e,s ).removeDirectory() ;
 }
+
+#ifdef Q_OS_UNIX
+directoryEntries directoryManager::readAllNative( const QByteArray& e,std::atomic_bool& s )
+{
+	return dManager( e,s ).readAll() ;
+}
+
+void directoryManager::removeDirectoryNative( const QByteArray& e,std::atomic_bool& s )
+{
+	return dManager( e,s ).removeDirectory() ;
+}
+#endif
