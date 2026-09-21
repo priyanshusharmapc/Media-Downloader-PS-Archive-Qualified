@@ -124,7 +124,7 @@ int main()
     if( ::mkdir( confirmed.constData(),0700 ) != 0 )return 17 ;
     if( ::mkdir( sibling.constData(),0700 ) != 0 )return 18 ;
     if( !createFile( child( confirmed,QByteArray( "victim" ) ) ) )return 19 ;
-    if( !createFile( child( sibling,QByteArray( "survivor" ) ) )return 20 ;
+    if( !createFile( child( sibling,QByteArray( "survivor" ) ) ) )return 20 ;
     if( !directoryManager::removeDirectoryContentsNative(
             root,confirmed,keepGoing ) )return 21 ;
     if( existsNative( child( confirmed,QByteArray( "victim" ) ) ) )return 22 ;
