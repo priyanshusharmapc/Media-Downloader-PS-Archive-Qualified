@@ -240,7 +240,7 @@ public:
 		quint64 m_generation = 0 ;
 		// next() is emitted once per queued row. Share the immutable snapshot
 		// so advancing an iterator is O(1), not a full directory copy.
-		std::shared_ptr< const std::vector< snapshot > > m_entries ;
+		std::shared_ptr< std::vector< snapshot > > m_entries ;
 	} ;
 
 	void join( bool folderFirst )
