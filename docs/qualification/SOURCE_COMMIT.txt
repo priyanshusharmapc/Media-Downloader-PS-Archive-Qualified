@@ -1,3 +1,4 @@
 GENERATED_BY_QUALIFICATION_WORKFLOW
-See current-release.json in the exact qualified workflow artifact.
+See current-release.json on the product GitHub Release tagged qualification-<C_main>.
+C_main is the qualified product commit; a later docs commit on main is not.
 Historical source identity is preserved under docs/qualification/history/.
