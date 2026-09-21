@@ -284,6 +284,7 @@ namespace directoryManager
 	// POSIX filenames are byte strings, not guaranteed UTF-8. These entry
 	// points keep an already-captured native path byte-for-byte intact.
 	directoryEntries readAllNative( const QByteArray&,std::atomic_bool& ) ;
+	void removeDirectoryContentsNative( const QByteArray&,std::atomic_bool& ) ;
 	void removeDirectoryNative( const QByteArray&,std::atomic_bool& ) ;
 #endif
 }
