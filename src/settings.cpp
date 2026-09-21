@@ -587,6 +587,53 @@ void settings::openUrl( const QString& e )
 	}
 }
 
+#ifdef Q_OS_UNIX
+void settings::openUrl( const QByteArray& nativePath )
+{
+	if( nativePath.isEmpty() || nativePath.indexOf( '\0' ) >= 0 ){
+		return ;
+	}
+
+	// QUrl can retain percent-encoded filesystem octets even when they are not
+	// valid UTF-8. This lets the desktop opener address the exact POSIX inode
+	// selected by Library instead of a QString reconstruction of its name.
+	static const char hex[] = "0123456789ABCDEF" ;
+	QByteArray encoded( "file://" ) ;
+	for( const auto byte : nativePath ){
+		const auto value = static_cast< unsigned char >( byte ) ;
+		const bool unreserved =
+			( value >= 'A' && value <= 'Z' ) ||
+			( value >= 'a' && value <= 'z' ) ||
+			( value >= '0' && value <= '9' ) ||
+			value == '/' || value == '-' || value == '_' || value == '.' || value == '~' ;
+		if( unreserved ){
+			encoded.append( static_cast< char >( value ) ) ;
+		}else{
+			encoded.append( '%' ) ;
+			encoded.append( hex[ value >> 4 ] ) ;
+			encoded.append( hex[ value & 0x0f ] ) ;
+		}
+	}
+
+	const auto url = QUrl::fromEncoded( encoded,QUrl::StrictMode ) ;
+	if( !url.isValid() ){
+		return ;
+	}
+
+	if( m_MdScaleFactor.isEmpty() ){
+		QDesktopServices::openUrl( url ) ;
+	}else{
+		if( m_defaultScaleFactor.isEmpty() ){
+			qunsetenv( "QT_SCALE_FACTOR" ) ;
+		}else{
+			qputenv( "QT_SCALE_FACTOR",m_defaultScaleFactor ) ;
+		}
+		QDesktopServices::openUrl( url ) ;
+		qputenv( "QT_SCALE_FACTOR",m_MdScaleFactor ) ;
+	}
+}
+#endif
+
 settings::~settings()
 {
 	// Flatpak handoff playlists are intentionally leased beyond this process.
