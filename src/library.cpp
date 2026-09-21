@@ -34,6 +34,7 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>
+#include <cstdio>
 #endif
 
 namespace
@@ -315,7 +316,12 @@ library::library( const Context& ctx ) :
 	} ) ;
 
 	connect( m_ui.pbLibraryDowloadFolder,&QPushButton::clicked,[ this ](){
-
+#ifdef Q_OS_UNIX
+		if( !m_currentNativePath.isEmpty() ){
+			m_settings.openUrl( m_currentNativePath ) ;
+			return ;
+		}
+#endif
 		utility::openDownloadFolderPath( m_currentPath ) ;
 	} ) ;
 
@@ -325,6 +331,9 @@ library::library( const Context& ctx ) :
 
 		m_downloadFolder = QDir::fromNativeSeparators( m ) ;
 		m_downloadNativePath = QFile::encodeName( canonicalLibraryPath( m_downloadFolder ) ) ;
+		if( m_downloadNativePath.isEmpty() ){
+			m_downloadNativePath = QFile::encodeName( QDir::cleanPath( m_downloadFolder ) ) ;
+		}
 
 		if( m_downloadFolder != m_currentPath ){
 
@@ -383,7 +392,7 @@ library::library( const Context& ctx ) :
 		}else{
 			m_ctx.Engines().openUrls( candidate ) ;
 		}
-	} ) ;;
+	} ) ;
 }
 
 void library::moveUp()
@@ -682,6 +691,9 @@ void library::renameFile( int row )
 	auto nn = m_ui.plainTextLibrarySetNewName->toPlainText() ;
 
 	auto& item = m_table.item( row,1 ) ;
+	if( nn == item.text() ){
+		return ;
+	}
 
 #ifdef Q_OS_UNIX
 	const auto oldNativeName = this->nativeNameAt( row ) ;
@@ -692,6 +704,9 @@ void library::renameFile( int row )
 		if( error.isEmpty() ){
 			item.setText( nn ) ;
 			item.setData( Qt::UserRole,newNativeName ) ;
+			// Rename changes both sort order and native identity. Rebuild the
+			// directory snapshot before any later sort/action can reuse stale rows.
+			this->showContents( m_currentPath,m_currentNativePath ) ;
 		}else{
 			m_ctx.logger().add( error,utility::loggerID() ) ;
 			this->showContents( m_currentPath,m_currentNativePath ) ;
