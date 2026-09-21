@@ -204,6 +204,11 @@ library::library( const Context& ctx ) :
 	m_folderIcon( m_settings.getIcon( "folder" ).pixmap( 30,40 ) ),
 	m_videoIcon( m_settings.getIcon( "video" ).pixmap( 30,40 ) )
 {
+	if( m_downloadNativePath.isEmpty() ){
+		m_downloadNativePath = QFile::encodeName( QDir::cleanPath( m_downloadFolder ) ) ;
+		m_currentNativePath = m_downloadNativePath ;
+	}
+
 	qRegisterMetaType< directoryEntries::iter >() ;
 
 	this->setRenameUiVisible( false ) ;
@@ -233,7 +238,9 @@ library::library( const Context& ctx ) :
 		const auto rows = this->pendingRows() ;
 		const auto expectedCount = m_pendingActionNames.size() ;
 		const auto directoryMatches = !m_pendingActionDirectory.isEmpty() &&
-			QDir::cleanPath( m_pendingActionDirectory ) == QDir::cleanPath( m_currentPath ) ;
+			QDir::cleanPath( m_pendingActionDirectory ) == QDir::cleanPath( m_currentPath ) &&
+			( m_pendingActionNativeDirectory.isEmpty() ||
+			  m_pendingActionNativeDirectory == m_currentNativePath ) ;
 
 		// Confirmation is valid only for the exact view and item identities that
 		// were displayed when the action was opened. Selection/current-row drift
@@ -477,6 +484,7 @@ void library::textAlignmentChanged( Qt::LayoutDirection )
 void library::capturePendingRows( const std::vector< int >& rows )
 {
 	m_pendingActionDirectory = m_currentPath ;
+	m_pendingActionNativeDirectory = m_currentNativePath ;
 	m_pendingActionNames.clear() ;
 	m_pendingActionNativeNames.clear() ;
 
@@ -505,7 +513,9 @@ std::vector< int > library::pendingRows()
 	std::vector< int > rows ;
 
 	if( m_pendingActionDirectory.isEmpty() ||
-		QDir::cleanPath( m_pendingActionDirectory ) != QDir::cleanPath( m_currentPath ) ){
+		QDir::cleanPath( m_pendingActionDirectory ) != QDir::cleanPath( m_currentPath ) ||
+		( !m_pendingActionNativeDirectory.isEmpty() &&
+		  m_pendingActionNativeDirectory != m_currentNativePath ) ){
 		return rows ;
 	}
 
@@ -534,6 +544,7 @@ std::vector< int > library::pendingRows()
 void library::clearPendingAction()
 {
 	m_pendingActionDirectory.clear() ;
+	m_pendingActionNativeDirectory.clear() ;
 	m_pendingActionNames.clear() ;
 	m_pendingActionNativeNames.clear() ;
 }
@@ -780,7 +791,7 @@ void library::deleteAll()
 				const auto completed = m_continue->load() ;
 				m_parent->m_deleteContinue.reset() ;
 				if( completed ){
-					m_parent->showContents( m_parent->m_currentPath ) ;
+					m_parent->showContents( m_parent->m_currentPath,m_parent->m_currentNativePath ) ;
 				}else{
 					m_parent->enableAll() ;
 				}
