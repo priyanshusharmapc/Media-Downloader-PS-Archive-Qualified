@@ -434,6 +434,7 @@ jobs:
       - name: Verify qualification release assets
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           tag="qualification-${GITHUB_SHA}"
