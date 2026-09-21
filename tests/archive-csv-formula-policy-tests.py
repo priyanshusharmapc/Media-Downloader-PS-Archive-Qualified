@@ -13,7 +13,7 @@ body=source[start:end]
 
 assert 'QString("=+-@").contains(s.trimmed().front())' in body
 assert 'QString("\\t\\r\\n").contains(s.front())' in body
-assert "s.prepend('\'')" in body
+assert r"s.prepend('\'')" in body
 assert 's.replace(\'"\',"\\"\\"")' in body or 's.replace(\'"\',"\\"\\"");' in body
 assert "return '\"'+s+'\"'" in body
 
