@@ -31,6 +31,7 @@
 #include "../util.hpp"
 #include "../utility.h"
 #include "../directoryEntries.h"
+#include "../library.h"
 
 #include <iostream>
 #include <array>
@@ -125,6 +126,9 @@ public:
 			}
 			if( arg == TEST_ENGINE_PREFIX"-library-filesystem-boundary" ){
 				return this->testLibraryFilesystemBoundary() ;
+			}
+			if( arg == TEST_ENGINE_PREFIX"-library-native-mutations" ){
+				return this->testLibraryNativeMutations() ;
 			}
 		}
 
@@ -328,6 +332,98 @@ public:
 				<< " fileLinked=" << fileLinked << std::endl ;
 			m_args.app.exit( 1 ) ;
 		}
+	}
+
+
+	void testLibraryNativeMutations()
+	{
+#ifndef Q_OS_UNIX
+		std::cout << "library-native-mutations=SKIP non-posix" << std::endl ;
+		m_args.app.exit( 0 ) ;
+#else
+		QTemporaryDir temp ;
+		QTemporaryDir outsideTemp ;
+		bool ok = temp.isValid() && outsideTemp.isValid() ;
+		const auto root = QFile::encodeName( temp.path() ) ;
+		const auto outside = QFile::encodeName( outsideTemp.path() ) ;
+
+		auto child = []( QByteArray parent,const QByteArray& name ){
+			if( !parent.endsWith( '/' ) )parent.append( '/' ) ;
+			parent.append( name ) ;
+			return parent ;
+		} ;
+		auto create = []( const QByteArray& path ){
+			QFile file( QFile::decodeName( path ) ) ;
+			return file.open( QIODevice::WriteOnly | QIODevice::NewOnly ) &&
+			       file.write( "fixture" ) == 7 ;
+		} ;
+		auto exists = []( const QByteArray& path ){
+			struct stat state{} ;
+			return ::lstat( path.constData(),&state ) == 0 ;
+		} ;
+
+		// Confirmation identity is native, not only the lossy/display path.
+		const QString sameDisplay = temp.path() + "/collision-display" ;
+		ok = ok && library::testPendingDirectoryMatches(
+			sameDisplay,sameDisplay,QByteArray( "native-a" ),QByteArray( "native-a" ) ) ;
+		ok = ok && !library::testPendingDirectoryMatches(
+			sameDisplay,sameDisplay,QByteArray( "native-a" ),QByteArray( "native-b" ) ) ;
+
+		// Two native names can render to the same escaped display spelling.
+		QByteArray invalidName( "collision-" ) ;
+		invalidName.append( static_cast< char >( 0xff ) ) ;
+		const QByteArray literalName( "collision-\\xff" ) ;
+		ok = ok && create( child( root,invalidName ) ) && create( child( root,literalName ) ) ;
+		std::atomic_bool keepGoing{ true } ;
+		ok = ok && library::testRemoveNativeEntry( root,root,invalidName,keepGoing ) ;
+		ok = ok && !exists( child( root,invalidName ) ) && exists( child( root,literalName ) ) ;
+
+		// Cancellation before the worker reaches mutation must leave the first
+		// selected file untouched.
+		const QByteArray cancelled( "cancel-before-worker" ) ;
+		ok = ok && create( child( root,cancelled ) ) ;
+		keepGoing.store( false ) ;
+		ok = ok && !library::testRemoveNativeEntry( root,root,cancelled,keepGoing ) ;
+		ok = ok && exists( child( root,cancelled ) ) ;
+		keepGoing.store( true ) ;
+
+		// Delete All operates on the confirmed native directory snapshot, not
+		// whichever display/current path exists when the worker eventually runs.
+		const QByteArray confirmedName( "confirmed" ) ;
+		const QByteArray siblingName( "sibling" ) ;
+		const auto confirmed = child( root,confirmedName ) ;
+		const auto sibling = child( root,siblingName ) ;
+		ok = ok && QDir().mkpath( QFile::decodeName( confirmed ) ) ;
+		ok = ok && QDir().mkpath( QFile::decodeName( sibling ) ) ;
+		ok = ok && create( child( confirmed,QByteArray( "victim" ) ) ) ;
+		ok = ok && create( child( sibling,QByteArray( "survivor" ) ) ) ;
+		ok = ok && library::testRemoveNativeDirectoryContents( root,confirmed,keepGoing ) ;
+		ok = ok && !exists( child( confirmed,QByteArray( "victim" ) ) ) ;
+		ok = ok && exists( child( sibling,QByteArray( "survivor" ) ) ) ;
+
+		// Replace an intermediate owned directory with a symlink after selection.
+		// Descriptor-relative re-resolution must refuse to traverse to outside.
+		const QByteArray insideName( "inside" ) ;
+		const auto inside = child( root,insideName ) ;
+		const auto insideReal = child( root,QByteArray( "inside-real" ) ) ;
+		ok = ok && QDir().mkpath( QFile::decodeName( inside ) ) ;
+		ok = ok && create( child( inside,QByteArray( "victim" ) ) ) ;
+		ok = ok && create( child( outside,QByteArray( "victim" ) ) ) ;
+		ok = ok && ::rename( inside.constData(),insideReal.constData() ) == 0 ;
+		ok = ok && ::symlink( outside.constData(),inside.constData() ) == 0 ;
+		ok = ok && !library::testRemoveNativeEntry(
+			root,inside,QByteArray( "victim" ),keepGoing ) ;
+		ok = ok && exists( child( outside,QByteArray( "victim" ) ) ) ;
+		ok = ok && exists( child( insideReal,QByteArray( "victim" ) ) ) ;
+
+		if( ok ){
+			std::cout << "library-native-mutations=PASS" << std::endl ;
+			m_args.app.exit( 0 ) ;
+		}else{
+			std::cerr << "library-native-mutations=FAIL" << std::endl ;
+			m_args.app.exit( 1 ) ;
+		}
+#endif
 	}
 
 	void testProxySecurity()
