@@ -60,11 +60,14 @@ QJsonObject quickjs::init( Logger& logger,const engines::enginePaths& enginePath
 
 	mainObj.insert( "Version","1" ) ;
 
-	mainObj.insert( "DownloadUrl","https://bellard.org/quickjs/binary_releases/LATEST.json" ) ;
+	// Upstream LATEST metadata does not publish a trusted SHA-256 for the
+	// selected archive. Do not offer an update that mandatory verification
+	// would have to reject.
+	mainObj.insert( "DownloadUrl","" ) ;
 
 	mainObj.insert( "DownloadUrlWin7","" ) ;
 
-	mainObj.insert( "AutoUpdate",true ) ;
+	mainObj.insert( "AutoUpdate",false ) ;
 
 	mainObj.insert( "Name","quickjs" ) ;
 
@@ -193,9 +196,13 @@ QString quickjs::parseVersionInfo( const utils::qprocess::outPut& r )
 	}
 }
 
-quickjs::quickjs( const engines& e,const engines::engine& s,QJsonObject& ) :
+quickjs::quickjs( const engines& e,const engines::engine& s,QJsonObject& obj ) :
 	engines::engine::baseEngine( e.Settings(),s,e.processEnvironment() )
 {
+	// Persisted definitions from older builds may still carry the unsigned
+	// feed. Force the runtime view fail-closed until a trusted digest exists.
+	obj.insert( "DownloadUrl","" ) ;
+	obj.insert( "AutoUpdate",false ) ;
 	if( utility::platformisFlatPak() ){
 
 		auto path = e.Settings().flatpakIntance().appDataLocation() + "/bin/qjs" ;

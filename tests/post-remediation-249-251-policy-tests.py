@@ -86,13 +86,18 @@ def main():
             "251: readdir bytes are still collapsed into QString identity")
     require("item.setData( Qt::UserRole,s.nativeName() )" in library and
             "nativePathAt" in library and
-            "renameNativeEntry" in library and
-            "removeDirectoryNative" in library and
+            "directoryManager::renameEntryNative" in library and
+            "directoryManager::removeEntryNative" in library and
+            "directoryManager::removeDirectoryContentsNative" in library and
             "readAllNative" in library and
             "m_pendingActionNativeDirectory" in library_h and
-            "m_pendingActionNativeDirectory == m_currentNativePath" in library and
-            "showContents( m_currentPath,m_currentNativePath )" in library,
+            "m_pendingActionNativeDirectory = m_currentNativePath" in library and
+            "deleteAll( m_pendingActionNativeDirectory )" in library,
             "251: Library actions/confirmations are not routed through retained native identity")
+    require("openat(" in entries and "O_NOFOLLOW" in entries and
+            "fstatat(" in entries and "AT_SYMLINK_NOFOLLOW" in entries and
+            "unlinkat(" in entries and "renameat(" in entries,
+            "251: POSIX destructive paths are not descriptor-relative/no-follow")
     require("void openUrl( const QByteArray& nativePath )" in settings_h and
             "QUrl::fromEncoded( encoded,QUrl::StrictMode )" in settings,
             "251: exact native POSIX file open path is missing")

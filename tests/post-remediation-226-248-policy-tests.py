@@ -107,8 +107,8 @@ def main():
             "223: extracted component tree is not validated before promotion")
 
     # 234/237: architecture and version-index contracts fail closed.
-    commands = section(engines_cpp, "engines::engine::exeArgs::cmd engines::engine::getCommands",
-                       "QString engines::engine::updateCmdPath")
+    commands = section(engines_cpp, "engines::engine::cmd engines::engine::getCommands",
+                       "engines::engine::cmd::cmd")
     require("cpu.aarch32()" in commands and 'getCmd( cmd,"arm" )' in commands,
             "234: ARM32 does not have an explicit resolver path")
     require("Unknown or unsupported architectures fail closed" in commands,

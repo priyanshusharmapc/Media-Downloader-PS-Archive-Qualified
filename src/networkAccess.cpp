@@ -962,7 +962,13 @@ void networkAccess::downloadP( networkAccess::Opts& opts,const utils::network::p
 			opts.networkError.add( QObject::tr( "Download Failed: persisted payload integrity check failed: %1" ).arg( opts.file.writeError() ) ) ;
 		}else if( p.success() ){
 
-			const auto expected = opts.metadata.hash().trimmed().toLower() ;
+			auto expected = opts.metadata.hash().trimmed().toLower() ;
+			// Specialized release parsers can bypass the generic normalizer.
+			// Accept only the explicit GitHub sha256: algorithm prefix, strip it,
+			// then validate the canonical 64 hexadecimal digits.
+			if( expected.startsWith( "sha256:",Qt::CaseInsensitive ) ){
+				expected = expected.mid( 7 ).trimmed().toLower() ;
+			}
 			bool digestValid = expected.size() == 64 ;
 			for( const auto ch : expected ){
 				const auto lc = ch.toLower() ;
@@ -1105,7 +1111,7 @@ void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
     if( engine.archiveContainsFolder() ){
         // Normalize a versioned top-level folder entirely inside staging. The
         // previously working engine is still untouched at this point.
-        auto rename = engine.renameArchiveFolder( opts.filePath,opts.updateStagePath ) ;
+        auto rename = engine.renameArchiveFolder( opts.metadata.fileName(),opts.updateStagePath ) ;
         if( !rename.success() ){
             removeUpdatePath( opts.updateStagePath ) ;
             this->failedToRename( engine.name(),rename.src(),rename.dst(),rename.err(),opts.id ) ;

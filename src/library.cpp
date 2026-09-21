@@ -81,84 +81,21 @@ bool parentWithinLibraryRoot( const QString& root,const QString& candidate )
 #ifdef Q_OS_UNIX
 QByteArray nativeChildPath( const QByteArray& parent,const QByteArray& name )
 {
-	if( parent.isEmpty() || name.isEmpty() || name.contains( '/' ) || name.contains( '\0' ) ){
-		return {} ;
-	}
+	if( parent.isEmpty() || name.isEmpty() || name.contains( '/' ) || name.contains( '\0' ) )return {} ;
 	QByteArray path = parent ;
 	if( !path.endsWith( '/' ) )path.append( '/' ) ;
 	path.append( name ) ;
 	return path ;
 }
-
 bool nativePathWithinLibraryRoot( const QByteArray& root,const QByteArray& candidate )
 {
-	if( root.isEmpty() || candidate.isEmpty() || root.contains( '\0' ) || candidate.contains( '\0' ) ){
-		return false ;
-	}
+	if( root.isEmpty() || candidate.isEmpty() || root.contains( '\0' ) || candidate.contains( '\0' ) )return false ;
 	if( candidate == root )return true ;
 	QByteArray prefix = root ;
 	if( !prefix.endsWith( '/' ) )prefix.append( '/' ) ;
 	return candidate.startsWith( prefix ) ;
 }
-
-bool nativeDirectoryIsSafe( const QByteArray& root,const QByteArray& path )
-{
-	if( !nativePathWithinLibraryRoot( root,path ) )return false ;
-	struct stat st{} ;
-	if( ::lstat( path.constData(),&st ) != 0 )return false ;
-	return S_ISDIR( st.st_mode ) && !S_ISLNK( st.st_mode ) ;
-}
-
-bool nativePathStillExists( const QByteArray& path )
-{
-	struct stat st{} ;
-	return ::lstat( path.constData(),&st ) == 0 ;
-}
-
-QString renameNativeEntry( const QByteArray& root,
-				 const QByteArray& parent,
-				 const QByteArray& oldName,
-				 const QString& newName,
-				 QByteArray& newNativeName )
-{
-	if( newName.isEmpty() || newName == "." || newName == ".." ||
-		newName.contains( '/' ) || newName.contains( '\\' ) ){
-		return QObject::tr( "Rename requires a file or folder name, not a path." ) ;
-	}
-	if( !nativeDirectoryIsSafe( root,parent ) ){
-		return QObject::tr( "Current Library directory is no longer safe." ) ;
-	}
-
-	newNativeName = QFile::encodeName( newName ) ;
-	if( newNativeName.isEmpty() || newNativeName.contains( '/' ) || newNativeName.contains( '\0' ) ){
-		return QObject::tr( "Rename destination cannot be represented safely on this filesystem." ) ;
-	}
-
-	const auto oldPath = nativeChildPath( parent,oldName ) ;
-	const auto newPath = nativeChildPath( parent,newNativeName ) ;
-	if( oldPath.isEmpty() || newPath.isEmpty() ||
-		!nativePathWithinLibraryRoot( root,oldPath ) ||
-		!nativePathWithinLibraryRoot( root,newPath ) ){
-		return QObject::tr( "Rename path is outside the Library root." ) ;
-	}
-
-	struct stat existing{} ;
-	if( ::lstat( newPath.constData(),&existing ) == 0 ){
-		return QObject::tr( "Rename destination already exists." ) ;
-	}
-	if( errno != ENOENT ){
-		return QObject::tr( "Unable to validate rename destination: %1" )
-			.arg( QString::fromLocal8Bit( std::strerror( errno ) ) ) ;
-	}
-
-	if( ::rename( oldPath.constData(),newPath.constData() ) != 0 ){
-		return QObject::tr( "Renaming failed: %1" )
-			.arg( QString::fromLocal8Bit( std::strerror( errno ) ) ) ;
-	}
-	return {} ;
-}
 #endif
-
 bool deleteLibraryPath( const QString& root,const QString& path,std::atomic_bool& keepGoing )
 {
 	if( !keepGoing.load() ){
@@ -261,7 +198,7 @@ library::library( const Context& ctx ) :
 		}else if( action == "DeleteAll" ){
 
 			if( directoryMatches ){
-				this->deleteAll() ;
+				this->deleteAll( m_pendingActionNativeDirectory ) ;
 			}
 
 		}else if( action == "DeleteSelectedItems" ){
@@ -366,7 +303,7 @@ library::library( const Context& ctx ) :
 			if( nativeCandidate.isEmpty() )return ;
 
 			if( m_table.stuffAt( row ) == directoryEntries::ICON::FOLDER ){
-				if( !nativeDirectoryIsSafe( m_downloadNativePath,nativeCandidate ) )return ;
+				if( !directoryManager::nativeDirectoryIsSafe( m_downloadNativePath,nativeCandidate ) )return ;
 				const auto displayCandidate = QDir::cleanPath( m_currentPath + "/" + s ) ;
 				this->showContents( displayCandidate,nativeCandidate ) ;
 			}else{
@@ -513,6 +450,7 @@ void library::capturePendingRow( int row )
 void library::capturePendingDirectory()
 {
 	m_pendingActionDirectory = m_currentPath ;
+	m_pendingActionNativeDirectory = m_currentNativePath ;
 	m_pendingActionNames.clear() ;
 	m_pendingActionNativeNames.clear() ;
 }
@@ -615,7 +553,8 @@ void library::deleteEntries( library::iter items )
 
 	const auto path = QDir::cleanPath( m_currentPath + "/" + m_table.item( row,1 ).text() ) ;
 	const auto root = m_downloadFolder ;
-	const auto nativePath = this->nativePathAt( row ) ;
+	const auto nativeParent = m_currentNativePath ;
+	const auto nativeName = this->nativeNameAt( row ) ;
 	const auto nativeRoot = m_downloadNativePath ;
 	auto keepGoing = m_deleteContinue ;
 
@@ -623,27 +562,20 @@ void library::deleteEntries( library::iter items )
 	{
 	public:
 		meaw( library * parent,library::iter items,int row,QString root,QString path,
-		      QByteArray nativeRoot,QByteArray nativePath,
+		      QByteArray nativeRoot,QByteArray nativeParent,QByteArray nativeName,
 		      std::shared_ptr< std::atomic_bool > keepGoing ) :
 			m_parent( parent ),m_items( items.move() ),m_row( row ),
 			m_root( std::move( root ) ),m_path( std::move( path ) ),
-			m_nativeRoot( std::move( nativeRoot ) ),m_nativePath( std::move( nativePath ) ),
-			m_continue( std::move( keepGoing ) )
+			m_nativeRoot( std::move( nativeRoot ) ),m_nativeParent( std::move( nativeParent ) ),
+			m_nativeName( std::move( nativeName ) ),m_continue( std::move( keepGoing ) )
 		{
 		}
 		bool bg()
 		{
 #ifdef Q_OS_UNIX
-			if( !m_nativePath.isEmpty() ){
-				if( !nativePathWithinLibraryRoot( m_nativeRoot,m_nativePath ) )return true ;
-				struct stat st{} ;
-				if( ::lstat( m_nativePath.constData(),&st ) != 0 )return false ;
-				if( S_ISDIR( st.st_mode ) && !S_ISLNK( st.st_mode ) ){
-					directoryManager::removeDirectoryNative( m_nativePath,*m_continue ) ;
-				}else{
-					::unlink( m_nativePath.constData() ) ;
-				}
-				return nativePathStillExists( m_nativePath ) ;
+			if( !m_nativeParent.isEmpty() && !m_nativeName.isEmpty() ){
+				return !directoryManager::removeEntryNative(
+					m_nativeRoot,m_nativeParent,m_nativeName,*m_continue ) ;
 			}
 #endif
 			return deleteLibraryPath( m_root,m_path,*m_continue ) ;
@@ -668,13 +600,14 @@ void library::deleteEntries( library::iter items )
 		QString m_root ;
 		QString m_path ;
 		QByteArray m_nativeRoot ;
-		QByteArray m_nativePath ;
+		QByteArray m_nativeParent ;
+		QByteArray m_nativeName ;
 		std::shared_ptr< std::atomic_bool > m_continue ;
 	} ;
 
 	// The background phase owns only value state and a shared cancellation token.
 	// Foreground publication is automatically suppressed if Library is destroyed.
-	utils::qthread::run( this,meaw( this,items.move(),row,root,path,nativeRoot,nativePath,std::move( keepGoing ) ) ) ;
+	utils::qthread::run( this,meaw( this,items.move(),row,root,path,nativeRoot,nativeParent,nativeName,std::move( keepGoing ) ) ) ;
 }
 
 void library::setRenameUiVisible( bool e )
@@ -699,7 +632,7 @@ void library::renameFile( int row )
 	const auto oldNativeName = this->nativeNameAt( row ) ;
 	if( !oldNativeName.isEmpty() ){
 		QByteArray newNativeName ;
-		const auto error = renameNativeEntry(
+		const auto error = directoryManager::renameEntryNative(
 			m_downloadNativePath,m_currentNativePath,oldNativeName,nn,newNativeName ) ;
 		if( error.isEmpty() ){
 			item.setText( nn ) ;
@@ -763,7 +696,7 @@ void library::deleteEntry( int row )
 	}
 }
 
-void library::deleteAll()
+void library::deleteAll( const QByteArray& confirmedNativePath )
 {
 	this->disableAll() ;
 
@@ -774,7 +707,7 @@ void library::deleteAll()
 	const auto root = m_downloadFolder ;
 	const auto path = m_currentPath ;
 	const auto nativeRoot = m_downloadNativePath ;
-	const auto nativePath = m_currentNativePath ;
+	const auto nativePath = confirmedNativePath.isEmpty() ? m_currentNativePath : confirmedNativePath ;
 	auto keepGoing = m_deleteContinue ;
 
 	class meaw
@@ -790,9 +723,9 @@ void library::deleteAll()
 		void bg()
 		{
 #ifdef Q_OS_UNIX
-			if( !m_nativePath.isEmpty() &&
-			    nativeDirectoryIsSafe( m_nativeRoot,m_nativePath ) ){
-				directoryManager::removeDirectoryContentsNative( m_nativePath,*m_continue ) ;
+			if( !m_nativePath.isEmpty() ){
+				if( !directoryManager::removeDirectoryContentsNative(
+					m_nativeRoot,m_nativePath,*m_continue ) )m_continue->store( false ) ;
 				return ;
 			}
 #endif
@@ -1114,7 +1047,7 @@ void library::showContents( const QString& path,const QByteArray& nativePath )
 #ifdef Q_OS_UNIX
 	QByteArray safeNativePath = nativePath ;
 	if( !safeNativePath.isEmpty() ){
-		if( !nativeDirectoryIsSafe( m_downloadNativePath,safeNativePath ) ){
+		if( !directoryManager::nativeDirectoryIsSafe( m_downloadNativePath,safeNativePath ) ){
 			safePath = QDir::cleanPath( m_downloadFolder ) ;
 			safeNativePath = m_downloadNativePath ;
 		}
@@ -1124,7 +1057,7 @@ void library::showContents( const QString& path,const QByteArray& nativePath )
 		}
 		safeNativePath = QFile::encodeName( canonicalLibraryPath( safePath ) ) ;
 	}
-	if( safeNativePath.isEmpty() || !nativeDirectoryIsSafe( m_downloadNativePath,safeNativePath ) ){
+	if( safeNativePath.isEmpty() || !directoryManager::nativeDirectoryIsSafe( m_downloadNativePath,safeNativePath ) ){
 		m_table.clear() ;
 		this->enableAll() ;
 		return ;

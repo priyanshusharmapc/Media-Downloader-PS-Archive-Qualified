@@ -20,8 +20,8 @@ end = source.index("void batchdownloader::saveComments", start)
 body = source[start:end]
 assert 'obj.value( "like_count" ).toInt()' not in body
 assert 'timestamp.toInt()' not in body
-assert "_commentInt64( obj.value( "like_count" ),likeCountValue )" in body
-assert "_commentInt64( timestamp,timestampValue )" in body
+assert '_commentInt64( obj.value( "like_count" ),likeCountValue )' in body
+assert '_commentInt64( timestamp,timestampValue )' in body
 assert "utility::fromSecsSinceEpoch( timestampValue )" in body
 
 sort_start = source.index("auto _make_sort")

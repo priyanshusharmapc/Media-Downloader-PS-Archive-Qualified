@@ -100,13 +100,53 @@ int main()
     const auto nested = child( rawDirectory,QByteArray( "nested" ) ) ;
     if( !createFile( nested ) )return 8 ;
 
-    directoryManager::removeDirectoryNative( rawDirectory,keepGoing ) ;
-    if( existsNative( rawDirectory ) )return 9 ;
+    if( !directoryManager::removeEntryNative(
+            root,root,rawDirectoryName,keepGoing ) )return 9 ;
+    if( existsNative( rawDirectory ) )return 13 ;
 
     // The colliding sibling files were not addressed by that native-directory
     // deletion, proving operations remain bound to their captured byte path.
     if( !existsNative( child( root,invalidName ) ) )return 10 ;
     if( !existsNative( child( root,literalEscapedName ) ) )return 11 ;
+
+    const QByteArray cancelledName( "cancel-before-worker" ) ;
+    if( !createFile( child( root,cancelledName ) ) )return 14 ;
+    keepGoing.store( false ) ;
+    if( directoryManager::removeEntryNative(
+            root,root,cancelledName,keepGoing ) )return 15 ;
+    if( !existsNative( child( root,cancelledName ) ) )return 16 ;
+    keepGoing.store( true ) ;
+
+    const QByteArray confirmedName( "confirmed-delete-all" ) ;
+    const QByteArray siblingName( "sibling-untouched" ) ;
+    const auto confirmed = child( root,confirmedName ) ;
+    const auto sibling = child( root,siblingName ) ;
+    if( ::mkdir( confirmed.constData(),0700 ) != 0 )return 17 ;
+    if( ::mkdir( sibling.constData(),0700 ) != 0 )return 18 ;
+    if( !createFile( child( confirmed,QByteArray( "victim" ) ) ) )return 19 ;
+    if( !createFile( child( sibling,QByteArray( "survivor" ) ) )return 20 ;
+    if( !directoryManager::removeDirectoryContentsNative(
+            root,confirmed,keepGoing ) )return 21 ;
+    if( existsNative( child( confirmed,QByteArray( "victim" ) ) ) )return 22 ;
+    if( !existsNative( child( sibling,QByteArray( "survivor" ) ) ) )return 23 ;
+
+    QTemporaryDir outsideTemporary ;
+    if( !outsideTemporary.isValid() )return 24 ;
+    const auto outsideRoot = QFile::encodeName( outsideTemporary.path() ) ;
+    if( !createFile( child( outsideRoot,QByteArray( "victim" ) ) ) )return 25 ;
+
+    const QByteArray insideName( "inside" ) ;
+    const auto inside = child( root,insideName ) ;
+    const auto insideReal = child( root,QByteArray( "inside-real" ) ) ;
+    if( ::mkdir( inside.constData(),0700 ) != 0 )return 26 ;
+    if( !createFile( child( inside,QByteArray( "victim" ) ) ) )return 27 ;
+    if( ::rename( inside.constData(),insideReal.constData() ) != 0 )return 28 ;
+    if( ::symlink( outsideRoot.constData(),inside.constData() ) != 0 )return 29 ;
+
+    if( directoryManager::removeEntryNative(
+            root,inside,QByteArray( "victim" ),keepGoing ) )return 30 ;
+    if( !existsNative( child( outsideRoot,QByteArray( "victim" ) ) ) )return 31 ;
+    if( !existsNative( child( insideReal,QByteArray( "victim" ) ) ) )return 32 ;
 
     return 0 ;
 #endif

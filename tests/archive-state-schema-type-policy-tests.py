@@ -21,8 +21,8 @@ for field in ["origin","verified_at","error"]:
     assert f'"{field}"' in source[source.index("inline bool representationShape"):start]
 for field in ["entry_key","url","position","last_position"]:
     assert f'"{field}"' in body
-assert "integerField(o,"position"" in body
-assert "integerField(o,"last_position"" in body
+assert 'integerField(o,"position"' in body
+assert 'integerField(o,"last_position"' in body
 
 print("Persisted Archive state type validation policy: PASS")
 

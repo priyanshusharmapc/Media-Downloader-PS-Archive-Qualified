@@ -285,11 +285,18 @@ namespace directoryManager
 	void removeDirectory( const QString&,std::atomic_bool& ) ;
 
 #ifdef Q_OS_UNIX
-	// POSIX filenames are byte strings, not guaranteed UTF-8. These entry
-	// points keep an already-captured native path byte-for-byte intact.
+	// POSIX filenames are byte strings, not guaranteed UTF-8. Enumeration
+	// retains those bytes, while destructive operations re-resolve the path
+	// descriptor-relatively with O_NOFOLLOW at mutation time.
 	directoryEntries readAllNative( const QByteArray&,std::atomic_bool& ) ;
-	void removeDirectoryContentsNative( const QByteArray&,std::atomic_bool& ) ;
-	void removeDirectoryNative( const QByteArray&,std::atomic_bool& ) ;
+	bool nativeDirectoryIsSafe( const QByteArray& root,const QByteArray& path ) ;
+	bool removeEntryNative( const QByteArray& root,const QByteArray& parent,
+				   const QByteArray& name,std::atomic_bool& ) ;
+	bool removeDirectoryContentsNative( const QByteArray& root,const QByteArray& path,
+					      std::atomic_bool& ) ;
+	QString renameEntryNative( const QByteArray& root,const QByteArray& parent,
+				  const QByteArray& oldName,const QString& newName,
+				  QByteArray& newNativeName ) ;
 #endif
 }
 

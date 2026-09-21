@@ -20,11 +20,13 @@ assert 'opts.ourOptions.prepend( "-d" )' in build
 fstart=source.index("const QByteArray& gallery_dl::gallery_dlFilter::operator()")
 fend=source.index("gallery_dl::gallery_dlFilter::~gallery_dlFilter",fstart)
 body=source[fstart:fend]
-segment=body[body.index("for( int i = 0 ; i + 1 < m.size()"):body.index("}",body.index("for( int i = 0 ; i + 1 < m.size()"))+2]
+loop_marker = "for( int i = 0 ; i + 1 < m.size()"
+loop_start = body.index(loop_marker)
+loop_end = body.index("\n\t\t}", loop_start)
 assert 'm[ i ] == "-d" || m[ i ] == "-D"' in body
 assert "m_dir = QDir::fromNativeSeparators( m[ i + 1 ] ).toUtf8()" in body
 # The destination scan must not stop at the first option.
-scan=body[body.index("for( int i = 0 ; i + 1 < m.size()"):body.index("\n\t\t}",body.index("for( int i = 0 ; i + 1 < m.size()")))]
+scan = body[loop_start:loop_end]
 assert "break" not in scan
 
 print("gallery-dl effective destination policy: PASS")

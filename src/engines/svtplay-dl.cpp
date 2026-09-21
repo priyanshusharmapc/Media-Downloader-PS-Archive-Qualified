@@ -407,7 +407,11 @@ svtplay_dl::svtplay_dl( const engines& engs,const engines::engine& engine,QJsonO
 
 	obj.insert( "ArchiveContainsFolder",utility::platformIsWindows() ) ;
 
-	obj.insert( "DownloadUrl","https://api.github.com/repos/spaam/svtplay-dl/tags" ) ;
+	// The tag feed does not provide a trusted payload SHA-256. Keep the
+	// installed/system engine usable, but do not expose an update action that
+	// the mandatory verifier must reject.
+	obj.insert( "DownloadUrl","" ) ;
+	obj.insert( "AutoUpdate",false ) ;
 }
 
 void svtplay_dl::updateOutPutChannel( QProcess::ProcessChannel& s ) const
