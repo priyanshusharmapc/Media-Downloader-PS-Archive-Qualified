@@ -28,6 +28,7 @@
 
 #include <atomic>
 #include <vector>
+#include <memory>
 
 class directoryEntries
 {
@@ -195,12 +196,13 @@ public:
 	public:
 		iter() = default ;
 		iter( const std::vector< directoryEntries::wrapper >& e,quint64 generation ) :
-			m_generation( generation )
+			m_generation( generation ),
+			m_entries( std::make_shared< std::vector< snapshot > >() )
 		{
-			m_entries.reserve( e.size() ) ;
+			m_entries->reserve( e.size() ) ;
 			for( const auto& wrapper : e ){
 				const auto * item = wrapper.operator->() ;
-				m_entries.push_back( {
+				m_entries->push_back( {
 					item->path(),
 					item->nativeName(),
 					item->isFolder() ? ICON::FOLDER : ICON::FILE
@@ -209,19 +211,19 @@ public:
 		}
 		bool hasNext() const
 		{
-			return m_position < m_entries.size() ;
+			return m_entries && m_position < m_entries->size() ;
 		}
 		const QString& value() const
 		{
-			return m_entries[ m_position ].displayName ;
+			return ( *m_entries )[ m_position ].displayName ;
 		}
 		const QByteArray& nativeName() const
 		{
-			return m_entries[ m_position ].nativeName ;
+			return ( *m_entries )[ m_position ].nativeName ;
 		}
 		directoryEntries::ICON icon() const
 		{
-			return m_entries[ m_position ].icon ;
+			return ( *m_entries )[ m_position ].icon ;
 		}
 		quint64 generation() const
 		{
@@ -236,7 +238,9 @@ public:
 	private:
 		size_t m_position = 0 ;
 		quint64 m_generation = 0 ;
-		std::vector< snapshot > m_entries ;
+		// next() is emitted once per queued row. Share the immutable snapshot
+		// so advancing an iterator is O(1), not a full directory copy.
+		std::shared_ptr< const std::vector< snapshot > > m_entries ;
 	} ;
 
 	void join( bool folderFirst )
