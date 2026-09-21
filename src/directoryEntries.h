@@ -22,7 +22,9 @@
 #define DIRECTORY_ENTRIES_H
 
 #include <QString>
+#include <QByteArray>
 #include <QObject>
+#include <QtGlobal>
 
 #include <atomic>
 #include <vector>
@@ -33,9 +35,10 @@ private:
 	class entry
 	{
 	public:
-		entry( qint64 d,QString p,bool f ) :
+		entry( qint64 d,QString p,QByteArray nativeName,bool f ) :
 			m_dateCreated( d ),
 			m_path( std::move( p ) ),
+			m_nativeName( std::move( nativeName ) ),
 			m_folder( f )
 		{
 		}
@@ -51,9 +54,14 @@ private:
 		{
 			return m_dateCreated ;
 		}
+		const QByteArray& nativeName() const
+		{
+			return m_nativeName ;
+		}
 	private:
 		qint64 m_dateCreated ;
 		QString m_path ;
+		QByteArray m_nativeName ;
 		bool m_folder ;
 	} ;
 	class wrapper
@@ -166,41 +174,58 @@ public:
 
 		m_globalJoined = m_joined ;
 	}
-	void addFile( qint64 dateCreated,QString path )
+	void addFile( qint64 dateCreated,QString path,QByteArray nativeName = {} )
 	{
-		m_files.emplace_back( dateCreated,std::move( path ),false ) ;
+		m_files.emplace_back( dateCreated,std::move( path ),std::move( nativeName ),false ) ;
 	}
-	void addFolder( qint64 dateCreated,QString path )
+	void addFolder( qint64 dateCreated,QString path,QByteArray nativeName = {} )
 	{
-		m_folders.emplace_back( dateCreated,std::move( path ),true ) ;
+		m_folders.emplace_back( dateCreated,std::move( path ),std::move( nativeName ),true ) ;
 	}
 
 	class iter
 	{
+	private:
+		struct snapshot
+		{
+			QString displayName ;
+			QByteArray nativeName ;
+			ICON icon ;
+		} ;
 	public:
-		iter()
+		iter() = default ;
+		iter( const std::vector< directoryEntries::wrapper >& e,quint64 generation ) :
+			m_generation( generation )
 		{
-		}
-		iter( const std::vector< directoryEntries::wrapper >& e ) :
-			m_entries( &e )
-		{
+			m_entries.reserve( e.size() ) ;
+			for( const auto& wrapper : e ){
+				const auto * item = wrapper.operator->() ;
+				m_entries.push_back( {
+					item->path(),
+					item->nativeName(),
+					item->isFolder() ? ICON::FOLDER : ICON::FILE
+				} ) ;
+			}
 		}
 		bool hasNext() const
 		{
-			return m_position < m_entries->size() ;
+			return m_position < m_entries.size() ;
 		}
 		const QString& value() const
 		{
-			return m_entries->data()[ m_position ]->path() ;
+			return m_entries[ m_position ].displayName ;
+		}
+		const QByteArray& nativeName() const
+		{
+			return m_entries[ m_position ].nativeName ;
 		}
 		directoryEntries::ICON icon() const
 		{
-			if( m_entries->data()[ m_position ]->isFolder() ){
-
-				return directoryEntries::ICON::FOLDER ;
-			}else{
-				return directoryEntries::ICON::FILE ;
-			}
+			return m_entries[ m_position ].icon ;
+		}
+		quint64 generation() const
+		{
+			return m_generation ;
 		}
 		iter next() const
 		{
@@ -210,7 +235,8 @@ public:
 		}
 	private:
 		size_t m_position = 0 ;
-		const std::vector< directoryEntries::wrapper > * m_entries = nullptr ;
+		quint64 m_generation = 0 ;
+		std::vector< snapshot > m_entries ;
 	} ;
 
 	void join( bool folderFirst )
@@ -234,9 +260,11 @@ public:
 		}
 	}
 
-	directoryEntries::iter Iter()
+	directoryEntries::iter Iter( quint64 generation = 0 )
 	{
-		return { m_joined } ;
+		// Queue-safe iterators own an immutable snapshot. They never retain
+		// pointers into m_joined, which is replaced/reordered by later scans.
+		return { m_joined,generation } ;
 	}
 } ;
 
