@@ -11,14 +11,16 @@ hdr=(root/"src/batchdownloader.h").read_text(encoding="utf-8")
 util=(root/"src/utility.h").read_text(encoding="utf-8")
 
 timer=cpp[cpp.index("void batchdownloader::getMetaData"):cpp.index("void batchdownloader::updateMetaData")]
-assert "rowWithUrl( url )" in timer
+assert "rowWithIdentity( identity )" in timer
+assert "const auto identity = m_table.entryAt( row ).stableIdentity" in timer
 done=cpp[cpp.index("void batchdownloader::showThumbnail"):cpp.index("int batchdownloader::addItemUi",cpp.index("void batchdownloader::showThumbnail"))]
-assert "rowWithUrl( m_url )" in done
+assert "rowWithIdentity( m_identity )" in done
 assert "m_parent.addItem( row" in done
 network=cpp[cpp.index("void batchdownloader::networkData"):cpp.index("void batchdownloader::addItem(",cpp.index("void batchdownloader::networkData"))]
-assert "rowWithUrl( m.identity() )" in network
+assert "rowWithIdentity( m.identity() )" in network
 assert "m.index()" not in network
 assert "const QString& identity() const" in hdr
-assert "m_identity( e.url() )" in hdr
+assert "m_identity" in hdr
+assert "stableIdentity" in cpp
 assert "QString m_identity" in util
 print("Stable Batch metadata callback identity policy: PASS")
