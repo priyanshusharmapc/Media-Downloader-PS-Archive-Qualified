@@ -130,6 +130,7 @@ private:
 	// Confirmation actions are bound to this immutable view/identity snapshot,
 	// never to the table's mutable current row at confirmation time.
 	QString m_pendingActionDirectory ;
+	QByteArray m_pendingActionNativeDirectory ;
 	QStringList m_pendingActionNames ;
 	QList< QByteArray > m_pendingActionNativeNames ;
 	QPixmap m_folderIcon ;
