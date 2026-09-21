@@ -283,7 +283,7 @@ library::library( const Context& ctx ) :
 		if( e ){
 
 			this->enableAll() ;
-			this->showContents( m_currentPath ) ;
+			this->showContents( m_currentPath,m_currentNativePath ) ;
 		}else{
 			m_table.clear() ;
 			this->disableAll() ;
@@ -335,7 +335,7 @@ library::library( const Context& ctx ) :
 
 	connect( m_ui.pbLibraryRefresh,&QPushButton::clicked,[ this ](){
 
-		this->showContents( m_currentPath ) ;
+		this->showContents( m_currentPath,m_currentNativePath ) ;
 	} ) ;
 
 	m_table.connect( &QTableWidget::cellDoubleClicked,[ this ]( int row,int column ){
@@ -372,7 +372,7 @@ library::library( const Context& ctx ) :
 
 			m_currentPath = candidate ;
 
-			this->showContents( m_currentPath ) ;
+			this->showContents( m_currentPath,m_currentNativePath ) ;
 		}else{
 			m_ctx.Engines().openUrls( candidate ) ;
 		}
@@ -409,7 +409,7 @@ void library::moveUp()
 			m_currentPath.truncate( m ) ;
 		}
 
-		this->showContents( m_currentPath ) ;
+		this->showContents( m_currentPath,m_currentNativePath ) ;
 	}
 }
 
@@ -454,7 +454,7 @@ void library::tabEntered()
 		// table plus m_continue == false. Always start a fresh directory read
 		// when the Library becomes active instead of treating rowCount as a
 		// completion marker.
-		this->showContents( m_currentPath ) ;
+		this->showContents( m_currentPath,m_currentNativePath ) ;
 	}
 }
 
@@ -584,13 +584,13 @@ void library::deleteEntries( library::iter items )
 		m_deleteContinue.reset() ;
 		// Successful filesystem mutations invalidate the cached directory
 		// snapshot used by sorting. Re-read it before re-enabling the view.
-		return this->showContents( m_currentPath ) ;
+		return this->showContents( m_currentPath,m_currentNativePath ) ;
 	}
 
 	auto row = items.next() ;
 	if( row < 0 || row >= m_table.rowCount() ){
 		m_deleteContinue.reset() ;
-		return this->showContents( m_currentPath ) ;
+		return this->showContents( m_currentPath,m_currentNativePath ) ;
 	}
 
 	const auto path = QDir::cleanPath( m_currentPath + "/" + m_table.item( row,1 ).text() ) ;
@@ -696,7 +696,7 @@ void library::renameFile( int row )
 
 	if( !utility::rename( m_ctx,item,m_currentPath,nn,item.text() ).isEmpty() ){
 
-		this->showContents( m_currentPath ) ;
+		this->showContents( m_currentPath,m_currentNativePath ) ;
 	}
 }
 
