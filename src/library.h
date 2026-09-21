@@ -109,8 +109,8 @@ private:
 	void arrangeAndShow() ;
 	void arrangeEntries( int ) ;
 	void showContents( const QString&,const QByteArray& nativePath = {} ) ;
-	QByteArray nativeNameAt( int row ) const ;
-	QByteArray nativePathAt( int row ) const ;
+	QByteArray nativeNameAt( int row ) ;
+	QByteArray nativePathAt( int row ) ;
 	void moveUp() ;
 	void addItem( const directoryEntries::iter& ) ;
 	const Context& m_ctx ;
