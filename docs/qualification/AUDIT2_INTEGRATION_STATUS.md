@@ -6,11 +6,16 @@
 - Coordination ledger: GitHub issue #3
 - Ledger tail at this integration: `MDPS-AUDIT2-251`
 - Integration base: `audit2-remediation`
-- Canonical combined pull request: #213
+- Canonical combined pull request: #213 (merged)
 - Canonical working branch until qualification and merge: `audit2-remediation-all-251`
-- `main` remains the last qualified release line and is not rewritten by this work.
+- Qualified **product** commit `C_main`: `bb949284c15a2ce1128e94d41a931fe407358e64`
+- `main` is not rewritten. A later docs or verifier commit on `main` is not `C_main`.
 
 Older remediation branches are historical inputs only. The 226-248 branch is a strict subset of the combined branch; the 204-225, pre-final, and conflict-reconciliation branches are behind `audit2-remediation`.
+
+## Product identity (gold incomplete)
+
+The qualified product commit is `bb949284c15a2ce1128e94d41a931fe407358e64`. GitHub Release `qualification-bb949284c15a2ce1128e94d41a931fe407358e64` holds the portable ZIP (`payload_sha256=8704235825ab2b5f9a3c6fe5eadd052ec08402214f7225d3e040b94f6b0e1cfd`) from run `35613369266`. Commit `77caa99e421ce6d9476d02c3d34c927d963b2528` is a verifier-only follow-up (`GH_REPO` on the ubuntu publisher). Sibling Release `qualification-77caa99e421ce6d9476d02c3d34c927d963b2528` is not the gold product. Gold 4 (endurance and low-memory) is **paused**: `GOLD-4-PAUSED-LOWMEM` (no cmake/ninja/Qt on the L16 host) and `GOLD-4-PAUSED-ENDURANCE` (no operator PlaylistUrl/VideoUrl). This is not a complete gold-state release.
 
 ## Final integration hardening
 
@@ -28,10 +33,10 @@ The combined branch preserves prior audit2 remediation and adds the final cross-
 
 ## Qualification and Actions storage policy
 
-Source inspection is not integration. The authoritative qualification is the **Archive Qt6 qualification** run attached to the exact PR #213 head. Both `linux` and `windows` jobs must execute real steps and conclude `success` before #213 can merge into `audit2-remediation`.
+Source inspection is not integration. Product qualification for `C_main` is Archive Qt6 push run `35613369266` (`R_main`) with real Linux and Windows steps. That is not a runner-allocation or empty-step record.
 
 Actions artifacts and caches are ephemeral. The workflow does not upload source tarballs, Qt package caches, portable trees, or test-output archives. The final GC job deletes repository Actions artifacts and caches after every same-repository run, including failure/cancel paths. Repositories, branches, tags, commits, issues, pull requests, and GitHub Releases are never GC targets.
 
-For a qualified `main` commit, durable identity is a small commit-specific GitHub Release manifest named `qualification-<commit>`. It records the exact commit and workflow run and is never deleted by Actions GC.
+For the qualified product commit, durable identity is GitHub Release `qualification-bb949284c15a2ce1128e94d41a931fe407358e64`. It records the exact commit and workflow run and is never deleted by Actions GC. Do not retag or clobber it. Sibling `qualification-77caa99e421ce6d9476d02c3d34c927d963b2528` is not gold.
 
-The exact successful run ID and merge commit are recorded in issue #3 when qualification completes.
+Issue #3 records `C_main`, `R_main`, and gold-4 paused. This is not a complete gold-state release.

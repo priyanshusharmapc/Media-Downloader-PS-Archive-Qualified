@@ -1,3 +1,1 @@
-GENERATED_BY_QUALIFICATION_WORKFLOW
-See current-release.json in the exact qualified workflow artifact.
-Historical source identity is preserved under docs/qualification/history/.
+bb949284c15a2ce1128e94d41a931fe407358e64
