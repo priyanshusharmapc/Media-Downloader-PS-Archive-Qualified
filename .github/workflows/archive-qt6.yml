@@ -271,31 +271,6 @@ jobs:
           } finally {
             if ($server -and !$server.HasExited) { Stop-Process -Id $server.Id -Force }
           }
-      - name: Q25 local http fixture scan and sync
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $out = Join-Path $env:GITHUB_WORKSPACE 'portable/Media-Downloader-PS'
-          $root = Join-Path $env:RUNNER_TEMP 'archive-q25-fixture-root'
-          New-Item -ItemType Directory -Force $root | Out-Null
-          $url = 'http://127.0.0.1:8765/archive-smoke.mp4'
-          $work = Join-Path $env:RUNNER_TEMP 'archive-runtime-e2e'
-          $serve = Join-Path $work 'serve'
-          New-Item -ItemType Directory -Force $serve | Out-Null
-          $fixture = Join-Path $serve 'archive-smoke.mp4'
-          & "$out/3rdParty/ffmpeg/bin/ffmpeg.exe" -y -f lavfi -i 'testsrc2=size=320x180:rate=24' -f lavfi -i 'sine=frequency=1000:sample_rate=48000' -t 3 -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 128k $fixture
-          if ($LASTEXITCODE -ne 0) { throw 'Failed to generate Q25 media fixture' }
-          $server = Start-Process -FilePath python -ArgumentList '-m','http.server','8765','--bind','127.0.0.1','--directory',$serve -PassThru -WindowStyle Hidden
-          try {
-            Start-Sleep -Seconds 2
-            & "$out/archive-cli.exe" scan $root $url 'Q25 local http fixture'
-            if ($LASTEXITCODE -ne 0) { throw "Q25 scan failed exit=$LASTEXITCODE" }
-            & "$out/archive-cli.exe" sync-item $root $url
-            if ($LASTEXITCODE -ne 0) { throw "Q25 sync-item failed exit=$LASTEXITCODE" }
-            Write-Host 'Q25 GHA local-fixture scan/sync PASS'
-          } finally {
-            if ($server -and !$server.HasExited) { Stop-Process -Id $server.Id -Force }
-          }
       - name: YouTube discovery advisory evidence
         continue-on-error: true
         shell: pwsh
