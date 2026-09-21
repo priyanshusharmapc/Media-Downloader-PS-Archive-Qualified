@@ -96,6 +96,29 @@ bool nativePathWithinLibraryRoot( const QByteArray& root,const QByteArray& candi
 	return candidate.startsWith( prefix ) ;
 }
 #endif
+
+bool pendingDirectoryMatches( const QString& pendingDisplay,const QString& currentDisplay,
+                              const QByteArray& pendingNative,const QByteArray& currentNative )
+{
+	return !pendingDisplay.isEmpty() &&
+		QDir::cleanPath( pendingDisplay ) == QDir::cleanPath( currentDisplay ) &&
+		( pendingNative.isEmpty() || pendingNative == currentNative ) ;
+}
+
+#ifdef Q_OS_UNIX
+bool removeLibraryNativeEntry( const QByteArray& root,const QByteArray& parent,
+                               const QByteArray& name,std::atomic_bool& keepGoing )
+{
+	return directoryManager::removeEntryNative( root,parent,name,keepGoing ) ;
+}
+
+bool removeLibraryNativeDirectoryContents( const QByteArray& root,const QByteArray& path,
+                                           std::atomic_bool& keepGoing )
+{
+	return directoryManager::removeDirectoryContentsNative( root,path,keepGoing ) ;
+}
+#endif
+
 bool deleteLibraryPath( const QString& root,const QString& path,std::atomic_bool& keepGoing )
 {
 	if( !keepGoing.load() ){
@@ -129,6 +152,41 @@ bool deleteLibraryPath( const QString& root,const QString& path,std::atomic_bool
 	return info.exists() ;
 }
 }
+
+#ifdef MDPS_LIBRARY_TEST_HOOKS
+bool library::testPendingDirectoryMatches( const QString& pendingDisplay,const QString& currentDisplay,
+                                           const QByteArray& pendingNative,const QByteArray& currentNative )
+{
+	return pendingDirectoryMatches( pendingDisplay,currentDisplay,pendingNative,currentNative ) ;
+}
+
+bool library::testRemoveNativeEntry( const QByteArray& root,const QByteArray& parent,
+                                     const QByteArray& name,std::atomic_bool& keepGoing )
+{
+#ifdef Q_OS_UNIX
+	return removeLibraryNativeEntry( root,parent,name,keepGoing ) ;
+#else
+	Q_UNUSED( root )
+	Q_UNUSED( parent )
+	Q_UNUSED( name )
+	Q_UNUSED( keepGoing )
+	return false ;
+#endif
+}
+
+bool library::testRemoveNativeDirectoryContents( const QByteArray& root,const QByteArray& path,
+                                                 std::atomic_bool& keepGoing )
+{
+#ifdef Q_OS_UNIX
+	return removeLibraryNativeDirectoryContents( root,path,keepGoing ) ;
+#else
+	Q_UNUSED( root )
+	Q_UNUSED( path )
+	Q_UNUSED( keepGoing )
+	return false ;
+#endif
+}
+#endif
 
 library::library( const Context& ctx ) :
 	m_ctx( ctx ),
@@ -175,10 +233,9 @@ library::library( const Context& ctx ) :
 		const auto action = m_ui.pbLibrarySetNewFileName->objectName() ;
 		const auto rows = this->pendingRows() ;
 		const auto expectedCount = m_pendingActionNames.size() ;
-		const auto directoryMatches = !m_pendingActionDirectory.isEmpty() &&
-			QDir::cleanPath( m_pendingActionDirectory ) == QDir::cleanPath( m_currentPath ) &&
-			( m_pendingActionNativeDirectory.isEmpty() ||
-			  m_pendingActionNativeDirectory == m_currentNativePath ) ;
+		const auto directoryMatches = pendingDirectoryMatches(
+			m_pendingActionDirectory,m_currentPath,
+			m_pendingActionNativeDirectory,m_currentNativePath ) ;
 
 		// Confirmation is valid only for the exact view and item identities that
 		// were displayed when the action was opened. Selection/current-row drift
@@ -574,7 +631,7 @@ void library::deleteEntries( library::iter items )
 		{
 #ifdef Q_OS_UNIX
 			if( !m_nativeParent.isEmpty() && !m_nativeName.isEmpty() ){
-				return !directoryManager::removeEntryNative(
+				return !removeLibraryNativeEntry(
 					m_nativeRoot,m_nativeParent,m_nativeName,*m_continue ) ;
 			}
 #endif
@@ -724,7 +781,7 @@ void library::deleteAll( const QByteArray& confirmedNativePath )
 		{
 #ifdef Q_OS_UNIX
 			if( !m_nativePath.isEmpty() ){
-				if( !directoryManager::removeDirectoryContentsNative(
+				if( !removeLibraryNativeDirectoryContents(
 					m_nativeRoot,m_nativePath,*m_continue ) )m_continue->store( false ) ;
 				return ;
 			}
