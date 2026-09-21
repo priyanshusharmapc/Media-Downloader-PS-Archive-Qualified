@@ -2562,19 +2562,30 @@ QString utility::uiIndex::toString( int index ) const
 	return s ;
 }
 
-void utility::setPermissions( QFile& qfile )
+bool utility::setPermissions( QFile& qfile )
 {
-	if( !QFileInfo( qfile ).isExecutable() ){
-
-		qfile.setPermissions( qfile.permissions() | QFileDevice::ExeOwner ) ;
+	QFileInfo info( qfile ) ;
+	if( !info.exists() || !info.isFile() ){
+		return false ;
 	}
+
+	if( !info.isExecutable() ){
+		const auto requested = qfile.permissions() | QFileDevice::ExeOwner ;
+		if( !qfile.setPermissions( requested ) ){
+			return false ;
+		}
+		info.refresh() ;
+	}
+
+	// Activation is successful only when the final promoted executable really
+	// has executable permission. Callers must treat false as update failure.
+	return info.isExecutable() ;
 }
 
-void utility::setPermissions( const QString& e )
+bool utility::setPermissions( const QString& e )
 {
 	QFile s( e ) ;
-
-	utility::setPermissions( s ) ;
+	return utility::setPermissions( s ) ;
 }
 
 void utility::networkReply::getData( const Context& ctx,const utils::network::reply& reply )
