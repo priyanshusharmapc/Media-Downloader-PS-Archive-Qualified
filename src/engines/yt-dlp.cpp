@@ -346,6 +346,10 @@ utility::addJsonCmd::entry::args yt_dlp::entryCmdNightly( const QString& e )
 		data.emplace_back( "win7amd64",_NicolaasjanYtdlpFor64BitWin7() ) ;
 		data.emplace_back( "x86","yt-dlp_x86-nightly.exe" ) ;
 		data.emplace_back( "amd64","yt-dlp-nightly.exe" ) ;
+		// Nightly publishes the native ARM64 asset as yt-dlp_arm64.exe.
+		// Keep "-nightly" in the managed command identity so the existing
+		// nightly asset matcher removes it and selects yt-dlp_arm64.exe exactly.
+		data.emplace_back( "aarch64","yt-dlp_arm64-nightly.exe" ) ;
 
 	}else if( e == "MacOS" ){
 
