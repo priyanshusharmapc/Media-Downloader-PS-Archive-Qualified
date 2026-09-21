@@ -1,4 +1,4 @@
-#include "directoryEntries.h"
+#include "../src/directoryEntries.h"
 
 #include <QByteArray>
 #include <QFile>
