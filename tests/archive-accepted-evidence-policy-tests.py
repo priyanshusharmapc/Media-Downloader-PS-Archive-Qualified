@@ -15,7 +15,7 @@ assert "Accepted recovery evidence hash mismatch" in source
 assert "Accepted recovery evidence file is missing" in source
 init=source[source.index("bool Store::initialize"):source.index("QVector<Source> Store::loadSources")]
 assert "verifyAcceptedEvidence(m_paths,error)" in init
-assert init.index("verifyAcceptedEvidence(m_paths,error)") < init.index("recoverStaleRunning")
+assert init.index("if(!verifyAcceptedEvidence(m_paths,error))") < init.index("if(recoverStaleRunning)")
 print("Accepted recovery evidence integrity policy: PASS")
 
 # Post-acceptance integrity must inspect directory/link/special entries too, not

@@ -17,7 +17,8 @@ ps=playlist[playlist.index("bool playlistdownloader::subscription::save()"):]
 assert "QSaveFile f( m_path )" in ps
 assert "f.write( data ) != data.size()" in ps
 assert "f.cancelWriting()" in ps
-assert "return f.commit()" in ps
+assert "!f.commit()" in ps
+assert "QLockFile lock( m_path + \".lock\" )" in ps
 assert "QMessageBox::warning" in playlist
 
 for sig,next_sig in [
@@ -30,7 +31,8 @@ for sig,next_sig in [
     assert "QSaveFile f( m_path )" in body
     assert "f.write( data ) != data.size()" in body
     assert "f.cancelWriting()" in body
-    assert "return f.commit()" in body
+    assert "!f.commit()" in body
+    assert "QLockFile lock( m_path + \".lock\" )" in body
     assert "QIODevice::Truncate" not in body
 
 assert "const auto defaultOptionsSaved = m_downloadDefaultOptions.save()" in configure

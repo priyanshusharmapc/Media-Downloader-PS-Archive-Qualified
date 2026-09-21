@@ -25,6 +25,5 @@ print("Media verification fingerprint policy: PASS")
 # Persisted fast-path evidence must itself be well-formed before it can suppress
 # a deep decode.
 assert 'QRegularExpression("^[0-9a-f]{64}$")' in src
-assert "std::isfinite(n)&&n>=0&&std::floor(n)==n" in src
-assert "std::numeric_limits<qint64>::max()" in src
+assert "representation.verifiedSize<0" in src
 assert "boundedDurationMs" in src

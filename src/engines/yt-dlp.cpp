@@ -1821,13 +1821,20 @@ const QByteArray& yt_dlp::yt_dlplFilter::parseOutput( const Logger::Data::QByteA
 		}
 		if( e.contains( " Merging formats into \"" ) ){
 
+			const auto openingQuote = e.indexOf( '"' ) ;
+			if( openingQuote < 0 ){
+				return m_tmp ;
+			}
 
-			auto m = e.mid( e.indexOf( '"' ) + 1 ) ;
-			auto s = m.lastIndexOf( '"' ) ;
+			auto m = e.mid( openingQuote + 1 ) ;
+			const auto closingQuote = m.lastIndexOf( '"' ) ;
+			if( closingQuote <= 0 ){
+				return m_tmp ;
+			}
 
-			if( s != -1 ){
-
-				m.truncate( s ) ;
+			m.truncate( closingQuote ) ;
+			if( m.trimmed().isEmpty() ){
+				return m_tmp ;
 			}
 
 			this->setFileName( m ) ;

@@ -6,7 +6,7 @@ p=argparse.ArgumentParser(); p.add_argument("--source-root",required=True,type=P
 root=p.parse_args().source_root
 c=(root/"src/configure.cpp").read_text(encoding="utf-8")
 s=(root/"src/settings.cpp").read_text(encoding="utf-8")
-start=c.index("class scaleUi"); end=c.index("pbConfigureScaleDown",start)
+start=c.index("class scaleUi"); end=c.index("New Ui Scale Factor",start)
 body=c[start:end]
 assert "minimumScaleFactor = 0.05" in body
 assert "!std::isfinite( interval ) || interval <= 0.0" in body

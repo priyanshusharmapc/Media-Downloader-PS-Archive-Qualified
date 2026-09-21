@@ -127,7 +127,10 @@ def main():
             "235/241: history writer is not a locked validated atomic transaction")
     require("QLockFile lock( filePath + \".lock\" )" in utility_cpp,
             "241: history reads lack the interprocess lock")
-    require("QLockFile lock( e + \".lock\" )" in logger_cpp,
+    require("utility::archiveData::clearHistory( e )" in logger_cpp,
+            "241: history clear does not use the shared locked transaction")
+    require("QLockFile lock( filePath + \".lock\" )" in utility_cpp and
+            "bool utility::archiveData::clearHistory" in utility_cpp,
             "241: history clear lacks the interprocess lock")
 
     # 236: plugin Name can never become an arbitrary filesystem authority.
@@ -176,8 +179,8 @@ def main():
 
     # 246: shutdown writers serialize the merge; startup atomically claims a
     # specific generation before the asynchronous consumer starts.
-    autosave = section(utility_cpp, "void utility::saveDownloadList",
-                       "utility::uiIndex::uiIndex")
+    autosave = section(utility_cpp, "void utility::saveDownloadList( const Context& ctx,tableWidget& tableWidget,bool pld )",
+                       "void utility::saveDownloadList( const Context& ctx,QMenu& m,tableWidget& tableWidget,bool pld )")
     require('QLockFile autosaveLock( e + ".lock" )' in autosave,
             "246: autosave merge/replace is not interprocess serialized")
     require(".consume-" in batch_cpp and 'QLockFile lock( shared + ".lock" )' in batch_cpp,

@@ -176,7 +176,8 @@ def main():
 
     # 093/112/225: durations use elapsed arithmetic and checked qint64 inputs.
     duration_body = engines_cpp[engines_cpp.find("timer::duration"):engines_cpp.find("timer::toSeconds")]
-    require("QTime" not in duration_body and 'QString( "%1:%2:%3" )' in duration_body, "093: elapsed duration still uses time-of-day")
+    require("QTime::" not in duration_body and 'QString( "%1:%2:%3" )' in duration_body and "totalSeconds / 3600" in duration_body,
+            "093: elapsed duration still uses time-of-day")
     to_seconds = engines_cpp[engines_cpp.find("timer::toSeconds"):engines_cpp.find("timer::elapsedTime")]
     require("toLongLong" in to_seconds and "numeric_limits< int >::max()" in to_seconds, "112: duration parser arithmetic is not checked")
     require("qint64 m_intDuration" in utility_h and "largestSafeSeconds" in utility_cpp and "1000LL" in utility_cpp,
