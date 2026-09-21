@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory=$true)][string]$VideoUrl,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-f]{40}$')][string]$ExpectedCommit,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedArtifactSha256,
-    [Parameter(Mandatory=$true)][ValidatePattern('^[0-9]+$')][string]$ExpectedArtifactId,
+    [Parameter(Mandatory=$true)][ValidatePattern('^qualification-[0-9a-f]{40}$')][string]$ExpectedReleaseTag,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9]+$')][string]$ExpectedRunId,
     [Parameter(Mandatory=$true)][ValidatePattern('^[^/\\s]+/[^/\\s]+$')][string]$ExpectedRepository,
     [Parameter(Mandatory=$true)][string]$ArtifactZipPath,
@@ -170,7 +170,7 @@ foreach ($path in $before.Keys) { if (!$after.ContainsKey($path) -or $before[$pa
 $evidence = @{
     schema_version=1; result='PASS'; started_at=$started; completed_at=[DateTime]::UtcNow.ToString('o');
     repository=$ExpectedRepository; source_commit=$ExpectedCommit; ci_run_id=$ExpectedRunId;
-    artifact_id=$ExpectedArtifactId; artifact_sha256=$actualArtifactSha256; source_key=$binding['source_key']; item_key=$verify['item_key'];
+    release_tag=$ExpectedReleaseTag; artifact_sha256=$actualArtifactSha256; source_key=$binding['source_key']; item_key=$verify['item_key'];
     entry_key=$binding['entry_key']; active_occurrences=[int]$binding['active_occurrences'];
     observed=[int]$scan['observed']; verified_media=$after; rerun='identical-canonical-media';
     manifest_sha256=(Get-FileHash -LiteralPath $sumPath -Algorithm SHA256).Hash.ToLowerInvariant()

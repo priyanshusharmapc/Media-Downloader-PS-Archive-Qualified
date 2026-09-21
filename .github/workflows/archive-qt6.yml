@@ -53,13 +53,27 @@ jobs:
           ARCHIVE_TEST_CONFIG_ROOT: ${{ github.workspace }}/archive-test-config-sanitized
         run: mkdir -p "$ARCHIVE_TEST_TMP" "$ARCHIVE_TEST_CONFIG_ROOT" && ctest --test-dir build-sanitized --output-on-failure --output-junit Testing/Temporary/ctest-junit.xml
   windows:
+    needs: [linux]
+    if: ${{ always() && !cancelled() }}
     runs-on: windows-2022
     timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
+      - name: Prove Git Bash can find Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYBIN="$(command -v python.exe || command -v python3 || command -v python || true)"
+          test -n "$PYBIN"
+          "$PYBIN" -c "import sys; print(sys.executable)"
+          command -v gh
+          gh --version
       - name: Compile Python policy suite
         run: python -m compileall -q tests
       - name: Install Qt6 and matching MinGW
@@ -311,6 +325,40 @@ jobs:
               $check.payload_sha256 -ne $payloadSha) {
             throw 'Generated release identity is not bound to the executing qualification run'
           }
+      - name: Dry-run compact JSON and ZIP digest (pull_request only)
+        if: github.event_name == 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYBIN="$(command -v python.exe || command -v python3 || command -v python || true)"
+          test -n "$PYBIN"
+          zip="portable/Media-Downloader-PS-Windows-Qt6-${GITHUB_SHA}.zip"
+          identity="portable/current-release.json"
+          test -f "$zip"
+          test -f "$identity"
+          "$PYBIN" - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          sha = os.environ['GITHUB_SHA']
+          ident = json.loads(Path('portable/current-release.json').read_text(encoding='utf-8'))
+          digest = hashlib.sha256(Path('portable/Media-Downloader-PS-Windows-Qt6-' + sha + '.zip').read_bytes()).hexdigest()
+          if ident.get('commit') != sha:
+              raise SystemExit('dry-run commit mismatch')
+          if ident.get('payload_sha256') != digest:
+              raise SystemExit('dry-run payload_sha256 mismatch')
+          path = Path('qualification-' + sha + '.json')
+          path.write_text(json.dumps({
+              'schema_version': 2,
+              'repository': os.environ['GITHUB_REPOSITORY'],
+              'commit': os.environ['GITHUB_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'linux': 'success',
+              'windows': 'success',
+              'actions_artifacts': 'ephemeral; workflow GC removes them',
+          }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          print('PR dry-run qualification publish: PASS')
+          PY
       - name: GUI settings preserve package seal
         shell: pwsh
         run: |
@@ -320,17 +368,8 @@ jobs:
           New-Item -ItemType Directory -Path $archiveRoot,$configRoot -Force | Out-Null
           $env:ARCHIVE_TEST_CONFIG_ROOT = $configRoot
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE/tests/archive-gui-package-immutability.ps1" -PackageRoot "$env:GITHUB_WORKSPACE/portable/Media-Downloader-PS" -ArchiveRoot $archiveRoot -OutputJson "$testRoot/results.json"
-  publish-qualification-evidence:
-    name: publish durable qualification evidence
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [linux, windows]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Publish compact immutable qualification identity
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.linux.result == 'success' && success()
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -338,7 +377,11 @@ jobs:
           set -euo pipefail
           tag="qualification-${GITHUB_SHA}"
           manifest="qualification-${GITHUB_SHA}.json"
-          python3 - <<'PY'
+          zip="portable/Media-Downloader-PS-Windows-Qt6-${GITHUB_SHA}.zip"
+          identity="portable/current-release.json"
+          PYBIN="$(command -v python.exe || command -v python3 || command -v python || true)"
+          test -n "$PYBIN"
+          "$PYBIN" - <<'PY'
           import json, os
           from pathlib import Path
           path = Path('qualification-' + os.environ['GITHUB_SHA'] + '.json')
@@ -353,13 +396,99 @@ jobs:
               'actions_artifacts': 'ephemeral; workflow GC removes them',
           }, indent=2, sort_keys=True) + '\n', encoding='utf-8')
           PY
+          test -f "$zip"
+          test -f "$identity"
+          test -f "$manifest"
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Qualification release already exists; immutable identity is retained."
+            mkdir -p /tmp/prior-qual
+            gh release download "$tag" --pattern "qualification-${GITHUB_SHA}.json" --dir /tmp/prior-qual
+            gh release download "$tag" --pattern "Media-Downloader-PS-Windows-Qt6-${GITHUB_SHA}.zip" --dir /tmp/prior-qual
+            gh release download "$tag" --pattern "current-release.json" --dir /tmp/prior-qual
+            "$PYBIN" - <<'PY'
+          import hashlib, json, os, pathlib, sys
+          sha = os.environ['GITHUB_SHA']
+          prior = pathlib.Path('/tmp/prior-qual')
+          ident = json.loads((prior / 'current-release.json').read_text(encoding='utf-8'))
+          blob = (prior / ('Media-Downloader-PS-Windows-Qt6-' + sha + '.zip')).read_bytes()
+          digest = hashlib.sha256(blob).hexdigest()
+          if ident.get('commit') != sha:
+              raise SystemExit('prior Release commit is not this GITHUB_SHA; do not overwrite')
+          if ident.get('payload_sha256') != digest:
+              raise SystemExit('prior ZIP bytes do not match prior current-release.json')
+          print('Existing qualification Release is the immutable first publish; newly built ZIP is not compared (Compress-Archive is not byte-reproducible).')
+          PY
             exit 0
           fi
-          gh release create "$tag" "$manifest" --target "$GITHUB_SHA" \
+          gh release create "$tag" "$manifest" "$zip" "$identity" --target "$GITHUB_SHA" \
             --title "Qualification $GITHUB_SHA" \
             --notes "Linux and Windows Archive Qt6 qualification executed and passed for this exact commit. Actions artifacts are ephemeral."
+  publish-qualification-evidence:
+    name: publish durable qualification evidence
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Verify qualification release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="qualification-${GITHUB_SHA}"
+          gh release view "$tag" --json tagName,assets > /tmp/rel.json
+          python3 - <<'PY'
+          import json, os, pathlib, urllib.request
+          sha = os.environ['GITHUB_SHA']
+          rel = json.loads(pathlib.Path('/tmp/rel.json').read_text())
+          if rel.get('tagName') != 'qualification-' + sha:
+              raise SystemExit('tag mismatch')
+          names = {a['name'] for a in rel['assets']}
+          need = {
+              'qualification-' + sha + '.json',
+              'Media-Downloader-PS-Windows-Qt6-' + sha + '.zip',
+              'current-release.json',
+          }
+          missing = need - names
+          if missing:
+              raise SystemExit('missing release assets: ' + ','.join(sorted(missing)))
+          PY
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          sha = os.environ['GITHUB_SHA']
+          ref = json.loads(subprocess.check_output(
+              ['gh', 'api', f'repos/{os.environ["GITHUB_REPOSITORY"]}/git/ref/tags/qualification-{sha}'],
+              text=True))
+          obj = ref['object']
+          if obj['type'] == 'commit':
+              peeled = obj['sha']
+          elif obj['type'] == 'tag':
+              tagobj = json.loads(subprocess.check_output(
+                  ['gh', 'api', obj['url']], text=True))
+              peeled = tagobj['object']['sha']
+          else:
+              raise SystemExit('unexpected tag object type ' + obj['type'])
+          if peeled != sha:
+              raise SystemExit('tag does not peel to GITHUB_SHA: ' + peeled)
+          print('tag peel: PASS')
+          PY
+          gh release download "$tag" --pattern "current-release.json"
+          gh release download "$tag" --pattern "Media-Downloader-PS-Windows-Qt6-${GITHUB_SHA}.zip"
+          python3 - <<'PY'
+          import json, hashlib, os, pathlib
+          sha = os.environ['GITHUB_SHA']
+          ident = json.loads(pathlib.Path('current-release.json').read_text(encoding='utf-8'))
+          blob = pathlib.Path('Media-Downloader-PS-Windows-Qt6-' + sha + '.zip').read_bytes()
+          digest = hashlib.sha256(blob).hexdigest()
+          if ident.get('commit') != sha:
+              raise SystemExit('current-release.json commit mismatch')
+          if ident.get('payload_sha256') != digest:
+              raise SystemExit('payload_sha256 mismatch')
+          if str(ident.get('run_id')) != str(os.environ['GITHUB_RUN_ID']):
+              print('prior run_id retained (immutable first publish on this commit); this run did not replace the ZIP')
+          print('qualification release verify: PASS')
+          PY
 
   artifact-gc:
     name: purge Actions artifact and cache storage
