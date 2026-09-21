@@ -2,6 +2,7 @@
 #define MDPS_ARCHIVESAFETY_H
 // Internal filesystem and state integrity helpers. No network or provider access.
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -12,6 +13,7 @@
 #include <QSaveFile>
 #include <QSet>
 #include <QMap>
+#include "archivehistory.h"
 #ifdef Q_OS_WIN
 #include <windows.h>
 #include <winioctl.h>
@@ -19,6 +21,9 @@
 #define FSCTL_GET_REPARSE_POINT 0x000900A8
 #endif
 #endif
+
+#include <cmath>
+#include <limits>
 
 namespace archive { namespace detail {
 inline bool reject(QString* error,const QString& message){if(error)*error=message;return false;}
@@ -92,6 +97,51 @@ inline QString fileDigest(const QString& path,QString* error){
     if(!hash.addData(&f)||f.error()!=QFileDevice::NoError){reject(error,"Unable to hash "+path);return {};}
     return QString::fromLatin1(hash.result().toHex());
 }
+inline bool stringField(const QJsonObject& o,const QString& key,bool required,QString* error,const QString& kind){
+    if(!o.contains(key))return required?reject(error,kind+" is missing string field: "+key):true;
+    if(!o.value(key).isString())return reject(error,kind+" has non-string field: "+key);
+    return true;
+}
+inline bool integerField(const QJsonObject& o,const QString& key,bool required,QString* error,const QString& kind){
+    if(!o.contains(key))return required?reject(error,kind+" is missing integer field: "+key):true;
+    const auto value=o.value(key);
+    if(!value.isDouble())return reject(error,kind+" has non-numeric integer field: "+key);
+    const auto number=value.toDouble();
+    if(!std::isfinite(number)||std::floor(number)!=number||
+       number<std::numeric_limits<int>::min()||number>std::numeric_limits<int>::max())
+        return reject(error,kind+" has invalid integer field: "+key);
+    return true;
+}
+inline bool stringArrayField(const QJsonObject& o,const QString& key,QString* error,const QString& kind){
+    if(!o.contains(key))return true;
+    if(!o.value(key).isArray())return reject(error,kind+" has non-array field: "+key);
+    for(const auto& value:o.value(key).toArray())
+        if(!value.isString())return reject(error,kind+" has non-string array member: "+key);
+    return true;
+}
+inline bool representationShape(const QJsonObject& r,const QString& name,QString* error){
+    for(const auto& key:QStringList{"state","path","origin","verified_at","error","verified_sha256","verification_profile"})
+        if(!stringField(r,key,key=="state",error,"representation "+name))return false;
+
+    if(r.contains("verified_sha256")){
+        const auto value=r.value("verified_sha256").toString();
+        if(!value.isEmpty()&&!QRegularExpression("^[0-9A-Fa-f]{64}$").match(value).hasMatch())
+            return reject(error,"representation "+name+" has invalid verified_sha256");
+    }
+
+    if(r.contains("verified_size")){
+        const auto value=r.value("verified_size");
+        if(!value.isDouble())return reject(error,"representation "+name+" has non-numeric verified_size");
+        const auto number=value.toDouble();
+        // 2^63 is exactly representable as double. Use an exclusive bound so
+        // rounding of qint64::max() can never admit an out-of-range cast.
+        constexpr double qint64ExclusiveUpper=9223372036854775808.0;
+        if(!std::isfinite(number)||number<0||std::floor(number)!=number||number>=qint64ExclusiveUpper)
+            return reject(error,"representation "+name+" has invalid verified_size");
+    }
+    return true;
+}
+
 inline bool arrayShape(const QJsonArray& array,const QString& kind,QString* error){
     QSet<QString> keys;
     const QStringList states={"missing","complete","failed","interrupted","running","blocked_unavailable"};
@@ -100,22 +150,51 @@ inline bool arrayShape(const QJsonArray& array,const QString& kind,QString* erro
         const auto o=entry.toObject();const QString key=o.value(kind=="playlist"?"item_key":"key").toString();
         if(key.isEmpty())return reject(error,kind+" contains an empty identity");
         const QString unique=kind=="source"?key.toCaseFolded():key;
-        // A playlist can contain repeated occurrences of the same video.
-        if(kind!="playlist" && keys.contains(unique))return reject(error,kind+" contains a duplicate identity: "+key);
-        keys.insert(unique);
+        // A playlist can contain repeated videos, but each occurrence must still
+        // have its own stable identity. Reconciliation indexes by entry_key, so
+        // accepting an empty or duplicate value would collapse historical rows.
+        if(kind=="playlist"){
+            const QString entryKey=o.value("entry_key").toString();
+            if(entryKey.isEmpty())return reject(error,"playlist contains an empty occurrence identity");
+            if(keys.contains(entryKey))return reject(error,"playlist contains a duplicate occurrence identity: "+entryKey);
+            keys.insert(entryKey);
+        }else{
+            if(keys.contains(unique))return reject(error,kind+" contains a duplicate identity: "+key);
+            keys.insert(unique);
+        }
         if(kind=="source"){
+            for(const auto& field:QStringList{"key","url","title","added_at","last_scan_at","last_scan_status","last_error"})
+                if(!stringField(o,field,field=="key"||field=="url",error,kind))return false;
             if(!sourceKeySafe(key)||o.value("url").toString().isEmpty())return reject(error,"Invalid source identity or URL");
         }else{
             const QString id=o.value("provider_id").toString();
             if((!id.isEmpty()&&!videoIdSafe(id))||(!key.startsWith("placeholder:")&&key!="youtube:"+id))return reject(error,"Invalid canonical identity: "+key);
             if(kind=="canonical"){
+                for(const auto& field:QStringList{"key","provider","provider_id","title","uploader","original_url","availability","first_seen","last_seen","recovery_status","metadata_path"})
+                    if(!stringField(o,field,field=="key"||field=="provider_id",error,kind))return false;
+                if(!stringArrayField(o,"user_tags",error,kind))return false;
+                const auto metadataPath=o.value("metadata_path").toString();
+                if(!metadataPath.isEmpty()&&(!relativeSafe(metadataPath)||!metadataPath.startsWith("Metadata/")))
+                    return reject(error,"Invalid canonical metadata path");
                 for(const auto& kindName:QStringList{"video","audio"}){
                     if(!o.value(kindName).isObject())return reject(error,"Missing representation: "+kindName);
-                    const auto r=o.value(kindName).toObject();const auto path=r.value("path").toString();
+                    const auto r=o.value(kindName).toObject();
+                    if(!representationShape(r,kindName,error))return false;
+                    const auto path=r.value("path").toString();
                     if(!states.contains(r.value("state").toString())||(!path.isEmpty()&&!relativeSafe(path))||(r.value("state")=="complete"&&path.isEmpty()))return reject(error,"Invalid representation: "+kindName);
                     if(!path.isEmpty() && !path.startsWith(kindName=="video"?"Video/":"Audio/"))return reject(error,"Representation outside canonical media directory");
                 }
-            }else if(o.value("membership")!="active"&&o.value("membership")!="removed")return reject(error,"Invalid playlist membership");
+            }else{
+                for(const auto& field:QStringList{"item_key","entry_key","provider_id","title","url","availability","membership","first_seen","last_seen"})
+                    if(!stringField(o,field,field=="item_key"||field=="entry_key",error,kind))return false;
+                if(!integerField(o,"position",false,error,kind)||!integerField(o,"last_position",false,error,kind))return false;
+                // -1 is the only sentinel used by the model. Other negative
+                // positions are semantically corrupt even though they fit int.
+                if((o.contains("position")&&o.value("position").toInt() < -1)||
+                   (o.contains("last_position")&&o.value("last_position").toInt() < -1))
+                    return reject(error,"Invalid playlist position range");
+                if(o.value("membership")!="active"&&o.value("membership")!="removed")return reject(error,"Invalid playlist membership");
+            }
         }
     }
     return true;
@@ -129,19 +208,28 @@ inline bool readArray(const QString& path,const QString& kind,QJsonArray* array,
     if(!arrayShape(doc.array(),kind,error))return false;
     *array=doc.array();return true;
 }
-inline bool historyValid(const QByteArray& bytes,QString* error){
-    if(!bytes.isEmpty()&&!bytes.endsWith('\n'))return reject(error,"Incomplete history record");
-    for(const auto& line:bytes.split('\n')){
-        if(line.trimmed().isEmpty())continue;
-        QJsonParseError pe;const auto doc=QJsonDocument::fromJson(line,&pe);
-        if(pe.error!=QJsonParseError::NoError||!doc.isObject())return reject(error,"Corrupt history record; original history was preserved");
-    }
+// A root identity survives loss of otherwise empty registries. Its version is
+// deliberately independent of per-record schemas; unknown versions are not
+// permission to initialize a new archive over existing data.
+inline bool archiveIdentityValid(const QJsonObject& object,QString* error){
+    const auto id=object.value("archive_id").toString();
+    const auto origin=object.value("admitted_from").toString();
+    if(object.value("schema_version")!=1||object.value("format")!="mdps-archive"||
+       !QRegularExpression("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$").match(id).hasMatch()||
+       id=="00000000-0000-0000-0000-000000000000"||
+       !QDateTime::fromString(object.value("created_at").toString(),Qt::ISODateWithMs).isValid()||
+       (origin!="fresh"&&origin!="legacy_unversioned"))
+        return reject(error,"Invalid or unsupported Archive identity; preserve the marker and restore the archive, not empty registries");
     return true;
 }
 inline bool transactionPayload(const QString& path,const QByteArray& after,QString* error){
     if(path.endsWith("/history.jsonl"))return historyValid(after,error);
     QJsonParseError pe;const auto doc=QJsonDocument::fromJson(after,&pe);
     if(pe.error!=QJsonParseError::NoError)return reject(error,"Invalid JSON transaction payload");
+    if(path=="State/ArchiveMode/archive-identity.json"){
+        if(!doc.isObject())return reject(error,"Archive identity must be a JSON object; preserve the existing marker");
+        return archiveIdentityValid(doc.object(),error);
+    }
     if(path=="State/ArchiveMode/items.json")return doc.isArray()&&arrayShape(doc.array(),"canonical",error);
     if(path=="State/ArchiveMode/sources.json")return doc.isArray()&&arrayShape(doc.array(),"source",error);
     if(path.startsWith("Playlists/")&&path.endsWith("/items.json"))return doc.isArray()&&arrayShape(doc.array(),"playlist",error);
@@ -149,7 +237,7 @@ inline bool transactionPayload(const QString& path,const QByteArray& after,QStri
 }
 inline QString journalPath(const QString& root){return QDir(root).filePath("State/ArchiveMode/transaction.json");}
 inline bool journalTarget(const QString& path){
-    if(path=="State/ArchiveMode/items.json"||path=="State/ArchiveMode/sources.json"||path=="State/ArchiveMode/projections-dirty.json")return true;
+    if(path=="State/ArchiveMode/items.json"||path=="State/ArchiveMode/sources.json"||path=="State/ArchiveMode/projections-dirty.json"||path=="State/ArchiveMode/archive-identity.json")return true;
     if(QRegularExpression("^State/ArchiveMode/Imports/Pending/[A-Za-z0-9_-]{1,160}/receipt\\.json$").match(path).hasMatch())return true;
     const auto parts=path.split('/');return parts.size()==3&&parts[0]=="Playlists"&&sourceKeySafe(parts[1])&&QStringList{"items.json","playlist.json","history.jsonl"}.contains(parts[2]);
 }

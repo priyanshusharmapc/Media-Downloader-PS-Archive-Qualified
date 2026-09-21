@@ -80,7 +80,7 @@ private:
 		  bool list_requested ) ;
 
 	void changeDefaultEngine( int index ) ;
-	void listRequested( const QByteArray&,int ) ;
+	void listRequested( const QByteArray&,const engines::engine&,int ) ;
 	void list() ;
 	void setContextMenuForDirectUrl() ;
 	void download( const basicdownloader::engine&,

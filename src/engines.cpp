@@ -47,8 +47,69 @@
 #include <QDesktopServices>
 #include <QNetworkProxyFactory>
 #include <QDir>
+#include <QUrl>
+#include <QSaveFile>
 
 #include <cstring>
+
+bool engines::executableOwnedByBinRoot( const QString& executable,const QString& binRoot )
+{
+	const QFileInfo rootInfo( binRoot ) ;
+	const QFileInfo executableInfo( executable ) ;
+	if( !rootInfo.exists() || !rootInfo.isDir() || !executableInfo.exists() || !executableInfo.isFile() ){
+		return false ;
+	}
+
+	const auto canonicalRoot = QDir::fromNativeSeparators( rootInfo.canonicalFilePath() ) ;
+	const auto canonicalExecutable = QDir::fromNativeSeparators( executableInfo.canonicalFilePath() ) ;
+	if( canonicalRoot.isEmpty() || canonicalExecutable.isEmpty() ){
+		return false ;
+	}
+
+	const auto rootPrefix = canonicalRoot.endsWith( '/' ) ? canonicalRoot : canonicalRoot + "/" ;
+#ifdef Q_OS_WIN
+	return canonicalExecutable.startsWith( rootPrefix,Qt::CaseInsensitive ) ;
+#else
+	return canonicalExecutable.startsWith( rootPrefix,Qt::CaseSensitive ) ;
+#endif
+}
+
+QString engines::redactLogArgument( const QString& argument )
+{
+	QString value = argument ;
+	const auto lower = value.toLower() ;
+	const QStringList secretPrefixes = {
+		"--proxy-password=","--password=","--passwd=","--token=",
+		"--access-token=","--api-key=","--apikey=","--secret="
+	} ;
+	for( const auto& prefix : secretPrefixes ){
+		if( lower.startsWith( prefix ) ){
+			return value.left( prefix.size() ) + "<REDACTED>" ;
+		}
+	}
+
+	// Credentials embedded in URLs are common in proxy settings. Preserve the
+	// useful endpoint/user context while ensuring the password never reaches
+	// command/debug/history text.
+	QUrl url( value ) ;
+	if( url.isValid() && !url.scheme().isEmpty() && !url.password().isEmpty() ){
+		url.setPassword( "<REDACTED>" ) ;
+		return url.toString( QUrl::FullyEncoded ) ;
+	}
+	return value ;
+}
+
+QString engines::redactLogEnvironment( const QString& key,const QString& value )
+{
+	const auto lower = key.toLower() ;
+	if( lower.contains( "password" ) || lower.contains( "passwd" ) ||
+		lower.contains( "token" ) || lower.contains( "secret" ) ||
+		lower.contains( "authorization" ) || lower.contains( "api_key" ) ||
+		lower.contains( "apikey" ) ){
+		return "<REDACTED>" ;
+	}
+	return engines::redactLogArgument( value ) ;
+}
 
 QStringList engines::dirEntries( const QString& e ) const
 {
@@ -234,9 +295,11 @@ void engines::openUrls( tableWidget& table,int row,const engines::engine& engine
 	if( reportFinished::finishedStatus::finishedWithSuccess( table,row ) ){
 
 		const auto& ee = table.uiText( row ) ;
-		const auto& ss = table.entryAt( row ).fileNames ;
+		const auto& entry = table.entryAt( row ) ;
+		const auto& ss = entry.fileNames ;
+		const auto folder = entry.downloadFolder.isEmpty() ? m_settings.downloadFolder() : entry.downloadFolder ;
 
-		engine.openLocalFile( { ee,m_settings.downloadFolder(),ss } ) ;
+		engine.openLocalFile( { ee,folder,ss } ) ;
 	}
 }
 
@@ -701,52 +764,97 @@ const QProcessEnvironment& engines::processEnvironment() const
 	return m_processEnvironment ;
 }
 
+static bool safePluginIdentity( const QString& name,const QString& definitionFile )
+{
+	if( name.isEmpty() || name == "." || name == ".." ||
+	    name.contains( '/' ) || name.contains( '\\' ) ||
+	    name.contains( ':' ) || QDir::isAbsolutePath( name ) ){
+		return false ;
+	}
+
+	for( const auto ch : name ){
+		if( ch.unicode() < 0x20 || ch.unicode() == 0x7f ){
+			return false ;
+		}
+	}
+
+	const QFileInfo defInfo( definitionFile ) ;
+	return !definitionFile.isEmpty() &&
+	       !QDir::isAbsolutePath( definitionFile ) &&
+	       defInfo.fileName() == definitionFile &&
+	       definitionFile == name + ".json" ;
+}
+
 QString engines::addEngine( const QByteArray& data,const QString& extensionFileName,int id )
 {
 	util::Json json( data ) ;
 
 	if( json ){
-
 		auto object = json.toObject() ;
-
 		auto name = object.value( "Name" ).toString() ;
 
-		if( !name.isEmpty() ){
-
-			auto e = m_enginePaths.enginePath( extensionFileName ) ;
-
-			QFile f( e ) ;
-
-			if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-				f.write( data ) ;
-
-				f.flush() ;
-
-				f.close() ;
-
-				for( int i = 0 ; i < 5 ; i++ ){
-
-					if( QFile::exists( e ) ){
-
-						break ;
-					}else{
-						utility::waitForOneSecond() ;
-					}
-				}
-
-				if( this->addEngine( extensionFileName,id ) ){
-
-					return name ;
-				}else{
+		if( safePluginIdentity( name,extensionFileName ) ){
+			// The logical plugin name is also the persisted definition identity.
+			// Reject traversal, alternate filenames and special path syntax before
+			// either the definition or payload can become removal authority.
+			// Validate exactly the engine object that would be loaded after
+			// publication. Derived yt-dlp definitions are overlays on top of
+			// yt-dlp.json, so compose those in memory before touching disk.
+			QJsonObject candidateObject = object ;
+			auto composeDerived = [ this,&object ]( engines::converter converter )->QJsonObject {
+				const auto basePath = m_enginePaths.enginePath( "yt-dlp.json" ) ;
+				util::Json base( engines::file( basePath,m_logger ).readAll() ) ;
+				if( !base ){
 					return {} ;
 				}
+				return converter( base.toObject(),object ) ;
+			} ;
+
+			if( extensionFileName == "yt-dlp-nightly.json" ){
+				candidateObject = composeDerived( yt_dlp::cmdNightly ) ;
+			}else if( extensionFileName == "yt-dlp-ffmpeg.json" ){
+				candidateObject = composeDerived( yt_dlp::cmdFfmpeg ) ;
+			}else if( extensionFileName == "yt-dlp-aria2c.json" ){
+				candidateObject = composeDerived( yt_dlp::cmdAria2C ) ;
 			}
+
+			auto candidate = candidateObject.isEmpty()
+				? engines::EnginesList::engine{}
+				: this->getEngineByPath1( candidateObject ) ;
+
+			if( !candidate.valid() || candidate->exePath().isEmpty() ){
+				m_logger.add( QObject::tr( "Rejected engine definition before persistence: %1" ).arg( extensionFileName ),id ) ;
+				return {} ;
+			}
+
+			const auto path = m_enginePaths.enginePath( extensionFileName ) ;
+			QSaveFile file( path ) ;
+			if( !file.open( QIODevice::WriteOnly ) ){
+				m_logger.add( QObject::tr( "Failed To Save Plugin Definition: %1" ).arg( file.errorString() ),id ) ;
+				return {} ;
+			}
+
+			if( file.write( data ) != data.size() || !file.commit() ){
+				file.cancelWriting() ;
+				m_logger.add( QObject::tr( "Failed To Save Plugin Definition: %1" ).arg( file.errorString() ),id ) ;
+				return {} ;
+			}
+
+			// Admission cannot now discover a different definition because it
+			// consumes the exact in-memory candidate validated above.
+			if( this->engineAdd( extensionFileName,candidate.move(),id ) ){
+				m_backends.sort() ;
+				return name ;
+			}
+
+			// engineAdd has no remaining expected failure after the checks above,
+			// but keep the failure visible rather than pretending installation.
+			m_logger.add( QObject::tr( "Failed To Admit Validated Plugin Definition: %1" ).arg( extensionFileName ),id ) ;
+			return {} ;
 		}
 	}
 
 	m_logger.add( QObject::tr( "Failed To Load A Plugin" ) + ": " + json.errorString(),id ) ;
-
 	return {} ;
 }
 
@@ -754,37 +862,66 @@ void engines::removeEngine( const QString& ee,int id )
 {
 	auto e = ee + ".json" ;
 
-	const auto& engine = this->getCompleteEngineByPath( e ) ;
+	const auto& engine = this->getEngineByName( ee ) ;
 
 	if( engine ){
 
-		utility::removeFile( m_enginePaths.enginePath( e ) ) ;
+		// Copy every value needed after erasing the owning backend entry.
+		// result_ref only carries a raw pointer and becomes invalid immediately
+		// after removeEngineFromList().
+		const auto name = engine->name() ;
+		const auto archiveContainsFolder = engine->archiveContainsFolder() ;
+		const auto exe = QDir::fromNativeSeparators( engine->exePath().realExe() ) ;
+		const auto binPath = QDir::fromNativeSeparators( m_enginePaths.binPath() ) ;
+		const auto definitionPath = m_enginePaths.enginePath( e ) ;
 
-		if( engine->archiveContainsFolder() ){
+		// The persisted definition is the authoritative plugin-registration
+		// record. If it cannot be removed, keep the in-memory backend and its
+		// defaults untouched so the UI never claims a removal that will be
+		// reversed at the next startup.
+		QString definitionError ;
+		const QFileInfo definitionInfo( definitionPath ) ;
+		if( definitionInfo.exists() || definitionInfo.isSymLink() ){
+			definitionError = utility::removeFile( definitionPath ) ;
+		}
+		if( !definitionError.isEmpty() ){
 
-			QFileInfo m( m_enginePaths.binPath( engine->name() ) ) ;
+			m_logger.add( QObject::tr( "Failed To Remove Plugin Definition: %1: %2" ).arg( definitionPath,definitionError ),id ) ;
+			return ;
+		}
 
-			if( m.exists() && m.isDir() ){
+		// Payload cleanup happens only after durable unregistration. A cleanup
+		// failure leaves an orphaned payload rather than a plugin that can
+		// silently reappear. Report every such failure for explicit maintenance.
+		if( archiveContainsFolder ){
 
-				utility::removeFolder( m.filePath() ) ;
+			QFileInfo folder( m_enginePaths.binPath( name ) ) ;
+
+			if( folder.exists() && folder.isDir() ){
+
+				QString treeError ;
+				if( !utility::updaterTreeIsSafe( folder.filePath(),&treeError ) ){
+					m_logger.add( QObject::tr( "Plugin payload cleanup refused: %1: %2" ).arg( folder.filePath(),treeError ),id ) ;
+				}else{
+					const auto removeError = utility::removeFolder( folder.filePath() ) ;
+					if( !removeError.isEmpty() ){
+						m_logger.add( QObject::tr( "Plugin payload cleanup failed: %1: %2" ).arg( folder.filePath(),removeError ),id ) ;
+					}
+				}
 			}
-		}else{
-			auto exe = QDir::fromNativeSeparators( engine->exePath().realExe() ) ;
-			auto binPath = QDir::fromNativeSeparators( m_enginePaths.binPath() ) ;
+		}else if( engines::executableOwnedByBinRoot( exe,binPath ) ){
 
-			if( exe.startsWith( binPath ) && QFile::exists( exe ) ){
-
-				engine->removeFiles( { exe },binPath ) ;
+			const auto status = engine->removeFiles( { exe },binPath ) ;
+			for( const auto& entry : status ){
+				m_logger.add( QObject::tr( "Plugin payload cleanup failed: %1: %2" ).arg( entry.src(),entry.err() ),id ) ;
 			}
 		}
 
-		this->removeEngineFromList( engine->name(),id ) ;
+		this->removeEngineFromList( name,id ) ;
 
 		if( m_backends.size() > 0 ){
 
-			const auto& name = engine->name() ;
-
-			auto _reset_default = [ & ]( const QString& name,settings::tabName n ){
+			auto _reset_default = [ & ]( settings::tabName n ){
 
 				if( name == m_settings.defaultEngine( n,this->defaultEngineName() ) ){
 
@@ -792,10 +929,10 @@ void engines::removeEngine( const QString& ee,int id )
 				}
 			} ;
 
-			_reset_default( name,settings::tabName::basic ) ;
-			_reset_default( name,settings::tabName::batch ) ;
-			_reset_default( name,settings::tabName::playlist ) ;
-		}		
+			_reset_default( settings::tabName::basic ) ;
+			_reset_default( settings::tabName::batch ) ;
+			_reset_default( settings::tabName::playlist ) ;
+		}
 	}
 }
 
@@ -932,30 +1069,25 @@ engines::engine::cmd engines::engine::getCommands( const QString& engineName,con
 		url = obj.value( "DownloadUrl" ).toString() ;
 	}
 
+	QJsonObject selected ;
+
 	if( cpu.x86_32() ){
-
-		auto m = this->getCmd( cmd,"x86" ) ;
-
-		if( !m.isEmpty() ){
-
-			return { m,url,*this } ;
-		}
-
+		selected = this->getCmd( cmd,"x86" ) ;
 	}else if( cpu.x86_64() ){
-
-		return { this->getCmd( cmd,"amd64" ),url,*this } ;
-
+		selected = this->getCmd( cmd,"amd64" ) ;
 	}else if( cpu.aarch64() ){
-
-		auto m = this->getCmd( cmd,"aarch64" ) ;
-
-		if( !m.isEmpty() ){
-
-			return { m,url,*this } ;
-		}
+		selected = this->getCmd( cmd,"aarch64" ) ;
+	}else if( cpu.aarch32() ){
+		// ARM32 is an explicitly recognized host architecture. Never silently
+		// reinterpret it as amd64 when an engine has no ARM32 payload.
+		selected = this->getCmd( cmd,"aarch32" ) ;
+		if( selected.isEmpty() )selected = this->getCmd( cmd,"arm" ) ;
 	}
 
-	return { this->getCmd( cmd,"amd64" ),url,*this } ;
+	// Unknown or unsupported architectures fail closed. Individual engines
+	// that intentionally support emulation must declare that mapping explicitly
+	// in their command metadata (for example QuickJS-ng Windows ARM64).
+	return { selected,url,*this } ;
 }
 
 engines::engine::cmd::cmd( const QJsonObject& obj,
@@ -1195,9 +1327,9 @@ void engines::engine::parseMultipleCmdArgs( Logger& logger,
 
 		if( a && b && c ){
 
-			if( m.startsWith( m_exeFolderPath ) ){
+			if( engines::executableOwnedByBinRoot( m,m_exeFolderPath ) ){
 				/*
-				 * backend found in internal bin folder
+				 * backend found in the canonical internal bin folder
 				 */
 				m_exePath = m ;
 
@@ -1337,12 +1469,12 @@ QString engines::engine::versionString( const QString& data ) const
 {
 	auto a = util::split( data,'\n',true ) ;
 
-	if( m_line < a.size() ){
+	if( m_line >= 0 && m_line < a.size() ){
 
 		auto b = a[ m_line ] ;
 		auto c = util::split( b,' ',true ) ;
 
-		if( m_position < c.size() ){
+		if( m_position >= 0 && m_position < c.size() ){
 
 			auto m = c[ m_position ] ;
 
@@ -1422,6 +1554,12 @@ QString engines::enginePaths::socketPath()
 		QDir().mkpath( m ) ;
 		return m  + "/ipc" ;
 	}
+}
+
+QString engines::enginePaths::socketLockPath() const
+{
+	QDir().mkpath( m_dataPath ) ;
+	return this->add( m_dataPath,"single-instance.lock" ) ;
 }
 
 void engines::enginePaths::confirmPaths( Logger& logger ) const
@@ -1831,9 +1969,10 @@ QString engines::engine::baseEngine::deleteEngineBinFolder( const QString& e )
 	}
 }
 
-void engines::engine::baseEngine::runCommandOnDownloadedFile( const std::vector< QByteArray >& fileNames )
+void engines::engine::baseEngine::runCommandOnDownloadedFile( const std::vector< QByteArray >& fileNames,const QString& downloadFolder )
 {
-	auto df = m_settings.downloadFolder() + "/" ;
+	const auto folder = downloadFolder.isEmpty() ? m_settings.downloadFolder() : downloadFolder ;
+	auto df = folder + "/" ;
 
 	m_settings.runCommandOnSuccessfulDownload( this->engine().name(),df,fileNames ) ;
 }
@@ -1841,10 +1980,22 @@ void engines::engine::baseEngine::runCommandOnDownloadedFile( const std::vector<
 QString engines::engine::baseEngine::commandString( const engines::engine::exeArgs::cmd& cmd )
 {
 	auto m = "\"" + cmd.exe() + "\"" ;
+	bool redactNext = false ;
 
 	for( const auto& it : cmd.args() ){
-
-		m += " \"" + it + "\"" ;
+		QString rendered ;
+		if( redactNext ){
+			rendered = "<REDACTED>" ;
+			redactNext = false ;
+		}else{
+			rendered = engines::redactLogArgument( it ) ;
+			const auto option = it.toLower() ;
+			redactNext = option == "--proxy-password" || option == "--password" ||
+				option == "--passwd" || option == "--token" ||
+				option == "--access-token" || option == "--api-key" ||
+				option == "--apikey" || option == "--secret" ;
+		}
+		m += " \"" + rendered + "\"" ;
 	}
 
 	return m ;
@@ -1973,15 +2124,49 @@ void engines::engine::baseEngine::openLocalFile( const engines::engine::baseEngi
 		}
 	}() ;
 
-	auto s = QDir::fromNativeSeparators( e ) ;
-	auto ss = QDir::fromNativeSeparators( l.downloadFolder ) ;
+	const auto normalizedRoot = QDir::cleanPath( QDir::fromNativeSeparators( l.downloadFolder ) ) ;
+	const auto reported = QDir::fromNativeSeparators( e ) ;
 
-	if( s.startsWith( ss ) ){
+	if( normalizedRoot.isEmpty() || reported.isEmpty() ){
 
-		m_settings.openUrl( s ) ;
-	}else{
-		m_settings.openUrl( l.downloadFolder + "/" + e ) ;
+		return ;
 	}
+
+	const auto candidatePath = QDir::isAbsolutePath( reported ) ?
+		QDir::cleanPath( reported ) :
+		QDir::cleanPath( QDir( normalizedRoot ).filePath( reported ) ) ;
+
+	auto canonicalOrClean = []( const QString& path ){
+
+		const QFileInfo info( path ) ;
+		const auto canonical = info.canonicalFilePath() ;
+
+		return canonical.isEmpty() ?
+			QDir::cleanPath( QDir::fromNativeSeparators( path ) ) :
+			QDir::fromNativeSeparators( canonical ) ;
+	} ;
+
+	const auto root = canonicalOrClean( normalizedRoot ) ;
+	const auto candidate = canonicalOrClean( candidatePath ) ;
+	const auto rootPrefix = root.endsWith( '/' ) ? root : root + "/" ;
+
+#ifdef Q_OS_WIN
+	const auto caseSensitivity = Qt::CaseInsensitive ;
+#else
+	const auto caseSensitivity = Qt::CaseSensitive ;
+#endif
+
+	const auto inRoot = candidate.compare( root,caseSensitivity ) == 0 ||
+		candidate.startsWith( rootPrefix,caseSensitivity ) ;
+
+	// Engine output is not an authorization to open arbitrary local files.
+	// Refuse sibling-prefix, absolute out-of-root and relative traversal paths.
+	if( !inRoot ){
+
+		return ;
+	}
+
+	m_settings.openUrl( candidate ) ;
 }
 
 engines::engine::baseEngine::onlineVersion engines::engine::baseEngine::versionInfoFromGithub( const QByteArray& e )
@@ -2453,29 +2638,43 @@ const engines::engine& engines::engine::baseEngine::engine() const
 	return m_engine ;
 }
 
-void engines::file::write( const QString& e )
+bool engines::file::write( const QString& e )
 {
-	if( m_file.open( QIODevice::WriteOnly ) ){
-
-		m_file.write( e.toUtf8() ) ;
-	}else{
+	const auto data = e.toUtf8() ;
+	QSaveFile file( m_filePath ) ;
+	if( !file.open( QIODevice::WriteOnly ) ){
 		this->failToOpenForWriting() ;
+		return false ;
 	}
+	if( file.write( data ) != data.size() || !file.commit() ){
+		auto id = utility::loggerID() ;
+		m_logger.add( QObject::tr( "Failed to atomically write file" ) + ": " + m_filePath,id ) ;
+		file.cancelWriting() ;
+		return false ;
+	}
+	return true ;
 }
 
-void engines::file::write( const QJsonDocument& doc,QJsonDocument::JsonFormat format )
+bool engines::file::write( const QJsonDocument& doc,QJsonDocument::JsonFormat format )
 {
-	if( m_file.open( QIODevice::WriteOnly ) ){
-
-		m_file.write( doc.toJson( format ) ) ;
-	}else{
+	const auto data = doc.toJson( format ) ;
+	QSaveFile file( m_filePath ) ;
+	if( !file.open( QIODevice::WriteOnly ) ){
 		this->failToOpenForWriting() ;
+		return false ;
 	}
+	if( file.write( data ) != data.size() || !file.commit() ){
+		auto id = utility::loggerID() ;
+		m_logger.add( QObject::tr( "Failed to atomically write file" ) + ": " + m_filePath,id ) ;
+		file.cancelWriting() ;
+		return false ;
+	}
+	return true ;
 }
 
-void engines::file::write( const QJsonObject& obj,QJsonDocument::JsonFormat format )
+bool engines::file::write( const QJsonObject& obj,QJsonDocument::JsonFormat format )
 {
-	this->write( QJsonDocument( obj ),format ) ;
+	return this->write( QJsonDocument( obj ),format ) ;
 }
 
 QByteArray engines::file::readAll()
@@ -2683,50 +2882,59 @@ QString engines::engine::baseEngine::timer::stringElapsedTime( qint64 millisecon
 
 QString engines::engine::baseEngine::timer::duration( qint64 milliseconds )
 {
-	auto seconds = milliseconds / 1000;
-	milliseconds = milliseconds % 1000;
-	auto minutes = seconds / 60 ;
-	seconds      = seconds % 60 ;
-	auto hours   = minutes / 60 ;
-	minutes      = minutes % 60 ;
+	if( milliseconds < 0 )milliseconds = 0 ;
+	const qint64 totalSeconds = milliseconds / 1000 ;
+	const qint64 hours = totalSeconds / 3600 ;
+	const qint64 minutes = ( totalSeconds / 60 ) % 60 ;
+	const qint64 seconds = totalSeconds % 60 ;
 
-	QTime time ;
-	time.setHMS( int( hours ),int( minutes ),int( seconds ),int( milliseconds ) ) ;
-
-	return time.toString( "hh:mm:ss" ) ;
+	// This is an elapsed duration, not a time-of-day. QTime wraps/invalidates
+	// hours outside 0..23, so format total hours arithmetically.
+	return QString( "%1:%2:%3" )
+		.arg( hours,2,10,QChar( '0' ) )
+		.arg( minutes,2,10,QChar( '0' ) )
+		.arg( seconds,2,10,QChar( '0' ) ) ;
 }
 
 int engines::engine::baseEngine::timer::toSeconds( const QString& e )
 {
-	auto _toNumber = []( const QString& e ){
-
-		return e.toInt() ;
+	auto parse = []( const QString& value,qint64& out ){
+		bool ok=false ;
+		const auto number=value.toLongLong( &ok ) ;
+		if( !ok || number < 0 )return false ;
+		out=number ;return true ;
+	} ;
+	auto checked = []( qint64 hours,qint64 minutes,qint64 seconds ){
+		if( hours > std::numeric_limits< int >::max() / 3600LL )return 0 ;
+		const qint64 total = hours * 3600LL + minutes * 60LL + seconds ;
+		return total > std::numeric_limits< int >::max() ? 0 : static_cast< int >( total ) ;
 	} ;
 
 	if( e.endsWith( "m" ) ){
-
-		auto s = e ;
-		s.replace( "m","" ) ;
-
-		return 60 * _toNumber( s ) ;
+		auto s=e;s.chop( 1 );qint64 minutes=0 ;
+		if( !parse( s,minutes ) || minutes > std::numeric_limits< int >::max() / 60LL )return 0 ;
+		return static_cast< int >( minutes * 60LL ) ;
 	}
 
-	auto m = util::split( e,':',true ) ;
-
-	if( m.size() == 3 ){
-
-		return 3600 * _toNumber( m[ 0 ] ) + 60 * _toNumber( m[ 1 ] ) + _toNumber( m[ 2 ] ) ;
-
-	}else if( m.size() == 2 ){
-
-		return 3600 * _toNumber( m[ 0 ] ) + 360 * _toNumber( m[ 1 ] ) ;
-
-	}else if( m.size() == 1 ){
-
-		return 3600 * _toNumber( m[ 0 ] ) ;
-	}else{
-		return 0 ;
+	const auto parts=util::split( e,':',false ) ;
+	if( parts.size()==3 ){
+		qint64 hours=0,minutes=0,seconds=0 ;
+		if( !parse( parts[0],hours ) || !parse( parts[1],minutes ) || !parse( parts[2],seconds ) ||
+		    minutes>=60 || seconds>=60 )return 0 ;
+		return checked( hours,minutes,seconds ) ;
 	}
+	if( parts.size()==2 ){
+		qint64 minutes=0,seconds=0 ;
+		if( !parse( parts[0],minutes ) || !parse( parts[1],seconds ) || seconds>=60 )return 0 ;
+		if( minutes > std::numeric_limits< int >::max() / 60LL )return 0 ;
+		const qint64 total=minutes*60LL+seconds ;
+		return total > std::numeric_limits< int >::max() ? 0 : static_cast< int >( total ) ;
+	}
+	if( parts.size()==1 ){
+		qint64 hours=0 ;
+		return parse( parts[0],hours ) ? checked( hours,0,0 ) : 0 ;
+	}
+	return 0 ;
 }
 
 qint64 engines::engine::baseEngine::timer::elapsedTime()
@@ -2818,63 +3026,55 @@ QNetworkProxy engines::proxySettings::toQNetworkProxy( const QString& u ) const
 {
 	QNetworkProxy proxy ;
 
-	if( u.isEmpty() ){
+	if( u.trimmed().isEmpty() ){
 
 		proxy.setType( QNetworkProxy::NoProxy ) ;
-
-		return proxy ;
-	}else{
-		auto url = u ;
-
-		if( url.startsWith( "socks5" ) ){
-
-			proxy.setType( QNetworkProxy::Socks5Proxy ) ;
-		}else{
-			proxy.setType( QNetworkProxy::HttpProxy ) ;
-		}
-
-		auto e = url.indexOf( "://" ) ;
-
-		if( e != -1 ){
-
-			url = url.mid( e + 3 ) ;
-		}
-
-		e = url.indexOf( '@' ) ;
-
-		if( e != -1 ){
-
-			auto credentials = url.mid( 0,e ) ;
-
-			auto ee = credentials.indexOf( ':' ) ;
-
-			if( ee != -1 ){
-
-				proxy.setUser( credentials.mid( 0,ee ) ) ;
-				proxy.setPassword( credentials.mid( ee + 1 ) ) ;
-			}
-
-			url = url.mid( e + 1 ) ;
-		}
-
-		e = url.indexOf( ':' ) ;
-
-		if( e != -1 ){
-
-			proxy.setPort( url.mid( e + 1 ).replace( "/","" ).toInt() ) ;
-
-			url = url.mid( 0,e ) ;
-		}
-
-		proxy.setHostName( url ) ;
-
-		if( proxy.hostName().isEmpty() ){
-
-			proxy.setType( QNetworkProxy::NoProxy ) ;
-		}
-
 		return proxy ;
 	}
+
+	const auto input = u.contains( "://" ) ? u : "http://" + u ;
+	const QUrl url( input,QUrl::StrictMode ) ;
+
+	if( !url.isValid() || url.host().isEmpty() ){
+
+		proxy.setType( QNetworkProxy::NoProxy ) ;
+		return proxy ;
+	}
+
+	const auto scheme = url.scheme().toLower() ;
+
+	if( scheme == "socks5" ){
+
+		proxy.setType( QNetworkProxy::Socks5Proxy ) ;
+
+	}else if( scheme == "http" || scheme == "https" ){
+
+		proxy.setType( QNetworkProxy::HttpProxy ) ;
+
+	}else{
+		proxy.setType( QNetworkProxy::NoProxy ) ;
+		return proxy ;
+	}
+
+	const auto port = url.port( -1 ) ;
+
+	if( port > 65535 ){
+
+		proxy.setType( QNetworkProxy::NoProxy ) ;
+		return proxy ;
+	}
+
+	proxy.setHostName( url.host() ) ;
+
+	if( port > 0 ){
+
+		proxy.setPort( static_cast< quint16 >( port ) ) ;
+	}
+
+	proxy.setUser( url.userName( QUrl::FullyDecoded ) ) ;
+	proxy.setPassword( url.password( QUrl::FullyDecoded ) ) ;
+
+	return proxy ;
 }
 
 void engines::proxySettings::setApplicationProxy( const QString& e ) const
@@ -2914,7 +3114,19 @@ QString engines::proxySettings::toString( const QNetworkProxy& e ) const
 
 		if( !e.hostName().isEmpty() ){
 
-			host = e.hostName() + ":" + QString::number( e.port() ) ;
+			auto hostName = e.hostName() ;
+
+			if( hostName.contains( ':' ) && !hostName.startsWith( '[' ) ){
+
+				hostName = "[" + hostName + "]" ;
+			}
+
+			host = hostName ;
+
+			if( e.port() > 0 ){
+
+				host += ":" + QString::number( e.port() ) ;
+			}
 		}
 
 		return type + credentials + host ;
@@ -2927,7 +3139,8 @@ QProcessEnvironment engines::engine::baseEngine::optionsEnvironment::update( con
 
 	for( const auto& it : m_pairs ){
 
-		s += "\nEnv: " + it.key + "=" + it.value  ;
+		// The child still receives the exact value; only diagnostics are scrubbed.
+		s += "\nEnv: " + it.key + "=" + engines::redactLogEnvironment( it.key,it.value ) ;
 
 		m.insert( it.key,it.value ) ;
 	}

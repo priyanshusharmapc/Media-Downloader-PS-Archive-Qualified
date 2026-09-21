@@ -41,6 +41,7 @@ If those sources disagree, stop and resolve the identity mismatch before using t
 | [ARCHIVE_RECOVERY.md](ARCHIVE_RECOVERY.md) | Recovery Package creation, validation, provenance, retry, acceptance, rejection |
 | [ARCHIVE_TESTING.md](ARCHIVE_TESTING.md) | Regression, integration, sanitizers, Windows qualification, package sealing, local acceptance |
 | [DOCUMENTATION_CHECKLIST.md](DOCUMENTATION_CHECKLIST.md) | Contract-change checklist to keep documentation synchronized with implementation |
+| [remediation/FINAL-AUDIT2-RECONCILIATION.md](remediation/FINAL-AUDIT2-RECONCILIATION.md) | Final 199-record AUDIT2 source-remediation reconciliation and qualification blocker |
 | [../resources/archive/ARCHIVE_AGENT.md](../resources/archive/ARCHIVE_AGENT.md) | Runtime materialized contract for external agents and recovery automation |
 
 ## Authority hierarchy
@@ -72,3 +73,48 @@ Documentation should be updated whenever any of the following changes:
 A code change that alters one of these contracts is incomplete until the corresponding documentation is updated. Use [DOCUMENTATION_CHECKLIST.md](DOCUMENTATION_CHECKLIST.md) as the release review checklist.
 
 Do not add hardcoded "latest" build identities to maintained docs. Point readers to package identity and CI evidence instead.
+
+## Discovery trust and playlist history
+
+[Discovery admission](remediation/009-031.md) explains provider identity binding,
+explicit occurrence indexes, retained missing-index fallback, and fail-closed
+membership handling for suspect responses.
+
+## Archive admission and missing registries
+
+[Missing-registry admission](remediation/012.md) describes orphan-evidence refusal, durable root identity, supported legacy admission and non-destructive recovery expectations.
+
+## Archive Root selection
+
+[Archive Root configuration and recovery](ARCHIVE_ROOT_CONFIGURATION.md) documents explicit opt-in, offline-root behavior, transactional selection, and settings compatibility for audit findings 001 and 032.
+
+## Committed work and report warnings
+
+[Transaction outcomes and projection repair](remediation/025.md) documents
+accurate accepted counts, separate post-commit warnings, CLI exit codes, and
+non-destructive report-only recovery.
+
+
+## Restart and unavailable representation states
+
+[Representation restart recovery](remediation/007.md) documents how stale
+`running` leases become `interrupted` only at a fresh Archive operation
+boundary, and how unavailable media becomes durably `blocked_unavailable`.
+
+## Qualified runtime tool boundary
+
+[Sealed runtime tool resolution](remediation/005.md) documents the default
+package-only resolver and the explicit, non-qualified development opt-in for
+system `PATH` tools.
+
+## Application update trust boundary
+
+[Fork-bound application updates](remediation/003.md) documents the qualified
+fork release endpoint, opt-in automatic update policy, and release-asset
+repository validation.
+
+## Existing-media provider binding
+
+[Existing-media provenance](remediation/006.md) documents the provider-ID,
+path and SHA-256 binding required before an existing file can be adopted into
+canonical history.

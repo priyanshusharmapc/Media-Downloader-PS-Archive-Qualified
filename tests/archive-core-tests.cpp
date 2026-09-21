@@ -1,4 +1,7 @@
 #include "../src/archive/archivecore.h"
+#include "archive-history-contract-tests.h"
+#include "archive-missing-playlist-tests.h"
+#include "archive-process-tests.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -38,6 +41,10 @@ PlaylistItem byPlaylistKey(const QVector<PlaylistItem>& items,const QString& key
 int main(int argc,char** argv)
 {
     QCoreApplication app(argc,argv);
+    const int fixtureResult=archive_process_tests::fixture(app.arguments());if(fixtureResult>=0)return fixtureResult;
+    QString processError;check(archive_process_tests::run(&processError),processError);
+    QString historyError;check(archive_history_tests::run(&historyError),historyError);
+    QString missingError;check(archive_missing_playlist_tests::run(&missingError),missingError);
     QTemporaryDir temp; check(temp.isValid(),"temporary directory");
     Paths paths(temp.path()); Store store(paths); QString error;
     check(store.initialize(&error),"initialize: "+error);
@@ -52,8 +59,9 @@ int main(int argc,char** argv)
     check(store.saveSources({source},&error),"save sources: "+error);
     auto round=store.loadSources(&error); check(round.size()==1&&round[0].key==source.key,"source registry round-trip");
 
-    // Parsed observations from a nonzero yt-dlp run are useful evidence, but never a complete snapshot.
-    const QByteArray partialJson=R"({"entries":[{"id":"abc123DEF45","title":"Observed before failure","playlist_index":1,"url":"https://www.youtube.com/watch?v=abc123DEF45","availability":"public"}]})";
+    // Bound observations from a nonzero yt-dlp run remain useful evidence.
+    // Unknown provider identity is tested separately as a refused observation.
+    const QByteArray partialJson=R"({"id":"PLTEST123","entries":[{"id":"abc123DEF45","title":"Observed before failure","playlist_index":1,"url":"https://www.youtube.com/watch?v=abc123DEF45","availability":"public"}]})";
     const auto parsedNonzero=PlaylistDiscovery::parse(source,partialJson,"extractor failed after partial output",1);
     check(parsedNonzero.items.size()==1,"nonzero discovery retains observed entries");
     check(!parsedNonzero.complete,"nonzero discovery cannot be complete");
@@ -70,6 +78,29 @@ int main(int argc,char** argv)
     Representation interrupted; interrupted.state="interrupted"; interrupted.origin="automatic_download"; interrupted.error="process interrupted";
     check(store.updateRepresentation(a.itemKey,"video",interrupted,&error),"write interrupted representation");
     check(byKey(store.loadCanonicalItems(),a.itemKey).video.state=="interrupted","interrupted representation retained");
+
+    // A same-thread nested operation may observe a live running worker. It must
+    // not perform restart recovery. Once the owning session releases its fresh
+    // lock, the next initialization must atomically recover that stale lease.
+    Representation running; running.state="running"; running.origin="automatic_download";
+    running.path="Video/in-progress.mp4"; running.error="download worker had started";
+    SyncLock liveSession(paths); check(liveSession.tryLock(),"acquire live Archive session");
+    check(liveSession.acquiredFreshly(),"top-level session did not establish fresh ownership");
+    check(store.updateRepresentation(a.itemKey,"video",running,&error),"write live running representation");
+    {
+        SyncLock nested(paths); check(nested.tryLock(),"join live Archive session");
+        check(!nested.acquiredFreshly(),"nested same-thread lock falsely reported fresh ownership");
+        Store nestedStore(paths);
+        check(nestedStore.initialize(&error,nested.acquiredFreshly()),"nested initialize: "+error);
+        check(byKey(store.loadCanonicalItems(),a.itemKey).video.state=="running","live worker was falsely interrupted");
+    }
+    liveSession.unlock();
+    Store restarted(paths); check(restarted.initialize(&error),"restart initialize: "+error);
+    const auto recovered=byKey(restarted.loadCanonicalItems(),a.itemKey).video;
+    check(recovered.state=="interrupted","stale running representation was not recovered after restart");
+    check(recovered.path==running.path&&recovered.origin==running.origin,"restart recovery discarded representation evidence");
+    check(recovered.error.contains("download worker had started")&&recovered.error.contains("Restart recovery"),
+          "restart recovery did not preserve prior error and append provenance");
 
     // A partial/429-like snapshot may observe only A but must not remove B.
     Snapshot partial; partial.sourceKey=source.key; partial.complete=false; partial.scannedAt="2026-09-14T10:10:00+05:30"; partial.error="HTTP 429"; partial.items={a};

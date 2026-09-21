@@ -3,6 +3,11 @@ param(
     [Parameter(Mandatory=$true)][string]$PlaylistUrl,
     [Parameter(Mandatory=$true)][string]$VideoUrl,
     [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-f]{40}$')][string]$ExpectedCommit,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$ExpectedArtifactSha256,
+    [Parameter(Mandatory=$true)][ValidatePattern('^qualification-[0-9a-f]{40}$')][string]$ExpectedReleaseTag,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[0-9]+$')][string]$ExpectedRunId,
+    [Parameter(Mandatory=$true)][ValidatePattern('^[^/\\s]+/[^/\\s]+$')][string]$ExpectedRepository,
+    [Parameter(Mandatory=$true)][string]$ArtifactZipPath,
     [switch]$AllowExistingArchive
 )
 
@@ -70,11 +75,59 @@ function Media-Hashes($values) {
     return $hashes
 }
 
+# Bind this extracted directory to the externally trusted GitHub artifact
+# before executing any candidate binary. The expected digest/identity values
+# must come from GitHub (or another trusted handoff), never from this package.
+$artifactZip = [IO.Path]::GetFullPath($ArtifactZipPath)
+if (!(Test-Path -LiteralPath $artifactZip -PathType Leaf)) { throw 'Externally anchored artifact ZIP is missing' }
+$actualArtifactSha256 = (Get-FileHash -LiteralPath $artifactZip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualArtifactSha256 -ne $ExpectedArtifactSha256.ToLowerInvariant()) { throw 'External artifact SHA-256 does not match the trusted digest' }
+
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$zip = [IO.Compression.ZipFile]::OpenRead($artifactZip)
+try {
+    $fileEntries = @($zip.Entries | Where-Object { $_.Name })
+    $identityEntries = @($fileEntries | Where-Object { $_.FullName.Replace('\','/') -match '(^|/)build-identity\.json$' })
+    if ($identityEntries.Count -ne 1) { throw 'Artifact ZIP must contain exactly one build-identity.json' }
+    $identityName = $identityEntries[0].FullName.Replace('\','/')
+    $prefix = $identityName.Substring(0, $identityName.Length - 'build-identity.json'.Length)
+    $zipListed = @{}
+    foreach ($entry in $fileEntries) {
+        $normalized = $entry.FullName.Replace('\','/')
+        if (!$normalized.StartsWith($prefix, [StringComparison]::Ordinal)) { continue }
+        $relative = $normalized.Substring($prefix.Length)
+        if (!$relative) { continue }
+        if ($zipListed.ContainsKey($relative)) { throw "Duplicate artifact ZIP path: $relative" }
+        $path = Safe-Child $here $relative
+        if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Extracted package is missing trusted artifact file: $relative" }
+        $stream = $entry.Open()
+        try {
+            $sha = [Security.Cryptography.SHA256]::Create()
+            try { $entryHash = ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant() }
+            finally { $sha.Dispose() }
+        } finally { $stream.Dispose() }
+        $extractedHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($entryHash -ne $extractedHash) { throw "Extracted package differs from externally anchored artifact: $relative" }
+        $zipListed[$relative] = $entryHash
+    }
+    foreach ($file in Get-ChildItem -LiteralPath $here -Recurse -File -Force) {
+        $relative = $file.FullName.Substring($here.TrimEnd('\','/').Length + 1).Replace('\','/')
+        if (!$zipListed.ContainsKey($relative)) { throw "Extracted package contains a file not present in the trusted artifact ZIP: $relative" }
+    }
+} finally {
+    $zip.Dispose()
+}
+
 # Validate identity and every declared package byte before executing any binary.
 foreach ($name in @('archive-cli.exe','build-identity.json','SHA256SUMS.txt')) { $null = Safe-Child $here $name }
 if (!(Test-Path -LiteralPath $cli) -or !(Test-Path -LiteralPath $identityPath) -or !(Test-Path -LiteralPath $sumPath)) { throw 'Portable candidate is incomplete' }
 $identity = Get-Content -LiteralPath $identityPath -Raw | ConvertFrom-Json
-if ($identity.commit -ne $ExpectedCommit -or $identity.qualification -ne 'windows-ci-qualified-for-local-harness') { throw 'Candidate commit or qualification does not match the expected CI build' }
+if ($identity.commit -ne $ExpectedCommit -or
+    [string]$identity.run_id -ne $ExpectedRunId -or
+    [string]$identity.repository -ne $ExpectedRepository -or
+    $identity.qualification -ne 'windows-ci-qualified-for-local-harness') {
+    throw 'Candidate repository, run, commit or qualification does not match the trusted artifact identity'
+}
 $listed = @{}
 foreach ($line in Get-Content -LiteralPath $sumPath) {
     if ($line -notmatch '^([0-9a-fA-F]{64})  (.+)$') { throw 'Malformed SHA256SUMS entry' }
@@ -97,7 +150,14 @@ if ((Test-Path -LiteralPath $root) -and !$AllowExistingArchive -and @(Get-ChildI
 $started = [DateTime]::UtcNow.ToString('o')
 $null = Invoke-Archive -CommandArgs @('preflight', $root)
 $scan = Invoke-Archive -CommandArgs @('scan', $root, $PlaylistUrl, 'Local harness playlist')
-if ($scan['complete'] -ne 'true' -or [int]$scan['observed'] -lt 1) { throw 'Playlist discovery was not complete and nonempty' }
+if ($scan['complete'] -ne 'true' -or [int]$scan['observed'] -lt 1 -or !$scan['source_key']) { throw 'Playlist discovery was not complete and nonempty' }
+
+# Bind the requested video to the exact active occurrence produced by this scan.
+# sync-item alone may create a standalone item and therefore is not membership proof.
+$binding = Invoke-Archive -CommandArgs @('playlist-binding', $root, $PlaylistUrl, $VideoUrl)
+if ($binding['member'] -ne 'true' -or $binding['source_key'] -ne $scan['source_key'] -or !$binding['item_key'] -or !$binding['entry_key'] -or [int]$binding['active_occurrences'] -lt 1) {
+    throw 'Requested video is not an active member of the scanned playlist'
+}
 $sync = Invoke-Archive -CommandArgs @('sync-item', $root, $VideoUrl)
 $verify = Invoke-Archive -CommandArgs @('verify-item', $root, $VideoUrl)
 if ($sync['sync'] -ne 'PASS' -or $verify['verify'] -ne 'PASS' -or !$sync['item_key'] -or $verify['item_key'] -ne $sync['item_key']) { throw 'Exact requested item did not verify' }
@@ -109,7 +169,9 @@ if ($repeat['sync'] -ne 'PASS' -or $verifiedAgain['verify'] -ne 'PASS' -or $veri
 foreach ($path in $before.Keys) { if (!$after.ContainsKey($path) -or $before[$path] -ne $after[$path]) { throw "Rerun changed canonical media: $path" } }
 $evidence = @{
     schema_version=1; result='PASS'; started_at=$started; completed_at=[DateTime]::UtcNow.ToString('o');
-    source_commit=$ExpectedCommit; ci_run_id=$identity.run_id; item_key=$verify['item_key'];
+    repository=$ExpectedRepository; source_commit=$ExpectedCommit; ci_run_id=$ExpectedRunId;
+    release_tag=$ExpectedReleaseTag; artifact_sha256=$actualArtifactSha256; source_key=$binding['source_key']; item_key=$verify['item_key'];
+    entry_key=$binding['entry_key']; active_occurrences=[int]$binding['active_occurrences'];
     observed=[int]$scan['observed']; verified_media=$after; rerun='identical-canonical-media';
     manifest_sha256=(Get-FileHash -LiteralPath $sumPath -Algorithm SHA256).Hash.ToLowerInvariant()
 }

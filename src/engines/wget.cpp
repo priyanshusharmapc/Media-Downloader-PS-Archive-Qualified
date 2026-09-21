@@ -20,6 +20,7 @@
 #include "wget.h"
 #include "../utility.h"
 #include <QDir>
+#include <QUrl>
 
 const char * wget::testData()
 {
@@ -311,29 +312,37 @@ const QByteArray& wget::replaceUndesirableText( const QByteArray& data )
 	return data ;
 }
 
-void wget::setProxySetting( engines::engine::baseEngine::optionsEnvironment&,QStringList& e,const QString& s )
+void wget::applyProxySetting( engines::engine::baseEngine::optionsEnvironment& environment,QStringList& e,const QString& s )
 {
 	e.append( "-e" ) ;
-	e.append( "use_proxy=yes" ) ;	
+	e.append( "use_proxy=yes" ) ;
 
 	if( s.contains( "@" ) ){
+		const auto proxy = engines::proxySettings( s ).networkProxy() ;
+		QUrl url ;
+		url.setScheme( "http" ) ;
+		url.setHost( proxy.hostName() ) ;
+		url.setPort( static_cast< int >( proxy.port() ) ) ;
+		url.setUserName( proxy.user() ) ;
+		url.setPassword( proxy.password() ) ;
+		const auto encoded = url.toString( QUrl::FullyEncoded ) ;
 
-		auto m = engines::proxySettings( s ).networkProxy() ;
-
-		e.append( "-e" ) ;
-		e.append( "http_proxy=" + m.hostName() + ":" + QString::number( m.port() ) ) ;
-
-		e.append( "-e" ) ;
-		e.append( "https_proxy=" + m.hostName() + ":" + QString::number( m.port() ) ) ;
-
-		e.append( "--proxy-user=" + m.user() ) ;
-		e.append( "--proxy-password=" + m.password() ) ;
+		// Wget consumes the authenticated proxy through the child environment.
+		// Keeping credentials out of argv prevents disclosure through process
+		// listings; optionsEnvironment::update redacts the password from logs.
+		environment.add( "http_proxy",encoded ) ;
+		environment.add( "https_proxy",encoded ) ;
 	}else{
 		e.append( "-e" ) ;
 		e.append( "http_proxy=" + s ) ;
 		e.append( "-e" ) ;
 		e.append( "https_proxy=" + s ) ;
 	}
+}
+
+void wget::setProxySetting( engines::engine::baseEngine::optionsEnvironment& environment,QStringList& e,const QString& s )
+{
+	wget::applyProxySetting( environment,e,s ) ;
 }
 
 QString wget::updateTextOnCompleteDownlod( const QString& uiText,
@@ -508,6 +517,24 @@ wget::wgetFilter::~wgetFilter()
 {
 }
 
+static QByteArray wgetReportedFileName( QByteArray value )
+{
+	value = value.trimmed() ;
+
+	if( value.size() >= 2 && value.startsWith( "'" ) && value.endsWith( "'" ) ){
+		return value.mid( 1,value.size() - 2 ) ;
+	}
+
+	const QByteArray left = "‘" ;
+	const QByteArray right = "’" ;
+	if( value.size() >= left.size() + right.size() &&
+	    value.startsWith( left ) && value.endsWith( right ) ){
+		return value.mid( left.size(),value.size() - left.size() - right.size() ) ;
+	}
+
+	return value ;
+}
+
 const QByteArray& wget::wgetFilter::processWget1( const QByteArray& line,Logger::Data& e )
 {
 	if( m_title.isEmpty() || m_length.isEmpty() ){
@@ -520,11 +547,7 @@ const QByteArray& wget::wgetFilter::processWget1( const QByteArray& line,Logger:
 
 				if( it.startsWith( "Saving to: " ) ){
 
-					m_title = it.mid( 11 ) ;
-					m_title.replace( "‘","" ) ;
-					m_title.replace( "’","" ) ;
-					m_title.replace( "'","" ) ;
-					m_title.replace( "'","" ) ;
+					m_title = wgetReportedFileName( it.mid( 11 ) ) ;
 
 					break ;
 				}
@@ -701,12 +724,7 @@ void wget::wgetFilter::setwget2Title( const QByteArray& line,const QByteArray& m
 
 			if( m != -1 ){
 
-				auto s = it.mid( 7 ) ;
-
-				s.replace( "‘","" ) ;
-				s.replace( "’","" ) ;
-				s.replace( "'","" ) ;
-				s.replace( "'","" ) ;
+				auto s = wgetReportedFileName( it.mid( 7 ) ) ;
 
 				if( m_title != s ){
 

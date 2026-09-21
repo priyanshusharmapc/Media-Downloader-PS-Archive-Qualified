@@ -20,6 +20,9 @@
 #include "themes.h"
 
 #include <QJsonDocument>
+#include <QJsonParseError>
+#include <QSaveFile>
+#include <QDebug>
 
 #include "util.hpp"
 
@@ -166,10 +169,9 @@ void themes::setTheme( QApplication& app,const QJsonObject& obj ) const
 
 	auto s = obj.value( "QToolTipStyleSheet" ).toString() ;
 
-	if( !s.isEmpty() ){
-
-		app.setStyleSheet( s ) ;
-	}
+	// QApplication stylesheets are process-global persistent state. Applying
+	// an empty stylesheet is required to clear rules from the previous theme.
+	app.setStyleSheet( s ) ;
 }
 
 themes::JObject themes::baseTheme() const
@@ -248,6 +250,51 @@ QJsonObject themes::defaultLightTheme() const
 	return obj ;
 }
 
+namespace
+{
+bool validBuiltInThemeFile( const QString& path )
+{
+	QFile file( path ) ;
+	if( !file.open( QIODevice::ReadOnly ) ){
+		return false ;
+	}
+
+	QJsonParseError error ;
+	const auto doc = QJsonDocument::fromJson( file.readAll(),&error ) ;
+	return error.error == QJsonParseError::NoError && doc.isObject() && !doc.object().isEmpty() ;
+}
+
+bool writeBuiltInThemeAtomically( const QString& path,const QJsonObject& object )
+{
+	const auto payload = QJsonDocument( object ).toJson( QJsonDocument::Indented ) ;
+	QSaveFile file( path ) ;
+
+	// Built-in themes are compiled defaults, not recovery data. Never fall
+	// back to direct writes because a short/partial first write would become
+	// authoritative merely by leaving the destination path behind.
+	file.setDirectWriteFallback( false ) ;
+	if( !file.open( QIODevice::WriteOnly ) ||
+	    file.write( payload ) != payload.size() ||
+	    !file.commit() ){
+		file.cancelWriting() ;
+		qWarning() << "Failed to atomically persist built-in theme" << path << file.errorString() ;
+		return false ;
+	}
+	return true ;
+}
+
+void ensureBuiltInTheme( const QString& path,const QJsonObject& object )
+{
+	if( validBuiltInThemeFile( path ) ){
+		return ;
+	}
+
+	// Malformed/zero-length built-ins self-heal from the compiled canonical
+	// definition. QSaveFile preserves the previous bytes if replacement fails.
+	writeBuiltInThemeAtomically( path,object ) ;
+}
+}
+
 void themes::set( QApplication& app ) const
 {
 	if( !QFile::exists( m_themePath ) ){
@@ -256,32 +303,10 @@ void themes::set( QApplication& app ) const
 	}
 
 	auto defaultDarkThemePath = this->defaultDarkthemeFullPath() ;
-
-	if( !QFile::exists( defaultDarkThemePath ) ){
-
-		QFile f( defaultDarkThemePath ) ;
-
-		if( f.open( QIODevice::WriteOnly ) ){
-
-			QJsonDocument doc( this->defaultDarkTheme() ) ;
-
-			f.write( doc.toJson( QJsonDocument::Indented ) ) ;
-		}
-	}
+	ensureBuiltInTheme( defaultDarkThemePath,this->defaultDarkTheme() ) ;
 
 	auto defaultPureDarkThemePath = this->defaultPureDarkthemeFullPath() ;
-
-	if( !QFile::exists( defaultPureDarkThemePath ) ){
-
-		QFile f( defaultPureDarkThemePath ) ;
-
-		if( f.open( QIODevice::WriteOnly ) ){
-
-			QJsonDocument doc( this->defaultPureDarkTheme() ) ;
-
-			f.write( doc.toJson( QJsonDocument::Indented ) ) ;
-		}
-	}
+	ensureBuiltInTheme( defaultPureDarkThemePath,this->defaultPureDarkTheme() ) ;
 
 	if( this->usingThemes() ){
 
@@ -472,13 +497,17 @@ QColor themes::getColor( const QString& e,const QJsonObject& obj ) const
 
 void themes::updateThemes()
 {
-	auto s = QDir( m_themePath ).entryList( QDir::Filter::Files ) ;
+	// Only JSON files can be loaded by themeFullPath()/set(). Do not advertise
+	// unrelated editor backups, images or notes as selectable themes.
+	auto s = QDir( m_themePath ).entryList( { "*.json" },QDir::Filter::Files ) ;
 
 	s.removeOne( m_defaultDarkTheme + ".json" ) ;
 
 	for( auto& it : s ){
 
-		it.replace( ".json","" ) ;
+		// The name filter guarantees a terminal suffix, so remove only that
+		// suffix instead of replacing arbitrary ".json" text in the basename.
+		it.chop( 5 ) ;
 
 		m_strings.emplace_back( it,it ) ;
 	}

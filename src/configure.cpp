@@ -27,11 +27,15 @@
 #include "versionInfo.h"
 
 #include <array>
+#include <cmath>
 
 #include <QFileDialog>
 #include <QFile>
 #include <QDesktopServices>
 #include <QClipboard>
+#include <QSaveFile>
+#include <QMessageBox>
+#include <QLockFile>
 
 configure::configure( const Context& ctx ) :
 	m_ctx( ctx ),
@@ -122,48 +126,50 @@ configure::configure( const Context& ctx ) :
 
 	connect( m_ui.pbConfigureSaveEditOption,&QPushButton::clicked,[ this ](){
 
-		auto row = m_tableDefaultDownloadOptions.currentRow() ;
+		if( !m_editOptionEngine.isEmpty() && !m_editOptionIdentity.isEmpty() ){
 
-		if( row != -1 ){
+			const auto New = m_ui.textEditConfigureEditOption->toPlainText() ;
+			m_downloadEngineDefaultOptions.replace( m_editOptionIdentity,New ) ;
 
-			auto Old = m_tableDefaultDownloadOptions.item( row,1 ).text() ;
+			// Refresh only when the user is still viewing the captured engine.
+			// A switch to another backend must never redirect or repaint the edit
+			// as though it belonged to the new selection.
+			if( m_ui.cbConfigureEngines->currentText() == m_editOptionEngine ){
 
-			auto New = m_ui.textEditConfigureEditOption->toPlainText() ;
-
-			auto mm = m_ui.cbConfigureEngines->currentText() ;
-
-			m_downloadEngineDefaultOptions.replace( mm,Old,New ) ;
-
-			const auto& s = m_ctx.Engines().getEngineByName( mm ) ;
-
-			this->populateOptionsTable( s.value(),row ) ;
+				const auto& s = m_ctx.Engines().getEngineByName( m_editOptionEngine ) ;
+				if( s )this->populateOptionsTable( s.value() ) ;
+			}
 		}
 
+		m_editOptionEngine.clear() ;
+		m_editOptionIdentity = {} ;
 		this->setVisibilityEditConfigFeature( false ) ;
 	} ) ;
 
 	connect( m_ui.pbConfigureSaveEditOptionCancel,&QPushButton::clicked,[ this ](){
 
+		m_editOptionEngine.clear() ;
+		m_editOptionIdentity = {} ;
 		this->setVisibilityEditConfigFeature( false ) ;
 	} ) ;
 
-	connect( m_ui.pbOpenThemeFolder,&QPushButton::clicked,[ themesFolderPath ](){
+	connect( m_ui.pbOpenThemeFolder,&QPushButton::clicked,[ this,themesFolderPath ](){
 
-		QDesktopServices::openUrl( QUrl( "file:///" + themesFolderPath,QUrl::TolerantMode ) ) ;
+		m_settings.openUrl( themesFolderPath ) ;
 	} ) ;
 
 	connect( m_ui.pbOpenBinFolder,&QPushButton::clicked,[ this,themesFolderPath ](){
 
 		const auto& m = m_engines.engineDirPaths().binPath() ;
 
-		QDesktopServices::openUrl( QUrl( "file:///" + m,QUrl::TolerantMode ) ) ;
+		m_settings.openUrl( m ) ;
 	} ) ;
 
 	connect( m_ui.pbOpenExtensionFolder,&QPushButton::clicked,[ this,themesFolderPath ](){
 
 		const auto& m = m_engines.engineDirPaths().enginePath() ;
 
-		QDesktopServices::openUrl( QUrl( "file:///" + m,QUrl::TolerantMode ) ) ;
+		m_settings.openUrl( m ) ;
 	} ) ;
 
 	class scaleUi
@@ -184,6 +190,11 @@ configure::configure( const Context& ctx ) :
 			auto s = m_parent.m_settings.highDpiScalingFactorValue() ;
 
 			auto interval = m_parent.m_settings.highDpiScalingFactorInterval() ;
+			constexpr double minimumScaleFactor = 0.05 ;
+
+			if( !std::isfinite( interval ) || interval <= 0.0 ){
+				interval = minimumScaleFactor ;
+			}
 
 			if( m_action == scaleUi::action::up ){
 
@@ -194,6 +205,10 @@ configure::configure( const Context& ctx ) :
 				s -= interval ;
 			}else{
 				s = 1.0 ;
+			}
+
+			if( !std::isfinite( s ) || s < minimumScaleFactor ){
+				s = minimumScaleFactor ;
 			}
 
 			auto m = QString::number( s ) ;
@@ -390,9 +405,9 @@ configure::configure( const Context& ctx ) :
 
 			if( row != -1 ){
 
-				auto m = m_tableDefaultDownloadOptions.item( row,1 ).text() ;
-
-				m_ui.textEditConfigureEditOption->setText( m ) ;
+				m_editOptionEngine = m_ui.cbConfigureEngines->currentText() ;
+				m_editOptionIdentity = m_tableDefaultDownloadOptions.stuffAt( row ) ;
+				m_ui.textEditConfigureEditOption->setText( m_editOptionIdentity.value( "options" ).toString() ) ;
 
 				this->setVisibilityEditConfigFeature( true ) ;
 			}
@@ -441,7 +456,13 @@ configure::configure( const Context& ctx ) :
 		}
 	} ) ;
 
-	m_tablePresetOptions.connect( &QTableWidget::customContextMenuRequested,[ this ]( QPoint ){
+	m_tablePresetOptions.connect( &QTableWidget::customContextMenuRequested,[ this ]( QPoint point ){
+
+		// A context-menu request does not have to change QTableWidget's current
+		// item. Make the hit-tested cell authoritative before Copy/Edit actions.
+		if( auto * target = m_tablePresetOptions.get().itemAt( point ) ){
+			m_tablePresetOptions.get().setCurrentItem( target ) ;
+		}
 
 		QMenu m ;
 
@@ -810,24 +831,25 @@ void configure::confirmResetMakeVisible( bool e )
 
 void configure::setCookieSourceLabel( bool e )
 {
-	auto name = m_ui.cbConfigureEngines->currentText() ;
+	const auto name = m_ui.cbConfigureEngines->currentText() ;
+	const auto& engine = m_engines.getEngineByName( name ) ;
+	const auto enable = engine && !engine->cookieArgument().isEmpty() ;
 
+	// This field represents two different per-engine settings. Always reload
+	// the value that corresponds to the active source mode so switching engines
+	// cannot overwrite a valid cookie-file path with the browser-name setting.
 	if( e ){
 
-		auto m = m_settings.cookieBrowserName( name ) ;
-
-		m_ui.lineEditConfigureCookieBrowserName->setText( m ) ;
-
+		m_ui.lineEditConfigureCookieBrowserName->setText( m_settings.cookieBrowserName( name ) ) ;
 		m_ui.labelPathToCookieFile->setText( tr( "Name Of Web Browser To Get Cookies From" ) ) ;
 	}else{
-		auto m = m_settings.cookieBrowserTextFilePath( name ) ;
-
-		m_ui.lineEditConfigureCookieBrowserName->setText( m ) ;
-
+		m_ui.lineEditConfigureCookieBrowserName->setText( m_settings.cookieBrowserTextFilePath( name ) ) ;
 		m_ui.labelPathToCookieFile->setText( tr( "Set Path To Cookie File" ) ) ;
 	}
 
-	m_ui.pbConfigureSetPathToCookieFile->setEnabled( !e ) ;
+	m_ui.lineEditConfigureCookieBrowserName->setEnabled( enable ) ;
+	m_ui.cbCookieSource->setEnabled( enable ) ;
+	m_ui.pbConfigureSetPathToCookieFile->setEnabled( enable && !e ) ;
 }
 
 void configure::downloadExtension( const QString& name )
@@ -1023,12 +1045,30 @@ void configure::populateOptionsTable( const engines::engine& s,int selectRow )
 
 	m_ui.labelConfigureOptionsToAdd->setEnabled( enable ) ;
 
-	m_ui.lineEditConfigureTextEncoding->setText( m_settings.textEncoding( s.name() ) ) ;
+	const auto engineName = s.name() ;
+	const bool sameEncodingEngine = m_textEncodingEngine == engineName ;
 
+	if( !m_textEncodingEngine.isEmpty() && !sameEncodingEngine ){
+
+		m_settings.setTextEncoding( m_ui.lineEditConfigureTextEncoding->text(),m_textEncodingEngine ) ;
+	}
+
+	if( !sameEncodingEngine ){
+
+		m_ui.lineEditConfigureTextEncoding->setText( m_settings.textEncoding( engineName ) ) ;
+	}
+
+	m_textEncodingEngine = engineName ;
 	m_ui.lineEditConfigureTextEncoding->setEnabled( s.supportsTextEnconding() ) ;
 
 	m_tableDefaultDownloadOptions.clear() ;
 
+	// Reset engine-specific presentation before applying overrides for the
+	// newly selected engine. Deno must not leak hidden/visible state forward.
+	m_ui.lineEditConfigureTextEncoding->setVisible( true ) ;
+	m_ui.cbDenoEnableAutoDownload->setVisible( false ) ;
+	m_ui.labelConfigureTextEncoding->setVisible( true ) ;
+	m_ui.labelConfigureTextEncoding->setEnabled( s.supportsTextEnconding() || s.name() == "deno" ) ;
 	m_ui.labelConfigureTextEncoding->setText( tr( "Text Encoding" ) ) ;
 
 	m_ui.cbDenoEnableAutoDownload->setChecked( m_settings.denoEnableAutoDownload() ) ;
@@ -1083,7 +1123,9 @@ void configure::populateOptionsTable( const engines::engine& s,int selectRow )
 
 void configure::tabExited()
 {
-	//this->saveOptions() ;
+	if( !m_textEncodingEngine.isEmpty() ){
+		m_settings.setTextEncoding( m_ui.lineEditConfigureTextEncoding->text(),m_textEncodingEngine ) ;
+	}
 }
 
 void configure::updateEnginesList( const QStringList& e )
@@ -1336,6 +1378,7 @@ QMenu * configure::removeExtenion()
 		ac->setEnabled( false ) ;
 
 		m_ctx.TabManager().setDefaultEngines() ;
+		this->updateExtensionsRemoveList() ;
 	} ) ;
 
 	return m ;
@@ -1356,6 +1399,10 @@ void configure::addEngine( const QByteArray& d,const QString& n )
 
 		return ;
 	}
+
+	// Engine inventory changed successfully; rebuild the removal menu now so
+	// the newly installed plugin is removable without restarting Configure.
+	this->updateExtensionsRemoveList() ;
 
 	m_ctx.TabManager().basicDownloader().setAsActive() ;
 
@@ -1397,8 +1444,15 @@ void configure::addEngine( const QByteArray& d,const QString& n )
 
 void configure::saveOptions()
 {
-	m_downloadDefaultOptions.save() ;
-	m_downloadEngineDefaultOptions.save() ;
+	const auto defaultOptionsSaved = m_downloadDefaultOptions.save() ;
+	const auto engineDefaultsSaved = m_downloadEngineDefaultOptions.save() ;
+
+	if( !defaultOptionsSaved || !engineDefaultsSaved ){
+
+		QMessageBox::warning( &m_mainWindow,
+				      tr( "Save Failed" ),
+				      tr( "Default download options could not be saved. The previous file was preserved." ) ) ;
+	}
 
 	auto m = m_ui.cbConfigureShowMetaDataInBatchDownloader->isChecked() ;
 
@@ -1416,30 +1470,20 @@ void configure::saveOptions()
 	m_settings.setUseSystemEngine( m_ui.cbConfigureUseSystemEngine->isChecked() ) ;
 	auto s = m_ui.lineEditConfigureMaximuConcurrentDownloads->text() ;
 
-	if( s.isEmpty() ){
+	bool maxDownloadsOk = false ;
+	const auto maxDownloads = s.toInt( &maxDownloadsOk ) ;
 
-		m_settings.setMaxConcurrentDownloads( 4 ) ;
-	}else{
-		bool ok ;
-
-		auto m = s.toInt( &ok ) ;
-
-		if( ok ){
-
-			if( m == 0 ){
-
-				m_settings.setMaxConcurrentDownloads( 4 ) ;
-			}else{
-				m_settings.setMaxConcurrentDownloads( m ) ;
-			}
-		}
-	}
+	// Persist one well-defined positive value. Empty, malformed, overflowed,
+	// zero and negative text all fall back to the established default instead
+	// of leaving stale or wrapped concurrency state behind.
+	m_settings.setMaxConcurrentDownloads( maxDownloadsOk && maxDownloads > 0 ? maxDownloads : 4 ) ;
 
 	auto mm = m_ui.cbConfigureEngines->currentText() ;
 
 	auto e = m_ui.lineEditConfigureTextEncoding->text() ;
 
-	m_settings.setTextEncoding( e,mm ) ;
+	const auto encodingEngine = m_textEncodingEngine.isEmpty() ? mm : m_textEncodingEngine ;
+	m_settings.setTextEncoding( e,encodingEngine ) ;
 
 	auto b = m_ui.lineEditConfigureCookieBrowserName->text() ;
 
@@ -1521,14 +1565,9 @@ void configure::setEngineOptions( const QString& e,engineOptions tab )
 
 		auto _setUpDownloadOptions = [ & ](){
 
-			auto enable = !s->cookieArgument().isEmpty() ;
-
-			auto mm = m_settings.cookieBrowserName( s->name() ) ;
-
-			m_ui.lineEditConfigureCookieBrowserName->setText( mm ) ;
-			m_ui.lineEditConfigureCookieBrowserName->setEnabled( enable ) ;
-			m_ui.cbCookieSource->setEnabled( enable ) ;
-			m_ui.pbConfigureSetPathToCookieFile->setEnabled( enable ) ;
+			// Cookie-source refresh owns both the per-engine value and the
+			// source-specific enablement state.
+			this->setCookieSourceLabel( m_ui.cbCookieSource->isChecked() ) ;
 		} ;
 
 		if( tab == engineOptions::url ){
@@ -1569,7 +1608,12 @@ void configure::savePresetOptions()
 		}
 	}
 
-	m_presetOptions.save() ;
+	if( !m_presetOptions.save() ){
+
+		QMessageBox::warning( &m_mainWindow,
+				      tr( "Save Failed" ),
+				      tr( "Preset options could not be saved. The previous file was preserved." ) ) ;
+	}
 }
 
 void configure::showOptions()
@@ -1812,51 +1856,81 @@ configure::presetOptions::presetOptions( const Context& ctx,settings& ) :
 	QByteArray data ;
 
 	if( QFile::exists( m_path ) ){
-
 		QFile f( m_path ) ;
-
-		if( f.open( QIODevice::ReadOnly ) ){
-
-			data = f.readAll() ;
+		if( !f.open( QIODevice::ReadOnly ) ){
+			m_storeValid = false ;
+			return ;
 		}
+		m_baseline = f.readAll() ;
+		data = m_baseline ;
 	}else{
+		m_baseline.clear() ;
 		data = this->defaultData() ;
 	}
 
+	// Apply the existing compatibility migrations only to the in-memory
+	// representation. The raw baseline remains unchanged so save() can detect
+	// another process replacing the file after this instance loaded it.
 	std::array< const char *,8 > resolutions{ "144","240","360","480","720","1080","1440","2160" } ;
-
 	QByteArray a = "bestvideo[height=" ;
 	QByteArray b = "bestvideo[format_note*=" ;
-
 	for( const auto& it : resolutions ){
-
-		auto x = a + it + "]" ;
-		auto y = b + it + "p]" ;
-
-		data.replace( x,y ) ;
+		data.replace( a + it + "]",b + it + "p]" ) ;
 	}
+	data.replace(
+		"bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best",
+		"bestvideo[ext=mp4][vcodec^=av]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best" ) ;
 
-	auto aa = "bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best" ;
-	auto bb = "bestvideo[ext=mp4][vcodec^=av]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best" ;
-
-	data.replace( aa,bb ) ;
-
-	auto json = utility::jsonDoc( data ) ;
-
-	if( json.valid() ){
-
-		m_array = json.toArray() ;
+	QJsonParseError error ;
+	const auto doc = QJsonDocument::fromJson( data,&error ) ;
+	if( error.error == QJsonParseError::NoError && doc.isArray() ){
+		m_array = doc.array() ;
+	}else{
+		// Malformed persisted configuration is recovery evidence. Keep it
+		// immutable until the user explicitly resets this store.
+		m_storeValid = false ;
 	}
 }
 
-void configure::presetOptions::save()
+bool configure::presetOptions::save()
 {
-	QFile f( m_path ) ;
-
-	if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-		f.write( QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ) ;
+	if( !m_storeValid ){
+		return false ;
 	}
+
+	QLockFile lock( m_path + ".lock" ) ;
+	lock.setStaleLockTime( 30000 ) ;
+	if( !lock.tryLock( 10000 ) ){
+		return false ;
+	}
+
+	QByteArray current ;
+	if( QFile::exists( m_path ) ){
+		QFile existing( m_path ) ;
+		if( !existing.open( QIODevice::ReadOnly ) ){
+			return false ;
+		}
+		current = existing.readAll() ;
+	}
+
+	// Atomic replacement alone is not a transaction. Refuse a stale snapshot
+	// instead of silently erasing a valid edit committed by another instance.
+	if( current != m_baseline ){
+		return false ;
+	}
+
+	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
+	QSaveFile f( m_path ) ;
+	f.setDirectWriteFallback( false ) ;
+	if( !f.open( QIODevice::WriteOnly ) ||
+	    f.write( data ) != data.size() ||
+	    !f.commit() ){
+		f.cancelWriting() ;
+		return false ;
+	}
+
+	m_baseline = data ;
+	return true ;
 }
 
 void configure::presetOptions::clear()
@@ -1871,13 +1945,22 @@ void configure::presetOptions::clear()
 
 void configure::presetOptions::setDefaults()
 {
-	this->clear() ;
+	QByteArray current ;
+	if( QFile::exists( m_path ) ){
+		QFile existing( m_path ) ;
+		if( !existing.open( QIODevice::ReadOnly ) ){
+			m_storeValid = false ;
+			return ;
+		}
+		current = existing.readAll() ;
+	}
 
-	auto json = utility::jsonDoc( this->defaultData() ) ;
-
-	if( json.valid() ){
-
-		m_array = json.toArray() ;
+	QJsonParseError error ;
+	const auto doc = QJsonDocument::fromJson( this->defaultData(),&error ) ;
+	if( error.error == QJsonParseError::NoError && doc.isArray() ){
+		m_array = doc.array() ;
+		m_baseline = current ;
+		m_storeValid = true ;
 	}
 }
 
@@ -2044,30 +2127,63 @@ configure::presetEntry::presetEntry( const QString& ui,const QString& op,const Q
 configure::downloadDefaultOptions::downloadDefaultOptions( const Context& ctx,const QString& name ) :
 	m_path( ctx.Engines().engineDirPaths().dataPath( name ) )
 {
-	if( QFile::exists( m_path ) ){
+	if( !QFile::exists( m_path ) ){
+		m_baseline.clear() ;
+		return ;
+	}
 
-		QFile f( m_path ) ;
+	QFile f( m_path ) ;
+	if( !f.open( QIODevice::ReadOnly ) ){
+		m_storeValid = false ;
+		return ;
+	}
 
-		if( f.open( QIODevice::ReadOnly ) ){
-
-			auto json = utility::jsonDoc( f.readAll() ) ;
-
-			if( json.valid() ){
-
-				m_array = json.toArray() ;
-			}
-		}
+	m_baseline = f.readAll() ;
+	QJsonParseError error ;
+	const auto doc = QJsonDocument::fromJson( m_baseline,&error ) ;
+	if( error.error == QJsonParseError::NoError && doc.isArray() ){
+		m_array = doc.array() ;
+	}else{
+		m_storeValid = false ;
 	}
 }
 
-void configure::downloadDefaultOptions::save()
+bool configure::downloadDefaultOptions::save()
 {
-	QFile f( m_path ) ;
-
-	if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
-
-		f.write( QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ) ;
+	if( !m_storeValid ){
+		return false ;
 	}
+
+	QLockFile lock( m_path + ".lock" ) ;
+	lock.setStaleLockTime( 30000 ) ;
+	if( !lock.tryLock( 10000 ) ){
+		return false ;
+	}
+
+	QByteArray current ;
+	if( QFile::exists( m_path ) ){
+		QFile existing( m_path ) ;
+		if( !existing.open( QIODevice::ReadOnly ) ){
+			return false ;
+		}
+		current = existing.readAll() ;
+	}
+	if( current != m_baseline ){
+		return false ;
+	}
+
+	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
+	QSaveFile f( m_path ) ;
+	f.setDirectWriteFallback( false ) ;
+	if( !f.open( QIODevice::WriteOnly ) ||
+	    f.write( data ) != data.size() ||
+	    !f.commit() ){
+		f.cancelWriting() ;
+		return false ;
+	}
+
+	m_baseline = data ;
+	return true ;
 }
 
 void configure::setVisibilityEditConfigFeature( bool e )
@@ -2104,6 +2220,20 @@ void configure::downloadDefaultOptions::replace( const QString& engineName,
 		if( obj.engineName() == engineName && obj.opts() == oldOptions ){
 
 			m_array[ i ] = obj.replaceOptions( newOptions ) ;
+		}
+	}
+}
+
+void configure::downloadDefaultOptions::replace( const QJsonObject& oldObject,
+						 const QString& newOptions )
+{
+	for( int i = 0 ; i < m_array.size() ; i++ ){
+
+		const auto current = m_array[ i ].toObject() ;
+		if( current == oldObject ){
+
+			m_array[ i ] = qOpts( current ).replaceOptions( newOptions ) ;
+			break ;
 		}
 	}
 }

@@ -21,6 +21,7 @@
 #include "context.hpp"
 #include "tabmanager.h"
 #include "mainwindow.h"
+#include "archive/archiveprocess.h"
 
 versionInfo::versionInfo( Ui::MainWindow&,const Context& ctx ) :
 	m_ctx( ctx ),
@@ -423,7 +424,48 @@ void versionInfo::printVersion( versionInfo::printVinfo vInfo ) const
 
 	versionInfo::pVInfo v{ vInfo.move(),id,exe } ;
 
-	utils::qprocess::run( cmd.exe(),cmd.args(),mm,v.move(),this,&versionInfo::printVersionP ) ;
+	// Version probes are untrusted external processes. Give them the same
+	// bounded process-tree containment used by Archive tools instead of leaving
+	// the UI disabled indefinitely if a backend hangs.
+	const auto cancel = std::make_shared< std::atomic_bool >( false ) ;
+	QObject::connect( &m_ctx.mainWidget(),&QObject::destroyed,[ cancel ](){
+		cancel->store( true ) ;
+	} ) ;
+
+	struct probeTask
+	{
+		QString exe ;
+		QStringList args ;
+		std::shared_ptr< std::atomic_bool > cancel ;
+		std::function< void( archive::ProcessResult&& ) > done ;
+
+		archive::ProcessResult bg()
+		{
+			return archive::detail::runContainedProcess( exe,args,QString(),10000,cancel.get() ) ;
+		}
+		void fg( archive::ProcessResult&& result )
+		{
+			done( std::move( result ) ) ;
+		}
+	} ;
+
+	// probeTask stores the completion hook in std::function, so the hook must
+	// be copy-constructible. pVInfo is intentionally move-only; share exactly
+	// one instance across any std::function copies and consume it once when the
+	// guarded foreground callback runs.
+	auto state = std::make_shared< versionInfo::pVInfo >( v.move() ) ;
+	auto done = [ this,state ]( archive::ProcessResult&& result ) mutable {
+		const auto status = result.ok ? utils::qprocess::outPut::ExitStatus::NormalExit
+		                              : utils::qprocess::outPut::ExitStatus::Crashed ;
+		utils::qprocess::outPut output{
+			result.exitCode,status,result.standardOutput.toUtf8(),result.standardError.toUtf8()
+		} ;
+		this->printVersionP( state->move(),output ) ;
+	} ;
+
+	Q_UNUSED( mm )
+	utils::qthread::run( &m_ctx.mainWidget(),
+		probeTask{ cmd.exe(),cmd.args(),cancel,std::move( done ) } ) ;
 }
 
 void versionInfo::printVersionP( versionInfo::pVInfo pvInfo,const utils::qprocess::outPut& r ) const

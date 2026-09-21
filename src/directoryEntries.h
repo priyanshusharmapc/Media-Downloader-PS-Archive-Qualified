@@ -22,10 +22,13 @@
 #define DIRECTORY_ENTRIES_H
 
 #include <QString>
+#include <QByteArray>
 #include <QObject>
+#include <QtGlobal>
 
 #include <atomic>
 #include <vector>
+#include <memory>
 
 class directoryEntries
 {
@@ -33,9 +36,10 @@ private:
 	class entry
 	{
 	public:
-		entry( qint64 d,QString p,bool f ) :
+		entry( qint64 d,QString p,QByteArray nativeName,bool f ) :
 			m_dateCreated( d ),
 			m_path( std::move( p ) ),
+			m_nativeName( std::move( nativeName ) ),
 			m_folder( f )
 		{
 		}
@@ -51,9 +55,14 @@ private:
 		{
 			return m_dateCreated ;
 		}
+		const QByteArray& nativeName() const
+		{
+			return m_nativeName ;
+		}
 	private:
 		qint64 m_dateCreated ;
 		QString m_path ;
+		QByteArray m_nativeName ;
 		bool m_folder ;
 	} ;
 	class wrapper
@@ -72,6 +81,7 @@ private:
 	std::vector< directoryEntries::entry > m_folders ;
 	std::vector< directoryEntries::entry > m_files ;
 	std::vector< directoryEntries::wrapper > m_joined ;
+	std::vector< directoryEntries::wrapper > m_globalJoined ;
 public:
 	template< typename Function >
 	void forEachFile( Function function )
@@ -93,6 +103,8 @@ public:
 	{
 		m_folders.clear() ;
 		m_files.clear() ;
+		m_joined.clear() ;
+		m_globalJoined.clear() ;
 	}
 	void sortByDateAscending()
 	{
@@ -147,42 +159,75 @@ public:
 	{
 		std::sort( m_folders.begin(),m_folders.end(),s ) ;
 		std::sort( m_files.begin(),m_files.end(),s ) ;
+
+		// Keep a globally sorted mixed sequence as well. This is the model used
+		// when folder-first grouping is disabled.
+		m_joined.clear() ;
+		for( const auto& it : m_folders ){
+			m_joined.emplace_back( it ) ;
+		}
+		for( const auto& it : m_files ){
+			m_joined.emplace_back( it ) ;
+		}
+		std::sort( m_joined.begin(),m_joined.end(),[ & ]( const wrapper& lhs,const wrapper& rhs ){
+			return s( *lhs.operator->(),*rhs.operator->() ) ;
+		} ) ;
+
+		m_globalJoined = m_joined ;
 	}
-	void addFile( qint64 dateCreated,QString path )
+	void addFile( qint64 dateCreated,QString path,QByteArray nativeName = {} )
 	{
-		m_files.emplace_back( dateCreated,std::move( path ),false ) ;
+		m_files.emplace_back( dateCreated,std::move( path ),std::move( nativeName ),false ) ;
 	}
-	void addFolder( qint64 dateCreated,QString path )
+	void addFolder( qint64 dateCreated,QString path,QByteArray nativeName = {} )
 	{
-		m_folders.emplace_back( dateCreated,std::move( path ),true ) ;
+		m_folders.emplace_back( dateCreated,std::move( path ),std::move( nativeName ),true ) ;
 	}
 
 	class iter
 	{
+	private:
+		struct snapshot
+		{
+			QString displayName ;
+			QByteArray nativeName ;
+			ICON icon ;
+		} ;
 	public:
-		iter()
+		iter() = default ;
+		iter( const std::vector< directoryEntries::wrapper >& e,quint64 generation ) :
+			m_generation( generation ),
+			m_entries( std::make_shared< std::vector< snapshot > >() )
 		{
-		}
-		iter( const std::vector< directoryEntries::wrapper >& e ) :
-			m_entries( &e )
-		{
+			m_entries->reserve( e.size() ) ;
+			for( const auto& wrapper : e ){
+				const auto * item = wrapper.operator->() ;
+				m_entries->push_back( {
+					item->path(),
+					item->nativeName(),
+					item->isFolder() ? ICON::FOLDER : ICON::FILE
+				} ) ;
+			}
 		}
 		bool hasNext() const
 		{
-			return m_position < m_entries->size() ;
+			return m_entries && m_position < m_entries->size() ;
 		}
 		const QString& value() const
 		{
-			return m_entries->data()[ m_position ]->path() ;
+			return ( *m_entries )[ m_position ].displayName ;
+		}
+		const QByteArray& nativeName() const
+		{
+			return ( *m_entries )[ m_position ].nativeName ;
 		}
 		directoryEntries::ICON icon() const
 		{
-			if( m_entries->data()[ m_position ]->isFolder() ){
-
-				return directoryEntries::ICON::FOLDER ;
-			}else{
-				return directoryEntries::ICON::FILE ;
-			}
+			return ( *m_entries )[ m_position ].icon ;
+		}
+		quint64 generation() const
+		{
+			return m_generation ;
 		}
 		iter next() const
 		{
@@ -192,14 +237,17 @@ public:
 		}
 	private:
 		size_t m_position = 0 ;
-		const std::vector< directoryEntries::wrapper > * m_entries = nullptr ;
+		quint64 m_generation = 0 ;
+		// next() is emitted once per queued row. Share the immutable snapshot
+		// so advancing an iterator is O(1), not a full directory copy.
+		std::shared_ptr< std::vector< snapshot > > m_entries ;
 	} ;
 
 	void join( bool folderFirst )
 	{
-		m_joined.clear() ;
-
 		if( folderFirst ){
+
+			m_joined.clear() ;
 
 			for( const auto& it : m_folders ){
 
@@ -210,20 +258,17 @@ public:
 				m_joined.emplace_back( it ) ;
 			}
 		}else{
-			for( const auto& it : m_files ){
-
-				m_joined.emplace_back( it ) ;
-			}
-			for( const auto& it : m_folders ){
-
-				m_joined.emplace_back( it ) ;
-			}
+			// Restore the last globally sorted mixed sequence. This makes toggling
+			// folder grouping reversible without requiring another sort operation.
+			m_joined = m_globalJoined ;
 		}
 	}
 
-	directoryEntries::iter Iter()
+	directoryEntries::iter Iter( quint64 generation = 0 )
 	{
-		return { m_joined } ;
+		// Queue-safe iterators own an immutable snapshot. They never retain
+		// pointers into m_joined, which is replaced/reordered by later scans.
+		return { m_joined,generation } ;
 	}
 } ;
 
@@ -238,6 +283,21 @@ namespace directoryManager
 	void removeDirectoryContents( const QString&,std::atomic_bool& ) ;
 
 	void removeDirectory( const QString&,std::atomic_bool& ) ;
+
+#ifdef Q_OS_UNIX
+	// POSIX filenames are byte strings, not guaranteed UTF-8. Enumeration
+	// retains those bytes, while destructive operations re-resolve the path
+	// descriptor-relatively with O_NOFOLLOW at mutation time.
+	directoryEntries readAllNative( const QByteArray&,std::atomic_bool& ) ;
+	bool nativeDirectoryIsSafe( const QByteArray& root,const QByteArray& path ) ;
+	bool removeEntryNative( const QByteArray& root,const QByteArray& parent,
+				   const QByteArray& name,std::atomic_bool& ) ;
+	bool removeDirectoryContentsNative( const QByteArray& root,const QByteArray& path,
+					      std::atomic_bool& ) ;
+	QString renameEntryNative( const QByteArray& root,const QByteArray& parent,
+				  const QByteArray& oldName,const QString& newName,
+				  QByteArray& newNativeName ) ;
+#endif
 }
 
 #endif

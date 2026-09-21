@@ -142,14 +142,14 @@ public:
 			void run( const QString& exe,const QStringList& args ) const ;
 			QStringList setVLCoptions( const QStringList& m ) const ;
 			QStringList m_urls ;
-			const settings::mediaPlayer::PlayerOpts& m_playerOpts ;
+			settings::mediaPlayer::PlayerOpts m_playerOpts ;
 			Logger& m_logger ;
-			const QString& m_appDataPath ;
-			const QJsonObject& m_obj ;
+			QString m_appDataPath ;
+			QJsonObject m_obj ;
 			settings& m_settings ;
 		} ;
 
-		mediaPlayer( settings&,const std::vector< settings::mediaPlayer::PlayerOpts >&,Logger& ) ;
+		mediaPlayer( settings&,std::vector< settings::mediaPlayer::PlayerOpts >,Logger& ) ;
 		const std::vector< settings::mediaPlayer::PlayerOpts >& opts() const
 		{
 			return m_playerOpts ;
@@ -166,7 +166,7 @@ public:
 			return { urls,m_logger,opts,appDataPath,obj,m_settings } ;
 		}
 	private:
-		const std::vector< settings::mediaPlayer::PlayerOpts >& m_playerOpts ;
+		std::vector< settings::mediaPlayer::PlayerOpts > m_playerOpts ;
 		Logger& m_logger ;
 		settings& m_settings ;
 	} ;
@@ -316,6 +316,9 @@ public:
 	void setTabNumber( int ) ;
 	void saveMainWindowDimensions( const QRect& ) ;
 	void openUrl( const QString& ) ;
+#ifdef Q_OS_UNIX
+	void openUrl( const QByteArray& nativePath ) ;
+#endif
 	void setEnableLibraryTab( bool ) ;
 	void setMonitorClipboardUrl( bool,settings::tabName ) ;
 	void setShowMetaDataInBatchDownloader( bool ) ;
@@ -347,16 +350,15 @@ public:
 			}
 			const QStringList& args() const
 			{
-				return m_args ;
+				return *m_args ;
 			}
 			bool valid() const
 			{
-				return !m_args.isEmpty() ;
+				return !m_args->isEmpty() ;
 			}
 			void checkAvailability() const ;
 		private:
-			bool checkAvailability( const QStringList& ) const ;
-			mutable QStringList m_args ;
+			mutable std::shared_ptr< QStringList > m_args = std::make_shared< QStringList >() ;
 		} ;
 
 		const VLC& getVLC() const ;
@@ -507,6 +509,10 @@ private:
 		{
 			return m_portableVersion ;
 		}
+		bool runningUpdated() const
+		{
+			return m_runningUpdated ;
+		}
 		const QString& pathToOldUpdatedVersion() const
 		{
 			return m_pathToOldUpdatedVersion ;
@@ -517,7 +523,8 @@ private:
 		QString m_exe3PartyBinPath ;
 		QString m_defaultPortableVersionDownloadFolder ;
 		QString m_pathToOldUpdatedVersion ;
-		bool m_portableVersion ;
+		bool m_portableVersion = false ;
+		bool m_runningUpdated = false ;
 	} ;
 
 	bool m_EnableHighDpiScaling ;

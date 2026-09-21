@@ -60,11 +60,14 @@ QJsonObject quickjs::init( Logger& logger,const engines::enginePaths& enginePath
 
 	mainObj.insert( "Version","1" ) ;
 
-	mainObj.insert( "DownloadUrl","https://bellard.org/quickjs/binary_releases/LATEST.json" ) ;
+	// Upstream LATEST metadata does not publish a trusted SHA-256 for the
+	// selected archive. Do not offer an update that mandatory verification
+	// would have to reject.
+	mainObj.insert( "DownloadUrl","" ) ;
 
 	mainObj.insert( "DownloadUrlWin7","" ) ;
 
-	mainObj.insert( "AutoUpdate",true ) ;
+	mainObj.insert( "AutoUpdate",false ) ;
 
 	mainObj.insert( "Name","quickjs" ) ;
 
@@ -106,24 +109,38 @@ quickjs::~quickjs()
 
 QString quickjs::namePrefix()
 {
+	const utility::CPU cpu ;
+
+	// Bellard's native OS-specific QuickJS binary archives currently expose
+	// i686/x86_64 naming. ARM64 is packaged separately (Cosmopolitan), so do
+	// not silently install an x86_64 archive as though it were native ARM64.
+	if( cpu.aarch64() ){
+		return {} ;
+	}
+
 	QString platform = utility::platformIsWindows() ? "win" : "linux" ;
-	QString arch     = utility::CPU().x86_32() ? "-i686" : "-x86_64" ;
+	QString arch     = cpu.x86_32() ? "-i686" : "-x86_64" ;
 
 	return "quickjs-" + platform + arch ;
 }
 
 QString quickjs::urlFileName( const QString& version )
 {
-	return this->namePrefix() + "-" + version + ".zip" ;
+	const auto prefix = this->namePrefix() ;
+
+	return prefix.isEmpty() ? QString() : prefix + "-" + version + ".zip" ;
 }
 
 engines::metadata quickjs::parseJsonDataFromGitHub( const QJsonDocument& e )
 {
 	auto version = e.object().value( "version" ).toString() ;
+	const auto prefix = this->namePrefix() ;
 
-	if( !version.isEmpty() && ( utility::platformIsLinux() || utility::platformIsWindows() ) ){
+	if( !version.isEmpty() &&
+	    !prefix.isEmpty() &&
+	    ( utility::platformIsLinux() || utility::platformIsWindows() ) ){
 
-		auto fileName = QString( "%1-%2.zip" ).arg( this->namePrefix(),version ) ;
+		auto fileName = QString( "%1-%2.zip" ).arg( prefix,version ) ;
 		auto url      = "https://bellard.org/quickjs/binary_releases/" + fileName ;
 
 		QJsonObject obj ;
@@ -158,7 +175,9 @@ engines::engine::baseEngine::removeFilesStatus quickjs::removeFiles( const QStri
 
 bool quickjs::foundNetworkUrl( const QString& s )
 {
-	return s.startsWith( this->namePrefix() ) && s.endsWith( ".zip" ) ;
+	const auto prefix = this->namePrefix() ;
+
+	return !prefix.isEmpty() && s.startsWith( prefix ) && s.endsWith( ".zip" ) ;
 }
 
 QString quickjs::parseVersionInfo( const utils::qprocess::outPut& r )
@@ -177,9 +196,13 @@ QString quickjs::parseVersionInfo( const utils::qprocess::outPut& r )
 	}
 }
 
-quickjs::quickjs( const engines& e,const engines::engine& s,QJsonObject& ) :
+quickjs::quickjs( const engines& e,const engines::engine& s,QJsonObject& obj ) :
 	engines::engine::baseEngine( e.Settings(),s,e.processEnvironment() )
 {
+	// Persisted definitions from older builds may still carry the unsigned
+	// feed. Force the runtime view fail-closed until a trusted digest exists.
+	obj.insert( "DownloadUrl","" ) ;
+	obj.insert( "AutoUpdate",false ) ;
 	if( utility::platformisFlatPak() ){
 
 		auto path = e.Settings().flatpakIntance().appDataLocation() + "/bin/qjs" ;

@@ -19,18 +19,16 @@
 
 #include "deno.h"
 #include <QProcess>
+#include "../archive/archiveprocess.h"
 
 util::version deno::version( const QString& m )
 {
-	QProcess cmd ;
+	const auto result = archive::detail::runContainedProcess( m,{ "--version" },QString(),10000 ) ;
 
-	cmd.start( m,{ "-version" } ) ;
+	if( result.ok ){
 
-	cmd.waitForFinished() ;
-
-	if( cmd.exitCode() == 0 && cmd.exitStatus() == QProcess::ExitStatus::NormalExit ){
-
-		return cmd.readAllStandardOutput().replace( "deno","" ).trimmed() ;
+		auto output = result.standardOutput ;
+		return output.replace( "deno","" ).trimmed() ;
 	}else{
 		return {} ;
 	}
@@ -44,6 +42,7 @@ utility::addJsonCmd::entry::args deno::entryCmd( const QString& e )
 
 		data.emplace_back( "x86","deno.exe" ) ;
 		data.emplace_back( "amd64","deno.exe" ) ;
+		data.emplace_back( "aarch64","deno.exe" ) ;
 	}else{
 		data.emplace_back( "x86","deno" ) ;
 		data.emplace_back( "aarch64","deno" ) ;
@@ -74,7 +73,7 @@ void deno::init( settings&,Logger& logger,const engines::enginePaths& enginePath
 
 	json.done() ;
 
-	mainObj.insert( "Version","2" ) ;
+	mainObj.insert( "Version","3" ) ;
 
 	mainObj.insert( "DownloadUrl","https://api.github.com/repos/denoland/deno/releases/latest" ) ;
 
@@ -84,7 +83,7 @@ void deno::init( settings&,Logger& logger,const engines::enginePaths& enginePath
 
 	mainObj.insert( "Name","deno" ) ;
 
-	mainObj.insert( "VersionArgument","-version" ) ;
+	mainObj.insert( "VersionArgument","--version" ) ;
 
 	mainObj.insert( "BackendPath",utility::stringConstants::defaultPath() ) ;
 
@@ -106,7 +105,7 @@ void deno::remove( Logger&,const engines::enginePaths& enginePath )
 		QFile::remove( m ) ;
 	}
 
-	m = enginePath.binPath( "deno" ) ;
+	m = enginePath.binPath( utility::platformIsWindows() ? "deno.exe" : "deno" ) ;
 
 	if( QFile::exists( m ) ){
 
@@ -139,6 +138,10 @@ QString deno::urlFileName( const QString& )
 		if( cpu.x86_64() ){
 
 			return "deno-x86_64-pc-windows-msvc.zip" ;
+
+		}else if( cpu.aarch64() ){
+
+			return "deno-aarch64-pc-windows-msvc.zip" ;
 		}
 
 	}else if( utility::platformIsLinux() || utility::platformisFlatPak() ){

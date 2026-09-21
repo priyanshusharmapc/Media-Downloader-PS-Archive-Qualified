@@ -18,18 +18,28 @@
  */
 
 #include "settings.h"
+#include <QCoreApplication>
 #include "utility.h"
 #include "locale_path.h"
 #include "translator.h"
 #include "logger.h"
 #include "themes.h"
 #include "directoryEntries.h"
+#include "archive/archiveprocess.h"
 
+#include <cmath>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QTemporaryFile>
+#include <QGuiApplication>
+#include <QScreen>
 
 #include <cstring>
 #include <algorithm>
+#include <atomic>
+#include <memory>
 
 #include <QDesktopServices>
 
@@ -117,17 +127,44 @@ void settings::addToHistory( QSettings& settings,
 			     const QString& input,
 			     int max )
 {
-	if( !input.isEmpty() && !history.contains( input ) ){
+	bool changed = false ;
 
-		if( history.size() == max ){
+	// A non-positive limit means history is disabled. Persist the normalized
+	// empty state instead of attempting removeLast() on an empty list.
+	if( max <= 0 ){
 
-			history.removeLast() ;
+		if( !history.isEmpty() ){
+
+			history.clear() ;
+			settings.setValue( key,history ) ;
 		}
-
-		history.insert( 0,input ) ;
-
-		settings.setValue( key,history ) ;
+		return ;
 	}
+
+	// Older settings may already contain more entries than a newly reduced
+	// limit. Normalize them even when this input is empty or duplicated.
+	while( history.size() > max ){
+
+		history.removeLast() ;
+		changed = true ;
+	}
+
+	if( input.isEmpty() || history.contains( input ) ){
+
+		if( changed ){
+
+			settings.setValue( key,history ) ;
+		}
+		return ;
+	}
+
+	while( history.size() >= max ){
+
+		history.removeLast() ;
+	}
+
+	history.insert( 0,input ) ;
+	settings.setValue( key,history ) ;
 }
 
 void settings::addToplaylistRangeHistory( const QString& engineName,const QString& e )
@@ -353,23 +390,10 @@ QString settings::playlistRangeHistoryLastUsed( const QString& engineName )
 
 QString settings::gitHubDownloadUrl()
 {
-	QString channel = utility::runningGitVersion() ? "git" : "release" ;
-
-	auto m = this->getOption( "WindowsUpdateChannel",channel ) ;
-
-	const auto& e = utility::fakeRunningVersionOfMediaDownloader() ;
-
-	if( !e.isEmpty() ){
-
-		m = utility::runningGitVersion( e ) ? "git" : "release" ;
-	}
-
-	if( m.compare( "release",Qt::CaseInsensitive ) == 0 ){
-
-		return "https://api.github.com/repos/mhogomchungu/media-downloader/releases/latest" ;
-	}else{
-		return "https://api.github.com/repos/mhogomchungu/media-downloader-git/releases/latest" ;
-	}
+	// This publication is a distinct qualified fork. Application update
+	// discovery must remain inside the fork's release namespace; inheriting the
+	// upstream channel would silently replace the qualified product.
+	return "https://api.github.com/repos/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified/releases/latest" ;
 }
 
 std::unique_ptr< QSettings > settings::setConfig( const QString& path )
@@ -397,12 +421,13 @@ std::unique_ptr< QSettings > settings::init()
 			return this->setConfig( m_appDataPath ) ;
 		}else{
 			/*
-			 * Migrating to .ini config file
+			 * Migrating to .ini config file. The legacy store remains the
+			 * authoritative fallback until the destination is durably synced
+			 * and a fresh reader confirms every copied value.
 			 */
 			QSettings oldSettings( "media-downloader","media-downloader" ) ;
 
 			auto newSettings = this->setConfig( m_appDataPath ) ;
-
 			const auto keys = oldSettings.allKeys() ;
 
 			for( const auto& it : keys ){
@@ -410,9 +435,43 @@ std::unique_ptr< QSettings > settings::init()
 				newSettings->setValue( it,oldSettings.value( it ) ) ;
 			}
 
-			oldSettings.clear() ;
+			newSettings->sync() ;
 
-			return newSettings ;
+			bool migrationVerified = newSettings->status() == QSettings::NoError ;
+
+			if( migrationVerified ){
+
+				QSettings verify( newSettings->fileName(),QSettings::IniFormat ) ;
+				verify.sync() ;
+
+				migrationVerified = verify.status() == QSettings::NoError ;
+
+				for( const auto& it : keys ){
+
+					if( !migrationVerified || verify.value( it ) != oldSettings.value( it ) ){
+
+						migrationVerified = false ;
+						break ;
+					}
+				}
+			}
+
+			if( migrationVerified ){
+
+				// Cleanup is a separate finalization step. If clearing the
+				// legacy backend itself fails, the durable new copy still wins.
+				oldSettings.clear() ;
+				oldSettings.sync() ;
+				return newSettings ;
+			}
+
+			// Do not let a failed/partial destination shadow the intact legacy
+			// settings on the next launch. Continue this session on legacy too.
+			const auto failedPath = newSettings->fileName() ;
+			newSettings.reset() ;
+			QFile::remove( failedPath ) ;
+
+			return std::make_unique< QSettings >( "media-downloader","media-downloader" ) ;
 		}
 	}
 }
@@ -505,6 +564,10 @@ settings::settings( const utility::cliArguments& args ) :
 
 void settings::openUrl( const QString& e )
 {
+	if( e.trimmed().isEmpty() ){
+		return ;
+	}
+
 	auto m = QUrl::fromLocalFile( e ) ;
 
 	if( m_MdScaleFactor.isEmpty() ){
@@ -524,9 +587,58 @@ void settings::openUrl( const QString& e )
 	}
 }
 
+#ifdef Q_OS_UNIX
+void settings::openUrl( const QByteArray& nativePath )
+{
+	if( nativePath.isEmpty() || nativePath.indexOf( '\0' ) >= 0 ){
+		return ;
+	}
+
+	// QUrl can retain percent-encoded filesystem octets even when they are not
+	// valid UTF-8. This lets the desktop opener address the exact POSIX inode
+	// selected by Library instead of a QString reconstruction of its name.
+	static const char hex[] = "0123456789ABCDEF" ;
+	QByteArray encoded( "file://" ) ;
+	for( const auto byte : nativePath ){
+		const auto value = static_cast< unsigned char >( byte ) ;
+		const bool unreserved =
+			( value >= 'A' && value <= 'Z' ) ||
+			( value >= 'a' && value <= 'z' ) ||
+			( value >= '0' && value <= '9' ) ||
+			value == '/' || value == '-' || value == '_' || value == '.' || value == '~' ;
+		if( unreserved ){
+			encoded.append( static_cast< char >( value ) ) ;
+		}else{
+			encoded.append( '%' ) ;
+			encoded.append( hex[ value >> 4 ] ) ;
+			encoded.append( hex[ value & 0x0f ] ) ;
+		}
+	}
+
+	const auto url = QUrl::fromEncoded( encoded,QUrl::StrictMode ) ;
+	if( !url.isValid() ){
+		return ;
+	}
+
+	if( m_MdScaleFactor.isEmpty() ){
+		QDesktopServices::openUrl( url ) ;
+	}else{
+		if( m_defaultScaleFactor.isEmpty() ){
+			qunsetenv( "QT_SCALE_FACTOR" ) ;
+		}else{
+			qputenv( "QT_SCALE_FACTOR",m_defaultScaleFactor ) ;
+		}
+		QDesktopServices::openUrl( url ) ;
+		qputenv( "QT_SCALE_FACTOR",m_MdScaleFactor ) ;
+	}
+}
+#endif
+
 settings::~settings()
 {
-	this->clearFlatPakTemps() ;
+	// Flatpak handoff playlists are intentionally leased beyond this process.
+	// Stale handoffs are reclaimed on a later startup instead of being deleted
+	// while a detached desktop-launched player may still be opening them.
 }
 
 QSettings& settings::bk()
@@ -536,38 +648,30 @@ QSettings& settings::bk()
 
 void settings::init_done()
 {
-	class meaw
-	{
-	public:
-		meaw( settings& s ) : m_parent( s )
-		{
-		}
-		void bg()
-		{
-			if( utility::platformIsWindows() ){
+	if( utility::platformIsWindows() ){
 
-				const auto& m = m_parent.m_options.pathToOldUpdatedVersion() ;
+		const auto candidate = m_options.pathToOldUpdatedVersion() ;
+		const auto configPath = m_options.dataPath() ;
+		const auto runningUpdated = m_options.runningUpdated() ;
+		const auto currentExecutable = QCoreApplication::applicationFilePath() ;
 
-				if( !m.isEmpty() ){
-
-					QDir( m ).removeRecursively() ;
-				}
-
-			}else if( utility::platformisFlatPak() ){
-
-				m_parent.clearFlatPakTemps() ;
-
-				m_parent.flatpakIntance().getVLC().checkAvailability() ;
+		// Cleanup runs in the background, but captures only immutable values.
+		// Never retain settings& beyond MainWindow shutdown.
+		utils::qthread::run( [ candidate,configPath,runningUpdated,currentExecutable ](){
+			if( utility::isOwnedUpdateCleanupPath( configPath,candidate,runningUpdated,currentExecutable ) ){
+				QDir( candidate ).removeRecursively() ;
 			}
-		}
-		void fg()
-		{
-		}
-	private:
-		settings& m_parent ;
-	} ;
+		} ) ;
+		return ;
+	}
 
-	utils::qthread::run( meaw( *this ) ) ;
+	if( utility::platformisFlatPak() ){
+
+		// These operations depend on live settings/runtime objects, so keep them
+		// within the owning settings lifetime instead of detaching raw references.
+		this->clearFlatPakTemps() ;
+		this->flatpakIntance().getVLC().checkAvailability() ;
+	}
 }
 
 void settings::setTabNumber( int s )
@@ -602,9 +706,38 @@ void settings::setMainWindowDimensions( QWidget * s )
 			auto w = m[ 2 ].toInt() ;
 			auto h = m[ 3 ].toInt() ;
 
-			s->setGeometry( { x,y,w,h } ) ;
+			QRect restored( x,y,w,h ) ;
+			bool visible = false ;
 
-			s->setFixedSize( s->size() ) ;
+			for( auto * screen : QGuiApplication::screens() ){
+
+				const auto intersection = screen->availableGeometry().intersected( restored ) ;
+
+				if( intersection.width() >= 50 && intersection.height() >= 50 ){
+					visible = true ;
+					break ;
+				}
+			}
+
+			if( !visible ){
+
+				if( auto * screen = QGuiApplication::primaryScreen() ){
+
+					const auto available = screen->availableGeometry() ;
+					restored.setSize( restored.size().boundedTo( available.size() ) ) ;
+
+					if( restored.width() <= 0 || restored.height() <= 0 ){
+						restored.setSize( s->size().boundedTo( available.size() ) ) ;
+					}
+
+					restored.moveCenter( available.center() ) ;
+				}
+			}
+
+			s->setGeometry( restored ) ;
+
+			// Restored geometry is only a starting rectangle. Do not convert it
+		// into equal minimum/maximum bounds; the main window must remain resizable.
 		}
 	}
 }
@@ -621,9 +754,12 @@ int settings::maxLoggerProcesses()
 
 size_t settings::maxConcurrentDownloads()
 {
-	auto m = this->getOption( "MaxConcurrentDownloads",4 ) ;
+	const auto m = this->getOption( "MaxConcurrentDownloads",4 ) ;
 
-	return static_cast< size_t >( m ) ;
+	// Settings may outlive older buggy builds, so validate persisted state at
+	// the read boundary as well. Never cast a non-positive signed value to the
+	// unsigned concurrency type.
+	return static_cast< size_t >( m > 0 ? m : 4 ) ;
 }
 
 bool settings::darkTheme()
@@ -671,7 +807,9 @@ const QString& settings::windowsOnlyDefaultPortableVersionDownloadFolder()
 
 void settings::setMaxConcurrentDownloads( int s )
 {
-	m_settings.setValue( "MaxConcurrentDownloads",s ) ;
+	// Keep invalid values out of persistent state even when this setter is
+	// called outside Configure.
+	m_settings.setValue( "MaxConcurrentDownloads",s > 0 ? s : 4 ) ;
 }
 
 void settings::setDownloadFolder( const QString& m )
@@ -688,46 +826,51 @@ void settings::setDownloadFolder( const QString& m )
 
 QString settings::downloadFolder( const QString& defaultPath,settings::sLogger& logger )
 {
-	auto mediaDownloaderCWD = utility::stringConstants::mediaDownloaderCWD() ;
-
-	auto mm = utility::stringConstants::mediaDownloaderDefaultDownloadPath() ;
+	const auto mediaDownloaderCWD = utility::stringConstants::mediaDownloaderCWD() ;
+	const auto defaultMarker = utility::stringConstants::mediaDownloaderDefaultDownloadPath() ;
 
 	if( !m_settings.contains( "DownloadFolder" ) ){
 
-		m_settings.setValue( "DownloadFolder",mm ) ;
+		// Only genuine first-use initialization writes the default identity.
+		m_settings.setValue( "DownloadFolder",defaultMarker ) ;
 	}
 
-	auto m = m_settings.value( "DownloadFolder" ).toString() ;
+	const auto configured = m_settings.value( "DownloadFolder" ).toString() ;
+	auto resolved = configured ;
 
-	if( m.startsWith( mediaDownloaderCWD ) ){
+	if( resolved.startsWith( mediaDownloaderCWD ) ){
 
-		m.replace( mediaDownloaderCWD,QDir::currentPath() ) ;
+		resolved.replace( mediaDownloaderCWD,QDir::currentPath() ) ;
 
-	}else if( m.startsWith( mm ) ){
+	}else if( resolved.startsWith( defaultMarker ) ){
 
-		m.replace( mm,defaultPath ) ;
+		resolved.replace( defaultMarker,defaultPath ) ;
 	}
 
-	if( QFile::exists( m ) ){
+	if( QFileInfo( resolved ).isDir() ){
 
-		return m ;
-	}else{
-		auto id = utility::loggerID() ;
+		return resolved ;
+	}
 
-		auto s = utility::barLine() ;
+	// The built-in default is application-owned fallback state, so creating it
+	// is safe. An explicitly configured removable/network/cloud path is user
+	// identity and must never be overwritten merely because it is offline.
+	QDir().mkpath( defaultPath ) ;
 
-		logger.add( s,id ) ;
-
-		logger.add( QObject::tr( "Resetting download folder to default" ).toUtf8(),id ) ;
-
-		logger.add( s,id ) ;
-
-		m_settings.setValue( "DownloadFolder",mm ) ;
-
-		QDir().mkpath( defaultPath ) ;
+	if( configured.startsWith( defaultMarker ) ){
 
 		return defaultPath ;
 	}
+
+	auto id = utility::loggerID() ;
+	const auto bar = utility::barLine() ;
+	logger.add( bar,id ) ;
+	logger.add( QObject::tr( "Configured download folder is unavailable; using the default folder for this operation" ).toUtf8(),id ) ;
+	logger.add( bar,id ) ;
+
+	// Operational fallback is intentionally non-persistent. Once the configured
+	// destination becomes available again, the next lookup uses it automatically.
+	return defaultPath ;
 }
 
 QString settings::downloadFolderImp( settings::sLogger logger )
@@ -789,7 +932,9 @@ void settings::setAutoDownloadWhenAddedInBatchDownloader( bool e )
 
 bool settings::showVersionInfoAndAutoDownloadUpdates()
 {
-	return this->getOption( "ShowVersionInfoAndAutoDownloadUpdates",true ) ;
+	// Application self-update is opt-in for the qualified fork. Backend/tool
+	// update preferences are separate settings and are not changed here.
+	return this->getOption( "ShowVersionInfoAndAutoDownloadUpdates",false ) ;
 }
 
 bool settings::showLocalAndLatestVersionInformation()
@@ -888,7 +1033,11 @@ int settings::stringTruncationSize()
 
 int settings::historySize()
 {
-	return this->getOption( "HistorySize",10 ) ;
+	const auto size = this->getOption( "HistorySize",10 ) ;
+
+	// Invalid negative persisted values disable history instead of flowing into
+	// unsafe list operations.
+	return size > 0 ? size : 0 ;
 }
 
 QString settings::thumbnailTabName( const QString& s, settings::tabName e )
@@ -930,10 +1079,10 @@ void settings::setOpenWith( const QString& e )
 }
 
 settings::mediaPlayer settings::openWith( Logger& logger )
-{	
-	static auto s = this->openWith() ;
-
-	return { *this,s,logger } ;
+{
+	// Player discovery and the persisted custom Open With setting are mutable
+	// during a process lifetime. Return a fresh, self-owned snapshot per menu.
+	return { *this,this->openWith(),logger } ;
 }
 
 std::vector< settings::mediaPlayer::PlayerOpts > settings::openWith()
@@ -1068,13 +1217,12 @@ void settings::setHighDpiScalingFactorValue( double m )
 double settings::highDpiScalingFactorValue()
 {
 	auto m = this->getOption( "HighDpiScalingFactorValue",1.0 ) ;
+	constexpr double minimumScaleFactor = 0.05 ;
 
-	if( m == 0.0 ){
-
-		return 1.0 ;
-	}else{
-		return m ;
-	}
+	// Zero/negative persisted values are invalid scale factors. Reset is an
+	// explicit UI action that stores 1.0, so invalid values clamp to the
+	// supported minimum instead of masquerading as a reset.
+	return !std::isfinite( m ) || m < minimumScaleFactor ? minimumScaleFactor : m ;
 }
 
 double settings::highDpiScalingFactorInterval()
@@ -1225,6 +1373,12 @@ void settings::runCommandOnSuccessfulDownload( const QString& s,
 
 		auto args = util::splitPreserveQuotes( m ) ;
 
+		// Legacy/manual settings may contain only whitespace. Validate the
+		// tokenized command, not the raw QString, before indexing element 0.
+		if( args.isEmpty() || args.at( 0 ).trimmed().isEmpty() ){
+			return ;
+		}
+
 		auto exe = args.at( 0 ) ;
 
 		args.replace( 0,s ) ;
@@ -1308,13 +1462,21 @@ void settings::clearFlatPakTemps()
 {
 	if( utility::platformisFlatPak() ){
 
-		auto ee = m_appDataPath + "tmp" ;
+		const auto root = QDir( m_appDataPath ).filePath( "tmp" ) ;
+		const auto now = QDateTime::currentDateTimeUtc() ;
+		const qint64 leaseSeconds = 24 * 60 * 60 ;
 
-		directoryManager::readAll( ee ).forEachFile( [ & ]( const QString& e ){
+		directoryManager::readAll( root ).forEachFile( [ & ]( const QString& name ){
 
-			if( e.endsWith( ".m3u8" ) ){
+			if( !name.endsWith( ".m3u8" ) ){
+				return ;
+			}
 
-				QFile::remove( ee + "/" + e ) ;
+			const auto path = QDir( root ).filePath( name ) ;
+			const QFileInfo info( path ) ;
+			if( info.exists() &&
+			    info.lastModified().toUTC().secsTo( now ) >= leaseSeconds ){
+				QFile::remove( path ) ;
 			}
 		} ) ;
 	}
@@ -1329,27 +1491,29 @@ QString settings::windowsDimensions( const QString& window )
 
 QString settings::localizationLanguage()
 {
-	auto path = this->localizationLanguagePath() ;
+	const auto path = this->localizationLanguagePath() ;
+	const auto available = [ & ]( const QString& language ){
+		return language == "en_US" || QFile::exists( path + "/" + language + ".qm" ) ;
+	} ;
 
-	auto name = QLocale::system().name() ;
-
-	if( name.isEmpty() ){
-
-		return this->getOption( "Language",QString( "en_US" ) ) ;
-
-	}else if( QFile::exists( path + "/" + name + ".qm" ) ){
-
-		return this->getOption( "Language",name ) ;
-	}else{
-		auto m = util::split( name,"_" ).at( 0 ) ;
-
-		if( QFile::exists( path + "/" + m + ".qm" ) ){
-
-			return this->getOption( "Language",m ) ;
-		}else{
-			return this->getOption( "Language",QString( "en_US" ) ) ;
-		}
+	const auto persisted = this->getOption( "Language",QString() ) ;
+	if( !persisted.isEmpty() && available( persisted ) ){
+		return persisted ;
 	}
+
+	auto fallback = QLocale::system().name() ;
+	if( fallback.isEmpty() || !available( fallback ) ){
+		const auto parts = util::split( fallback,"_" ) ;
+		fallback = parts.isEmpty() ? QString() : parts.at( 0 ) ;
+	}
+	if( fallback.isEmpty() || !available( fallback ) ){
+		fallback = "en_US" ;
+	}
+
+	// Keep persisted settings aligned with the language that can actually be
+	// loaded, so Configure never advertises a missing translation as active.
+	m_settings.setValue( "Language",fallback ) ;
+	return fallback ;
 }
 
 bool settings::portableVersion()
@@ -1357,13 +1521,14 @@ bool settings::portableVersion()
 	return m_options.portableVersion() ;
 }
 
-settings::options::options( const utility::cliArguments& args,const QString& appPath )
+settings::options::options( const utility::cliArguments& args,const QString& appPath ) :
+	m_runningUpdated( args.runningUpdated() )
 {
 	if( utility::platformIsWindows() ){
 
 		m_exePath = utility::windowsApplicationDirPath() ;
 
-		if( args.runningUpdated() ){
+		if( m_runningUpdated ){
 
 			m_pathToOldUpdatedVersion = args.pathToOldUpdatedVersion() ;
 
@@ -1478,9 +1643,9 @@ QByteArray settings::proxySettings::proxyAddress() const
 }
 
 settings::mediaPlayer::mediaPlayer( settings& e,
-				   const std::vector< settings::mediaPlayer::PlayerOpts >& s,
+				   std::vector< settings::mediaPlayer::PlayerOpts > s,
 				   Logger& logger ) :
-	m_playerOpts( s ),
+	m_playerOpts( std::move( s ) ),
 	m_logger( logger ),
 	m_settings( e )
 {
@@ -1524,26 +1689,24 @@ QByteArray settings::hash( quint64 i,const QString& s )
 
 QString settings::tmpFile( const QString& e,const QString& s )
 {
-	QString m ;
+	Q_UNUSED( s )
 
-	for( quint64 i = 0 ; i < 100 ; i++ ){
-
-		m = "tmp/" + this->hash( i,s ) + ".m3u8" ;
-
-		if( e.endsWith( "/" ) ){
-
-			m = e + m ;
-		}else{
-			m = e + "/" + m ;
-		}
-
-		if( !QFile::exists( m ) ){
-
-			break ;
-		}
+	const auto tmpRoot = QDir( e ).filePath( "tmp" ) ;
+	if( !QDir().mkpath( tmpRoot ) ){
+		return {} ;
 	}
 
-	return m ;
+	// QTemporaryFile performs an exclusive create, so multiple supported
+	// application instances can never reserve the same external-player handoff.
+	QTemporaryFile file( QDir( tmpRoot ).filePath( "handoff-XXXXXX.m3u8" ) ) ;
+	file.setAutoRemove( false ) ;
+	if( !file.open() ){
+		return {} ;
+	}
+
+	const auto path = file.fileName() ;
+	file.close() ;
+	return path ;
 }
 
 QStringList settings::mediaPlayer::action::setVLCoptions( const QStringList& m ) const
@@ -1591,28 +1754,41 @@ void settings::mediaPlayer::action::operator()() const
 			}
 		}else{
 			auto urls = m_urls.join( "\n" ) ;
+			const auto m = m_settings.tmpFile( m_appDataPath,urls ) ;
+			if( m.isEmpty() ){
+				this->logError() ;
+				return ;
+			}
 
-			auto m = m_settings.tmpFile( m_appDataPath,urls ) ;
+			bool durationOk = false ;
+			const auto durationValue = m_obj.value( "duration" ).toString().toLongLong( &durationOk ) ;
+			auto duration = durationOk && durationValue >= 0 ? QByteArray::number( durationValue ) : QByteArray( "0" ) ;
+			auto title    = m_obj.value( "title" ).toString().toUtf8() ;
 
-			QFile ff( m ) ;
+			// EXTINF metadata is line-oriented. Provider-controlled title text
+			// must never terminate the metadata line and inject another URL or
+			// playlist directive into the desktop handoff.
+			title.replace( '\r',' ' ) ;
+			title.replace( '\n',' ' ) ;
 
-			if( ff.open( QIODevice::WriteOnly ) ){
+			QByteArray payload = "#EXTM3U\n\n" ;
+			if( duration != "0" && !title.isEmpty() && title != "NA" ){
+				payload += "#EXTINF:" + duration + ", " + title + "\n" ;
+			}
+			payload += urls.toUtf8() + "\n" ;
 
-				auto duration = m_obj.value( "duration" ).toString().toUtf8() ;
-				auto title    = m_obj.value( "title" ).toString().toUtf8() ;
+			QSaveFile out( m ) ;
+			if( !out.open( QIODevice::WriteOnly ) ||
+			    out.write( payload ) != payload.size() ||
+			    !out.commit() ){
+				QFile::remove( m ) ;
+				this->logError() ;
+				return ;
+			}
 
-				QByteArray aa = "#EXTM3U\n\n" ;
-
-				if( duration != "0" && !title.contains( "NA" ) ){
-
-					aa += "#EXTINF:" + duration + ", " + title + "\n" ;
-				}
-
-				ff.write( aa + urls.toUtf8() + "\n" ) ;
-
-				ff.close() ;
-
-				QDesktopServices::openUrl( QUrl::fromLocalFile( m ) ) ;
+			if( !QDesktopServices::openUrl( QUrl::fromLocalFile( m ) ) ){
+				QFile::remove( m ) ;
+				this->logError() ;
 			}
 		}
 
@@ -1682,26 +1858,46 @@ const settings::flatpakRuntimeOptions::VLC& settings::flatpakRuntimeOptions::get
 
 void settings::flatpakRuntimeOptions::VLC::checkAvailability() const
 {
-	if( this->checkAvailability( { "--host","vlc" } ) ){
-
-		this->checkAvailability( { "--host","flatpak","run","org.videolan.VLC" } ) ;
+	const auto context = QCoreApplication::instance() ;
+	if( context == nullptr ){
+		return ;
 	}
-}
 
-bool settings::flatpakRuntimeOptions::VLC::checkAvailability( const QStringList& e ) const
-{
-	QProcess exe ;
+	const auto cancel = std::make_shared< std::atomic_bool >( false ) ;
+	QObject::connect( context,&QObject::destroyed,[ cancel ](){ cancel->store( true ) ; } ) ;
 
-	exe.start( "flatpak-spawn",e + QStringList{ "--version" } ) ;
+	class probe
+	{
+	public:
+		probe( std::shared_ptr< QStringList > target,std::shared_ptr< std::atomic_bool > cancel ) :
+			m_target( std::move( target ) ),m_cancel( std::move( cancel ) )
+		{
+		}
+		QStringList bg()
+		{
+			const QList< QStringList > candidates{
+				{ "--host","vlc" },
+				{ "--host","flatpak","run","org.videolan.VLC" }
+			} ;
+			for( const auto& candidate : candidates ){
+				const auto result = archive::detail::runContainedProcess(
+					"flatpak-spawn",candidate + QStringList{ "--version" },
+					QString(),5000,m_cancel.get() ) ;
+				if( result.ok ){
+					return candidate ;
+				}
+				if( m_cancel->load() )break ;
+			}
+			return {} ;
+		}
+		void fg( QStringList&& args )
+		{
+			*m_target = std::move( args ) ;
+		}
+	private:
+		std::shared_ptr< QStringList > m_target ;
+		std::shared_ptr< std::atomic_bool > m_cancel ;
+	} ;
 
-	exe.waitForFinished() ;
-
-	if( exe.exitCode() == 0 && exe.exitStatus() == QProcess::ExitStatus::NormalExit ){
-
-		m_args = e ;
-
-		return false ;
-	}else{
-		return true ;
-	}
+	utils::qthread::run( context,probe( m_args,cancel ) ) ;
 }

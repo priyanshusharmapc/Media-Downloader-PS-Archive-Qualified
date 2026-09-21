@@ -12,6 +12,7 @@
 
 #include <functional>
 #include <memory>
+#include <atomic>
 
 namespace archive
 {
@@ -19,6 +20,13 @@ struct RuntimeConfig
 {
     QString archiveRoot;
     QString appDir;
+    // Qualified/default execution is sealed to package-owned tools. System PATH
+    // is available only to callers that explicitly opt into development mode.
+    bool allowSystemTools = false;
+    // Optional operation-lifetime cancellation. ArchiveTab sets this only for
+    // application shutdown; the user-facing "Stop After Current" contract
+    // remains queue-level and does not tear down a healthy current item.
+    const std::atomic_bool* cancelRequested = nullptr;
 };
 
 struct Representation
@@ -27,6 +35,9 @@ struct Representation
     QString path;
     QString origin;
     QString verifiedAt;
+    QString verifiedSha256;
+    qint64 verifiedSize = -1;
+    QString verificationProfile;
     QString error;
 };
 
@@ -84,9 +95,14 @@ struct Snapshot
     QVector<PlaylistItem> items;
 };
 
+// Authoritative state and generated reports have different commit boundaries.
+// A report failure never makes a completed registry/history transaction unsafe
+// to count as committed, nor is it permission to replay that transaction.
 struct ReconcileSummary
 {
     bool committed = false;
+    bool projectionsCurrent = false;
+    QString projectionWarning;
     bool completeSnapshot = false;
     int observed = 0;
     int active = 0;
@@ -168,7 +184,10 @@ class Store
 public:
     explicit Store(Paths paths);
     const Paths& paths() const;
-    bool initialize(QString* error = nullptr);
+    // recoverStaleRunning is true only at an operation boundary that has
+    // exclusive ownership of a newly acquired Archive lock. Nested operations
+    // must pass false so a live worker can never be relabelled as interrupted.
+    bool initialize(QString* error = nullptr,bool recoverStaleRunning = true);
     QVector<Source> loadSources(QString* error = nullptr) const;
     bool saveSources(const QVector<Source>& sources,QString* error = nullptr) const;
     QVector<CanonicalItem> loadCanonicalItems(QString* error = nullptr) const;
@@ -179,13 +198,19 @@ public:
     bool appendHistory(const QString& sourceKey,const QJsonObject& event,QString* error = nullptr) const;
     bool writeAllProjections(QString* error = nullptr) const;
     bool writeProjections(const QString& sourceKey,QString* error = nullptr) const;
-    bool updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error = nullptr);
+    bool updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error = nullptr,
+                              const QString& metadataPath = {});
+    bool beginRepresentationBatch(QString* error = nullptr);
+    bool commitRepresentationBatch(QString* error = nullptr);
+    void cancelRepresentationBatch();
     bool updateCanonicalMetadata(const QString& itemKey,const QString& title,const QString& uploader,
                                  const QString& availability,const QString& originalUrl,QString* error = nullptr);
     ReconcileSummary reconcile(Source& source,const Snapshot& snapshot,ActivityLogger* logger = nullptr);
     bool writeReceipt(const QString& packageDir,const QJsonObject& receipt,QString* error = nullptr) const;
 private:
     Paths m_paths;
+    bool m_representationBatchActive = false;
+    QVector<CanonicalItem> m_representationBatchItems;
 };
 
 class ToolResolver
@@ -228,12 +253,15 @@ class MediaExecutor
 {
 public:
     MediaExecutor(RuntimeConfig config,Store& store,ActivityLogger& logger);
-    bool syncItem(const CanonicalItem& item,bool wantVideo,bool wantAudio,QString* error = nullptr);
+    bool syncItem(const CanonicalItem& item,bool wantVideo,bool wantAudio,QString* error = nullptr,bool rebuildProjections = true);
     bool syncItems(const QVector<CanonicalItem>& items,const std::function<bool()>& shouldStop,
                    QStringList* failures = nullptr);
 private:
     ProcessResult run(const QString& program,const QStringList& args,const QString& purpose) const;
     QString findExistingById(const QString& relativeDir,const QString& id,const QStringList& extensions) const;
+    QString findAttemptById(const QString& relativeDir,const QString& id,const QString& attempt,const QStringList& extensions) const;
+    bool mediaBindingValid(const QString& relativePath,const QString& providerId,const QString& kind) const;
+    bool writeMediaBinding(const QString& relativePath,const CanonicalItem& item,const QString& kind,QString* error) const;
     bool downloadVideo(const CanonicalItem& item,QString* error);
     bool downloadAudio(const CanonicalItem& item,QString* error);
     RuntimeConfig m_config;
@@ -248,9 +276,16 @@ class RecoveryImporter
 public:
     RecoveryImporter(RuntimeConfig config,Store& store,ActivityLogger& logger);
     ValidationResult validate(const QString& packageDir) const;
-    bool ingest(const QString& packageDir,QString* error = nullptr);
-    int ingestPending(QStringList* failures = nullptr,const std::function<bool()>& shouldStop = {});
+    // Accept one direct Pending package under the archive lock. True means the
+    // media, canonical state, receipt and Accepted move committed. A subsequent
+    // report rebuild failure is a warning, not a retryable admission failure.
+    // False preserves the existing failure/recovery contract through error.
+    bool ingest(const QString& packageDir,QString* error = nullptr,QString* projectionWarning = nullptr);
+    // Count durable acceptances. Append pre-commit failures and post-commit
+    // warnings separately, so callers never label an Accepted package Pending.
+    int ingestPending(QStringList* failures = nullptr,const std::function<bool()>& shouldStop = {},QStringList* warnings = nullptr);
 private:
+    ValidationResult validateSnapshot(const QString& packageDir,const QByteArray& manifestBytes) const;
     bool normalizeVideo(const QString& input,const QString& output,QString* error) const;
     bool normalizeAudio(const QString& input,const QString& output,QString* error) const;
     RuntimeConfig m_config;
@@ -271,10 +306,14 @@ public:
     bool tryLock(int timeoutMs = 0);
     void unlock();
     QString errorString() const;
+    // True only when this SyncLock created the process/file lock rather than
+    // joining a same-thread lock already owned by a surrounding operation.
+    bool acquiredFreshly() const;
 private:
     Paths m_paths;
     std::shared_ptr<ArchiveLockState> m_lock;
     QString m_error;
+    bool m_acquiredFreshly = false;
 };
 
 QString videoIdFromUrl(const QString& url);

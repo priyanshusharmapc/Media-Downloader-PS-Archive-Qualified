@@ -59,7 +59,11 @@ public:
 			title( obj.value( "title" ).toString() ),
 			engineName( obj.value( "engineName" ).toString() ),
 			downloadOptions( obj.value( "downloadOptions" ).toString() ),
-			downloadExtraOptions( obj.value( "downloadExtraOptions" ).toString() )
+			downloadExtraOptions( obj.value( "downloadExtraOptions" ).toString() ),
+			subtitle( obj.value( "subtitle" ).toString() ),
+			timeInterval( obj.value( "timeInterval" ).toString() ),
+			chapters( obj.value( "chapters" ).toString() ),
+			splitByChapters( obj.value( "splitByChapters" ).toBool() )
 		{
 			auto m = obj.value( "duration" ).toString() ;
 
@@ -105,6 +109,10 @@ public:
 		QString engineName ;
 		QString downloadOptions ;
 		QString downloadExtraOptions ;
+		QString subtitle ;
+		QString timeInterval ;
+		QString chapters ;
+		bool splitByChapters = false ;
 	} ;
 	Items() = default ;
 	Items( const Items::entry& s )
@@ -388,7 +396,7 @@ private:
 		       tableWidget& table,
 		       Ui::MainWindow& ui,
 		       const utility::MediaEntry& media ) ;
-	void showThumbnail( const engines::engine&,int,const QString& url ) ;
+	void showThumbnail( const engines::engine&,int,const QString& url,const QString& identity ) ;
 	class networkCtx ;
 	void networkResult( const networkCtx&,const utils::network::reply& ) ;
 	void showMetaDataSlot( ItemEntries ) ;
@@ -403,8 +411,10 @@ private:
 				m_parent( p ),
 				m_engine( engine ),
 				m_index( index ),
-				m_event( e.move() )
+				m_event( e.move() ),
+				m_downloadFolder( p.m_ctx.Settings().downloadFolder() )
 			{
+				m_parent.m_table.setDownloadFolder( m_index,m_downloadFolder ) ;
 				m_event.whenCreated() ;
 			}
 			bool addData( const QByteArray& e )
@@ -446,7 +456,7 @@ private:
 			}
 			QString downloadFolder()
 			{
-				return m_parent.m_ctx.Settings().downloadFolder() ;
+				return m_downloadFolder ;
 			}
 			events move()
 			{
@@ -457,6 +467,7 @@ private:
 			const engines::engine& m_engine ;
 			int m_index ;
 			Event m_event ;
+			QString m_downloadFolder ;
 		} ;
 
 		auto updater = [ this,index ]( const QByteArray& e ){
@@ -714,8 +725,8 @@ private:
 	class networkCtx
 	{
 	public:
-		networkCtx( const utility::MediaEntry& e,int index ) :
-			m_media( e ),m_index( index )
+		networkCtx( const utility::MediaEntry& e,int index,QString identity ) :
+			m_media( e ),m_index( index ),m_identity( std::move( identity ) )
 		{
 		}
 		networkCtx move()
@@ -730,9 +741,14 @@ private:
 		{
 			return std::move( m_media ) ;
 		}
+		const QString& identity() const
+		{
+			return m_identity ;
+		}
 	private:
 		mutable utility::MediaEntry m_media ;
 		int m_index ;
+		QString m_identity ;
 	} ;
 
 	const Context& m_ctx ;
@@ -747,6 +763,10 @@ private:
 	QLineEdit m_lineEdit ;
 	QPixmap m_defaultVideoThumbnail ;
 	batchdownloader::listType m_listType ;
+	// Stable chooser ownership. Selection changes must not redirect an open
+	// media-options/subtitle panel to another batch row.
+	int m_listTargetRow = -1 ;
+	QString m_listTargetUrl ;
 	utility::Terminator m_terminator ;
 	widgetOverMainTable m_widgetOverMainTable ;
 	QByteArray m_downloadingComments ;

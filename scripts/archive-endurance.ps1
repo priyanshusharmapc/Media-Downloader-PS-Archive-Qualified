@@ -8,8 +8,10 @@ param(
     [int]$DurationMinutes = 60,
     [string]$PlanPath,
     [string]$BasePackageRoot,
-    [string]$ExpectedCommit,
-    [string]$ExpectedCiRun,
+    [Parameter(Mandatory=$true)][string]$ExpectedCommit,
+    [Parameter(Mandatory=$true)][string]$ExpectedCiRun,
+    [string[]]$AllowedOverlayPath = @(),
+    [string[]]$AllowedOverlaySha256 = @(),
     [switch]$SkipPreflight,
     [string]$OutputJson
 )
@@ -39,9 +41,93 @@ function Assert-PackageSeal([string]$path){
     $listed=@{};$mismatches=@();$missing=@();foreach($entry in $entries){$listed[$entry.Path]=$true;$file=Join-Path $path ($entry.Path.Replace('/','\'));if(!(Test-Path -LiteralPath $file -PathType Leaf)){$missing+=$entry.Path}elseif((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entry.Expected){$mismatches+=$entry.Path}}
     $unsealed=@();foreach($file in Get-ChildItem -LiteralPath $path -Recurse -File -Force){$relative=$file.FullName.Substring($path.Length+1).Replace('\','/');if($relative -ne 'SHA256SUMS.txt' -and !$listed.ContainsKey($relative)){$unsealed+=$relative}}
     if(($missing.Count -gt 0) -or ($mismatches.Count -gt 0) -or ($unsealed.Count -gt 0)){throw "Base package seal invalid: missing=$($missing.Count) mismatches=$($mismatches.Count) unsealed=$($unsealed.Count)"}
-    return [ordered]@{root=$path;commit=$identity.commit;ciRunId=[string]$identity.run_id;manifestEntries=$entries.Count;manifestSha256=(Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant();unsealed=$unsealed}
+    return [ordered]@{root=$path;commit=$identity.commit;ciRunId=[string]$identity.run_id;manifestEntries=$entries.Count;manifestSha256=(Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant();unsealed=$unsealed;entries=$entries}
 }
+
+function Assert-ExecutionPackage([string]$base,[string]$execution,$seal,[string[]]$allowedOverlay,[string[]]$allowedOverlaySha256){
+    # Every sealed file remains immutable. Overlay additions require both an
+    # explicit relative path and an independently supplied SHA-256 digest.
+    $listed=@{}
+    foreach($entry in $seal.entries){
+        $listed[[string]$entry.Path]=[string]$entry.Expected
+    }
+
+    $overlayHashes=@{}
+    foreach($spec in $allowedOverlaySha256){
+        if([string]::IsNullOrWhiteSpace($spec)){continue}
+        $separator=$spec.LastIndexOf('=')
+        if($separator -le 0){throw "Overlay SHA-256 must use relative/path=<sha256>: $spec"}
+        $relative=$spec.Substring(0,$separator).Replace('\','/').TrimStart('/')
+        $expected=$spec.Substring($separator+1).ToLowerInvariant()
+        if($expected -notmatch '^[0-9a-f]{64}$'){throw "Invalid overlay SHA-256 for $relative"}
+        $overlayHashes[$relative]=$expected
+    }
+
+    $allowed=@{}
+    foreach($item in $allowedOverlay){
+        if([string]::IsNullOrWhiteSpace($item)){continue}
+        $relative=$item.Replace('\','/').TrimStart('/')
+        if($relative.Contains('../') -or $relative -eq '..'){throw "Unsafe allowed overlay path: $item"}
+        if($listed.ContainsKey($relative)){throw "Allowed overlay cannot replace sealed package path: $relative"}
+        if(!$overlayHashes.ContainsKey($relative)){throw "Allowed overlay is missing expected SHA-256: $relative"}
+        $allowed[$relative]=$true
+    }
+    foreach($relative in $overlayHashes.Keys){
+        if(!$allowed.ContainsKey($relative)){throw "Overlay SHA-256 supplied for undeclared path: $relative"}
+    }
+
+    $differences=@()
+    foreach($entry in $seal.entries){
+        $relative=[string]$entry.Path
+        $file=Join-Path $execution ($relative.Replace('/','\'))
+        if(!(Test-Path -LiteralPath $file -PathType Leaf)){
+            $differences+="missing:$relative"
+            continue
+        }
+        $actual=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        if($actual -ne [string]$entry.Expected){$differences+="modified:$relative"}
+    }
+
+    foreach($relative in $allowed.Keys){
+        $file=Join-Path $execution ($relative.Replace('/','\'))
+        if(!(Test-Path -LiteralPath $file -PathType Leaf)){
+            $differences+="missing-overlay:$relative"
+            continue
+        }
+        $actual=(Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        if($actual -ne [string]$overlayHashes[$relative]){$differences+="overlay-hash-mismatch:$relative"}
+    }
+
+    foreach($file in Get-ChildItem -LiteralPath $execution -Recurse -File -Force){
+        $relative=$file.FullName.Substring($execution.Length+1).Replace('\','/')
+        if($relative -eq 'SHA256SUMS.txt'){continue}
+        if(!$listed.ContainsKey($relative) -and !$allowed.ContainsKey($relative)){
+            $differences+="unsealed:$relative"
+        }
+    }
+
+    if($differences.Count -gt 0){
+        throw "Execution package differs from sealed base outside declared overlay: $($differences -join ', ')"
+    }
+
+    $cliRelative='archive-cli.exe'
+    if(!$listed.ContainsKey($cliRelative)){throw "Sealed package manifest does not contain archive-cli.exe"}
+    $cliPath=Join-Path $execution $cliRelative
+    $actualCli=(Get-FileHash -LiteralPath $cliPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $expectedCli=[string]$listed[$cliRelative]
+    if($actualCli -ne $expectedCli){throw "Executed archive-cli.exe does not match sealed package"}
+
+    return [ordered]@{
+        root=$execution
+        allowedOverlay=@($allowed.Keys | Sort-Object)
+        overlaySha256=$overlayHashes
+        expectedArchiveCliSha256=$expectedCli
+        archiveCliSha256=$actualCli
+    }
+}
+
 $packageSeal=Assert-PackageSeal $basePackage
+$executionSeal=Assert-ExecutionPackage $basePackage ([IO.Path]::GetFullPath($PackageRoot)) $packageSeal $AllowedOverlayPath $AllowedOverlaySha256
 $packageFfmpeg=Join-Path $PackageRoot '3rdParty\ffmpeg\bin'
 if(Test-Path -LiteralPath $packageFfmpeg -PathType Container){$env:PATH=$packageFfmpeg+';'+$env:PATH}
 
@@ -107,14 +193,17 @@ $report=[ordered]@{
     preflightSkipped=[bool]$SkipPreflight
     preflightReason=if($SkipPreflight){'deliberate fake-provider overlay; exact sealed base package was manifest-validated and preflighted separately'}else{$null}
     packageSeal=$packageSeal
+    executionSeal=$executionSeal
     basePackageRoot=$basePackage
     packageRoot=[IO.Path]::GetFullPath($PackageRoot)
+    expectedCommit=$ExpectedCommit
+    expectedCiRun=[string]$ExpectedCiRun
     media_hashes=$baseline
     media_changes=$mediaChanges
     max_media_count=$maxMediaCount
     temp_entries=$tempEntries
     transaction_journal_present=$journal
-    pass=($failures.Count -eq 0 -and (Get-Date)-ge $deadline -and !$journal -and $packageSeal.manifestEntries -gt 0)
+    pass=($failures.Count -eq 0 -and (Get-Date)-ge $deadline -and !$journal -and $packageSeal.manifestEntries -gt 0 -and $executionSeal.archiveCliSha256)
 }
 $report|ConvertTo-Json -Depth 10|Set-Content -LiteralPath $OutputJson -Encoding UTF8
 if(!$report.pass){throw "Endurance failed or ended early: $OutputJson"}

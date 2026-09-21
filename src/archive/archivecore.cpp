@@ -1,5 +1,6 @@
 #include "archivecore.h"
 #include "archivesafety.h"
+#include "archiveprocess.h"
 #include <QMutex>
 #include <QMutexLocker>
 #include <QUuid>
@@ -25,6 +26,7 @@
 #include <QUrlQuery>
 
 #include <algorithm>
+#include <limits>
 
 namespace archive
 {
@@ -96,6 +98,9 @@ QJsonObject repToJson(const Representation& r)
     if(!r.path.isEmpty()) o["path"]=r.path;
     if(!r.origin.isEmpty()) o["origin"]=r.origin;
     if(!r.verifiedAt.isEmpty()) o["verified_at"]=r.verifiedAt;
+    if(!r.verifiedSha256.isEmpty()) o["verified_sha256"]=r.verifiedSha256;
+    if(r.verifiedSize>=0) o["verified_size"]=static_cast<double>(r.verifiedSize);
+    if(!r.verificationProfile.isEmpty()) o["verification_profile"]=r.verificationProfile;
     if(!r.error.isEmpty()) o["error"]=r.error;
     return o;
 }
@@ -107,6 +112,15 @@ Representation repFromJson(const QJsonObject& o)
     r.path=o.value("path").toString();
     r.origin=o.value("origin").toString();
     r.verifiedAt=o.value("verified_at").toString();
+    r.verifiedSha256=o.value("verified_sha256").toString().toLower();
+    const auto persistedSize=o.value("verified_size");
+    if(persistedSize.isDouble()){
+        const auto n=persistedSize.toDouble();
+        constexpr double qint64ExclusiveUpper=9223372036854775808.0;
+        if(std::isfinite(n)&&n>=0&&std::floor(n)==n&&n<qint64ExclusiveUpper)
+            r.verifiedSize=static_cast<qint64>(n);
+    }
+    r.verificationProfile=o.value("verification_profile").toString();
     r.error=o.value("error").toString();
     return r;
 }
@@ -204,6 +218,30 @@ bool isUnavailable(const QString& a)
     return a=="deleted"||a=="private"||a=="unavailable"||a=="login_required"||a=="members_only"||a=="geo_blocked"||a=="copyright_blocked";
 }
 
+bool isSourceAccessible(const QString& availability)
+{
+    // Revival requires positive provider evidence. Discovery normalizes all
+    // ordinary accessible states (including unlisted) to "public"; unknown or
+    // future/unrecognized tokens must not clear external-recovery state.
+    return availability=="public";
+}
+
+void updateRecoveryStatus(CanonicalItem& item)
+{
+    const bool incomplete=item.video.state!="complete" || item.audio.state!="complete";
+
+    if(!incomplete){
+        item.recoveryStatus="not_required";
+    }else if(isUnavailable(item.availability)){
+        item.recoveryStatus="unrecovered";
+    }else if(isSourceAccessible(item.availability)){
+        // External recovery is no longer required when the ordinary provider
+        // source is positively accessible again. Missing representations are
+        // regular Sync work, not stale missing.csv recovery work.
+        item.recoveryStatus="not_required";
+    }
+}
+
 bool isTransientText(QString s)
 {
     s=s.toLower();
@@ -237,41 +275,10 @@ bool copyResource(const QString& resource,const QString& destination,QString* er
     return atomicWrite(destination,bytes,error);
 }
 
-ProcessResult runProcess(const QString& program,const QStringList& args,const QString& cwd,int timeoutMs)
+ProcessResult runProcess(const QString& program,const QStringList& args,const QString& cwd,int timeoutMs,
+                         const std::atomic_bool* cancelRequested=nullptr)
 {
-    ProcessResult r;
-    if(program.isEmpty()){r.error="Required executable was not found";return r;}
-    QProcess process;if(!cwd.isEmpty())process.setWorkingDirectory(cwd);
-    process.setProcessChannelMode(QProcess::SeparateChannels);process.start(program,args);
-    if(!process.waitForStarted(10000)){r.error=process.errorString();return r;}
-    process.closeWriteChannel();
-    QByteArray output,errors;QElapsedTimer timer;timer.start();bool overflow=false,timedOut=false;
-    const auto drain=[&]{
-        const auto chunk=process.readAllStandardOutput();
-        if(output.size()+chunk.size()>64*1024*1024)overflow=true;else output+=chunk;
-        errors+=process.readAllStandardError();
-        if(errors.size()>256*1024)errors=QByteArray("WARNING: earlier diagnostic output truncated\n")+errors.right(256*1024-64);
-    };
-    while(process.state()!=QProcess::NotRunning){
-        process.waitForReadyRead(100);drain();
-        timedOut=timer.elapsed()>timeoutMs;
-        if(overflow||timedOut){
-#ifdef Q_OS_WIN
-            const auto pid=process.processId();
-            if(pid>0){
-                QProcess killer;killer.start("taskkill",{"/PID",QString::number(pid),"/T","/F"});
-                killer.waitForFinished(5000);
-            }else process.kill();
-#else
-            process.kill();
-#endif
-            process.waitForFinished(5000);break;
-        }
-    }
-    drain();r.standardOutput=QString::fromUtf8(output);r.standardError=QString::fromUtf8(errors);
-    if(overflow||timedOut){r.error=overflow?"Process output exceeded the safety limit":"Process timed out";return r;}
-    r.exitCode=process.exitCode();r.ok=process.exitStatus()==QProcess::NormalExit&&r.exitCode==0;
-    if(!r.ok)r.error=QString("Process exited with code %1").arg(r.exitCode);return r;
+    return detail::runContainedProcess(program,args,cwd,timeoutMs,cancelRequested);
 }
 
 QJsonObject historyEvent(const QString& event,const QString& itemKey,const QJsonObject& detail={})
@@ -294,6 +301,38 @@ void appendYtRuntimeArgs(QStringList& args,const ToolResolver& tools)
     if(!ffmpeg.isEmpty()) args << "--ffmpeg-location" << QFileInfo(ffmpeg).absolutePath();
     const auto deno=tools.deno();
     if(!deno.isEmpty()) args << "--js-runtimes" << ("deno:"+deno);
+}
+
+bool validateExternalToolStatePaths(const Paths& paths,const QStringList& relativePaths,QString* error)
+{
+    // External tools open these deterministic files themselves, so validate
+    // the exact leaf and all of its ancestors immediately before every child
+    // launch. This mirrors the fail-closed link/reparse policy used by the
+    // application's own writers.
+    for(const auto& relative:relativePaths){
+        if(!paths.isSafeRelative(relative))
+            return detail::reject(error,"Unsafe external-tool state path refused: "+relative);
+    }
+    return true;
+}
+
+bool validateOwnedStagingTree(const Paths& paths,const QString& root,QString* error)
+{
+    const auto rootRelative=paths.relativeToRoot(root);
+    if(rootRelative.isEmpty()||!paths.isSafeRelative(rootRelative)||!QFileInfo(root).isDir())
+        return detail::reject(error,"Unsafe external-tool staging directory refused: "+root);
+
+    QDirIterator entries(root,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,
+                         QDirIterator::Subdirectories);
+    while(entries.hasNext()){
+        const auto path=entries.next();
+        const auto info=entries.fileInfo();
+        const auto relative=paths.relativeToRoot(path);
+        if(relative.isEmpty()||!paths.isSafeRelative(relative)||info.isSymLink()||
+           (!info.isFile()&&!info.isDir()))
+            return detail::reject(error,"External tool produced an unsafe staging entry: "+path);
+    }
+    return true;
 }
 
 QStringList withoutDownloadArchive(QStringList args)
@@ -467,21 +506,340 @@ void ActivityLogger::prune()
 Store::Store(Paths paths):m_paths(std::move(paths)){}
 const Paths& Store::paths() const{return m_paths;}
 
-bool Store::initialize(QString* error)
+namespace {
+const QString archiveIdentityRelative="State/ArchiveMode/archive-identity.json";
+
+QByteArray newArchiveIdentity(const QString& origin)
+{
+    return QJsonDocument(QJsonObject{{"schema_version",1},{"format","mdps-archive"},
+        {"archive_id",QUuid::createUuid().toString(QUuid::WithoutBraces)},
+        {"created_at",nowIso()},{"admitted_from",origin}}).toJson();
+}
+
+// Called only while the archive writer lock is owned. The lock/layout helpers
+// create empty structural directories before admission, so those exact paths
+// and this invocation's lock are allowed. Every other managed entry, including
+// hidden files and empty historical subdirectories, is evidence, not garbage.
+// Unrelated root-level files (for example operator notes or an application
+// installation) are left alone. No existing payload is removed or rewritten.
+bool freshArchiveRoot(const Paths& paths,QString* error)
+{
+    const QSet<QString> emptyLayout={"Video","Audio","Metadata","Temp","Playlists", "State",
+        "State/ArchiveMode","State/ArchiveMode/Schemas","State/ArchiveMode/Imports",
+        "State/ArchiveMode/Imports/Pending","State/ArchiveMode/Imports/Accepted",
+        "State/ArchiveMode/Imports/Rejected","State/ArchiveMode/Logs",
+        "State/ArchiveMode/Logs/Activity","State/ArchiveMode/Logs/Diagnostic"};
+    const QSet<QString> managedRoots={"video","audio","metadata","temp","playlists","state"};
+    const QSet<QString> rootEvidence={"archive_agent.md","catalog.csv","missing.csv",
+        "video.m3u8","audio.m3u8","download-archive.txt","unavailable.jsonl","removed.jsonl"};
+    auto evidence=[&](const QString& relative){
+        return detail::reject(error,"Canonical registries are missing beside Archive evidence: "+relative+
+            ". Preserve this root and restore its registries from a known-good backup; use a different empty root for a new archive.");
+    };
+    std::function<bool(const QString&)> visit=[&](const QString& relative){
+        const auto absolute=QDir(paths.root()).filePath(relative);
+        QFileInfo info(absolute);
+        if(!detail::noLinks(absolute))return evidence(relative);
+        if(relative=="State/ArchiveMode/sync.lock"&&info.isFile())return true;
+        if(!info.isDir()||!emptyLayout.contains(relative)||!info.isReadable())return evidence(relative);
+#ifndef Q_OS_WIN
+        // An unreadable/unsearchable directory is not proof of emptiness.
+        if(!info.isExecutable())return evidence(relative);
+#endif
+        const auto entries=QDir(absolute).entryInfoList(QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot);
+        for(const auto& entry:entries)if(!visit(relative+"/"+entry.fileName()))return false;
+        return true;
+    };
+    const auto entries=QDir(paths.root()).entryInfoList(QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot);
+    for(const auto& entry:entries){
+        const auto folded=entry.fileName().toCaseFolded();
+        if(rootEvidence.contains(folded))return evidence(entry.fileName());
+        if(managedRoots.contains(folded)&&!visit(entry.fileName()))return false;
+    }
+    return true;
+}
+
+// A missing occurrence file is only a first-admission state when every
+// retained lifecycle record agrees. Never reconstruct membership from today's
+// provider snapshot after a managed file or its whole directory was lost.
+bool missingPlaylistStateAllowed(const Paths& paths,const QString& sourceKey,const QJsonArray& sources,QString* error)
+{
+    const auto rejectMissing=[&](){return detail::reject(error,
+        "Missing authoritative playlist items.json for "+sourceKey+
+        "; existing evidence was preserved. Restore the original state before scanning.");};
+    const auto neverScanned=[](const QJsonObject& source,bool legacyAdmission){
+        // Legacy minimal registry entries are valid first admissions only in
+        // the absence of independent metadata/history evidence. Present but
+        // malformed lifecycle fields are not equivalent to absent fields.
+        if(legacyAdmission&&!source.contains("last_scan_at")&&!source.contains("last_scan_status"))return true;
+        return source.value("last_scan_at").isString()&&source.value("last_scan_at").toString().isEmpty()&&
+            source.value("last_scan_status")==QJsonValue("never");
+    };
+    if(!detail::sourceKeySafe(sourceKey)||!detail::noLinks(paths.playlistItemsFile(sourceKey)))return rejectMissing();
+    for(const auto& value:sources){
+        const auto source=value.toObject();
+        if(source.value("key").toString()==sourceKey&&!neverScanned(source,true))return rejectMissing();
+    }
+    const auto history=paths.playlistHistoryFile(sourceKey);
+    // Even an empty history file is durable evidence of a prior reconciliation.
+    if(QFileInfo::exists(history)||!detail::noLinks(history))return rejectMissing();
+    const auto meta=paths.playlistFile(sourceKey);
+    if(!detail::noLinks(meta))return rejectMissing();
+    if(QFileInfo::exists(meta)){
+        QByteArray bytes;if(!detail::readBytes(meta,&bytes,error))return false;
+        QJsonParseError parseError;const auto document=QJsonDocument::fromJson(bytes,&parseError);
+        if(parseError.error!=QJsonParseError::NoError||!document.isObject()||
+           document.object().value("key")!=QJsonValue(sourceKey)||!neverScanned(document.object(),false))return rejectMissing();
+    }
+    return true;
+}
+
+bool missingPlaylistStateAllowed(const Paths& paths,const QString& sourceKey,QString* error)
+{
+    QJsonArray sources;
+    if(!detail::readArray(paths.sourcesFile(),"source",&sources,error))return false;
+    return missingPlaylistStateAllowed(paths,sourceKey,sources,error);
+}
+
+bool readPlaylistArrayWithMigration(const Paths& paths,const QString& sourceKey,QJsonArray* array,QString* error,bool missingAllowed)
+{
+    const auto path=paths.playlistItemsFile(sourceKey);
+    if(missingAllowed&&!QFileInfo::exists(path)&&!missingPlaylistStateAllowed(paths,sourceKey,error))return false;
+    if(detail::readArray(path,"playlist",array,error,missingAllowed))return true;
+
+    // The only supported legacy shape predates occurrence identity entirely.
+    // Mixed old/new rows are ambiguous corruption, so never guess which rows
+    // should retain which identity.
+    QByteArray bytes;QString legacyError;
+    if(!detail::readBytes(path,&bytes,&legacyError))return false;
+    QJsonParseError pe;const auto doc=QJsonDocument::fromJson(bytes,&pe);
+    if(pe.error!=QJsonParseError::NoError||!doc.isArray())return false;
+    auto legacy=doc.array();
+    if(legacy.isEmpty())return false;
+    for(const auto& value:legacy)
+        if(!value.isObject()||!value.toObject().value("entry_key").toString().isEmpty())return false;
+
+    QHash<QString,int> ordinals;
+    for(int i=0;i<legacy.size();++i){
+        auto row=legacy[i].toObject();
+        const auto itemKey=row.value("item_key").toString();
+        if(itemKey.isEmpty())return false;
+        row["entry_key"]=itemKey+"#"+QString::number(++ordinals[itemKey]);
+        legacy[i]=row;
+    }
+    QString shapeError;
+    if(!detail::arrayShape(legacy,"playlist",&shapeError))return false;
+
+    QByteArray history;
+    const auto historyPath=paths.playlistHistoryFile(sourceKey);
+    if(QFileInfo::exists(historyPath)){
+        if(!detail::readBytes(historyPath,&history,&legacyError)||!detail::historyValid(history,&legacyError)){
+            detail::reject(error,legacyError);return false;
+        }
+    }
+    history+=QJsonDocument(historyEvent("playlist_entry_key_migrated","",{
+        {"source_key",sourceKey},{"rows",legacy.size()},{"method","item_key_ordinal"}})).toJson(QJsonDocument::Compact)+"\n";
+    if(!detail::commitTransaction(paths.root(),{
+        {"Playlists/"+sourceKey+"/items.json",QJsonDocument(legacy).toJson()},
+        {"Playlists/"+sourceKey+"/history.jsonl",history}},&legacyError)){
+        detail::reject(error,legacyError);return false;
+    }
+    *array=legacy;
+    if(error)error->clear();
+    return true;
+}
+
+bool validateStoreGraph(const Paths& paths,const QJsonArray& sources,const QJsonArray& canonical,QString* error)
+{
+    QSet<QString> sourceKeys,canonicalKeys;
+    for(const auto& value:sources)sourceKeys.insert(value.toObject().value("key").toString());
+    for(const auto& value:canonical){
+        const auto object=value.toObject();
+        canonicalKeys.insert(object.value("key").toString());
+        const auto metadataPath=object.value("metadata_path").toString();
+        if(metadataPath.isEmpty())continue;
+        if(!detail::relativeSafe(metadataPath)||!metadataPath.startsWith("Metadata/"))
+            return detail::reject(error,"Canonical item has unsafe metadata path: "+metadataPath);
+        const auto absolute=paths.absoluteFromRelative(metadataPath);
+        if(absolute.isEmpty()||!detail::noLinks(absolute)||!QFileInfo(absolute).isDir())
+            return detail::reject(error,"Canonical item metadata directory is missing or linked: "+metadataPath);
+    }
+
+    // Checking only directories that still exist misses complete source-folder
+    // loss. Validate all registered owners before any legacy migration writes.
+    for(const auto& sourceKey:sourceKeys){
+        if(!QFileInfo::exists(paths.playlistItemsFile(sourceKey))&&
+           !missingPlaylistStateAllowed(paths,sourceKey,sources,error))return false;
+    }
+
+    for(const auto& dir:QDir(paths.playlists()).entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
+        if(!detail::sourceKeySafe(dir)||!detail::noLinks(paths.sourceDir(dir)))
+            return detail::reject(error,"Unsafe managed playlist directory: "+dir);
+        const auto metaPath=paths.playlistFile(dir);
+        const auto itemsPath=paths.playlistItemsFile(dir);
+        const auto historyPath=paths.playlistHistoryFile(dir);
+        const auto retiredPath=QDir(paths.sourceDir(dir)).filePath("retired.json");
+        const bool managed=QFileInfo::exists(metaPath)||QFileInfo::exists(itemsPath)||
+                           QFileInfo::exists(historyPath)||QFileInfo::exists(retiredPath);
+        if(!managed)continue;
+
+        const bool registered=sourceKeys.contains(dir);
+        if(!registered){
+            QByteArray retirementBytes;
+            if(!QFileInfo::exists(retiredPath)||!detail::readBytes(retiredPath,&retirementBytes,error))
+                return detail::reject(error,"Managed playlist directory has no registered source or retirement marker: "+dir);
+            QJsonParseError retirementParse;
+            const auto retirement=QJsonDocument::fromJson(retirementBytes,&retirementParse);
+            if(retirementParse.error!=QJsonParseError::NoError||!retirement.isObject()||
+               retirement.object().value("schema_version").toInt()!=1||
+               retirement.object().value("source_key").toString()!=dir||
+               retirement.object().value("retired_at").toString().isEmpty())
+                return detail::reject(error,"Invalid retired playlist marker: "+dir);
+        }
+
+        if(QFileInfo::exists(metaPath)){
+            QByteArray metaBytes;
+            if(!detail::readBytes(metaPath,&metaBytes,error))return false;
+            QJsonParseError pe;const auto doc=QJsonDocument::fromJson(metaBytes,&pe);
+            if(pe.error!=QJsonParseError::NoError||!doc.isObject()||doc.object().value("key").toString()!=dir)
+                return detail::reject(error,"Playlist metadata/source identity mismatch: "+dir);
+        }
+
+        if(QFileInfo::exists(itemsPath)){
+            QJsonArray rows;
+            if(!readPlaylistArrayWithMigration(paths,dir,&rows,error,false))return false;
+            for(const auto& row:rows){
+                const auto itemKey=row.toObject().value("item_key").toString();
+                if(!canonicalKeys.contains(itemKey))
+                    return detail::reject(error,"Playlist occurrence references missing canonical item: "+itemKey);
+            }
+        }
+        if(QFileInfo::exists(historyPath)){
+            QByteArray history;
+            if(!detail::readBytes(historyPath,&history,error)||!detail::historyValid(history,error))return false;
+        }
+    }
+    return true;
+}
+}
+
+namespace
+{
+bool verifyAcceptedEvidence(const Paths& paths,QString* error)
+{
+    const QDir accepted(paths.importsAccepted());
+    for(const auto& packageName:accepted.entryList(QDir::Dirs|QDir::NoDotAndDotDot)){
+        if(!detail::sourceKeySafe(packageName))
+            return detail::reject(error,"Unsafe Accepted recovery package name: "+packageName);
+
+        const auto packageDir=accepted.filePath(packageName);
+        if(!detail::noLinks(packageDir))
+            return detail::reject(error,"Accepted recovery package is linked: "+packageName);
+
+        QByteArray receiptBytes;
+        const auto receiptPath=QDir(packageDir).filePath("receipt.json");
+        if(!detail::readBytes(receiptPath,&receiptBytes,error))return false;
+
+        QString parseError;
+        const auto receiptDoc=parseJson(receiptBytes,&parseError);
+        if(!receiptDoc.isObject())
+            return detail::reject(error,"Invalid Accepted receipt for "+packageName+": "+parseError);
+
+        const auto receipt=receiptDoc.object();
+        if(receipt.value("package_id").toString()!=packageName)
+            return detail::reject(error,"Accepted receipt package identity mismatch: "+packageName);
+        if(!receipt.value("file_sha256").isObject())
+            return detail::reject(error,"Accepted receipt is missing file hashes: "+packageName);
+
+        const auto expected=receipt.value("file_sha256").toObject();
+        QSet<QString> observed;
+        // Integrity includes the filesystem shape, not only regular files. A
+        // post-acceptance junction/symlink directory must not hide from a
+        // file-only iterator and later be followed by backup/forensic tooling.
+        QDirIterator entries(packageDir,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,
+                             QDirIterator::Subdirectories);
+        while(entries.hasNext()){
+            const auto path=entries.next();
+            const auto info=entries.fileInfo();
+            const auto rel=QDir(packageDir).relativeFilePath(path);
+            if(!detail::relativeSafe(rel)||!detail::noLinks(path)||info.isSymLink())
+                return detail::reject(error,"Unsafe entry in Accepted recovery package: "+packageName+"/"+rel);
+            if(info.isDir())continue;
+            if(!info.isFile())
+                return detail::reject(error,"Special entry in Accepted recovery package: "+packageName+"/"+rel);
+            if(rel=="receipt.json")continue;
+            observed.insert(rel);
+            if(!expected.contains(rel)||!expected.value(rel).isString())
+                return detail::reject(error,"Unrecorded file in Accepted recovery package: "+packageName+"/"+rel);
+            const auto digest=detail::fileDigest(path,error);
+            if(digest.isEmpty())return false;
+            if(digest!=expected.value(rel).toString())
+                return detail::reject(error,"Accepted recovery evidence hash mismatch: "+packageName+"/"+rel);
+        }
+
+        for(auto it=expected.begin();it!=expected.end();++it){
+            if(!observed.contains(it.key()))
+                return detail::reject(error,"Accepted recovery evidence file is missing: "+packageName+"/"+it.key());
+        }
+    }
+    return true;
+}
+}
+
+bool Store::initialize(QString* error,bool recoverStaleRunning)
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
     if(error)error->clear();
     if(!m_paths.ensureLayout(error)||!detail::recoverTransaction(m_paths.root(),error))return false;
     const bool sources=QFileInfo::exists(m_paths.sourcesFile()),items=QFileInfo::exists(m_paths.itemsFile());
     if(sources!=items)return detail::reject(error,"Incomplete Archive registry; existing state is preserved");
+    const auto identityPath=QDir(m_paths.root()).filePath(archiveIdentityRelative);
     if(!sources){
-        // Existing playlist history means this is not a fresh archive.
-        if(!QDir(m_paths.playlists()).entryList(QDir::Dirs|QDir::NoDotAndDotDot).isEmpty())
-            return detail::reject(error,"Canonical registries missing beside existing playlist history");
-        if(!detail::commitTransaction(m_paths.root(),{{"State/ArchiveMode/sources.json","[]\n"},{"State/ArchiveMode/items.json","[]\n"}},error))return false;
+        if(!freshArchiveRoot(m_paths,error))return false;
+        // Identity and both empty registries share the same journaled intent.
+        // A crash rolls this intent forward; it never needs a heuristic reset.
+        if(!detail::commitTransaction(m_paths.root(),{{"State/ArchiveMode/sources.json","[]\n"},
+            {"State/ArchiveMode/items.json","[]\n"},{archiveIdentityRelative,newArchiveIdentity("fresh")}},error))return false;
     }
-    QJsonArray a;
-    if(!detail::readArray(m_paths.sourcesFile(),"source",&a,error)||!detail::readArray(m_paths.itemsFile(),"canonical",&a,error))return false;
+    QJsonArray sourcesArray,canonicalArray;
+    if(!detail::readArray(m_paths.sourcesFile(),"source",&sourcesArray,error)||
+       !detail::readArray(m_paths.itemsFile(),"canonical",&canonicalArray,error))return false;
+    if(QFileInfo::exists(identityPath)||!detail::noLinks(identityPath)){
+        QByteArray identity;
+        if(!detail::readBytes(identityPath,&identity,error)||!detail::transactionPayload(archiveIdentityRelative,identity,error))return false;
+    }else{
+        // Supported unversioned archives already have two valid registries.
+        // Add only a marker: never reserialize historical registry/history
+        // bytes during this compatibility migration. Missing registries are
+        // not a recognized legacy format and cannot enter this branch.
+        if(!detail::commitTransaction(m_paths.root(),{{archiveIdentityRelative,newArchiveIdentity("legacy_unversioned")}},error))return false;
+    }
+
+    if(!validateStoreGraph(m_paths,sourcesArray,canonicalArray,error))return false;
+    if(!verifyAcceptedEvidence(m_paths,error))return false;
+
+    if(recoverStaleRunning){
+        // A persisted "running" state is a lease owned by the process that held
+        // the Archive lock. At a fresh operation boundary no such worker can
+        // still exist, so retaining "running" would be false state. Preserve
+        // paths/origin/verification evidence and append restart provenance.
+        bool changed=false;
+        for(int index=0;index<canonicalArray.size();++index){
+            auto item=canonicalArray[index].toObject();
+            for(const auto& kind:QStringList{"video","audio"}){
+                auto rep=item.value(kind).toObject();
+                if(rep.value("state").toString()!="running")continue;
+                rep["state"]="interrupted";
+                const auto prior=rep.value("error").toString();
+                const auto recovery=QString("Restart recovery: prior running state has no active Archive worker");
+                rep["error"]=prior.isEmpty()?recovery:prior+" | "+recovery;
+                item[kind]=rep;changed=true;
+            }
+            canonicalArray[index]=item;
+        }
+        if(changed&&!detail::commitTransaction(m_paths.root(),
+            {{"State/ArchiveMode/items.json",QJsonDocument(canonicalArray).toJson()}},error))return false;
+    }
     if(!m_paths.materializeAgentResources(error))return false;
     if(QFileInfo::exists(QDir(m_paths.archiveState()).filePath("projections-dirty.json")))return writeAllProjections(error);
     return true;
@@ -517,7 +875,8 @@ QVector<PlaylistItem> Store::loadPlaylistItems(const QString& sourceKey,QString*
 {
     if(!detail::sourceKeySafe(sourceKey)){detail::reject(error,"Invalid source key");return {};}
     SyncLock lock(m_paths);if(!lock.tryLock()){detail::reject(error,lock.errorString());return {};}
-    QJsonArray a;QVector<PlaylistItem> out;if(!detail::readArray(m_paths.playlistItemsFile(sourceKey),"playlist",&a,error,true))return out;
+    QJsonArray a;QVector<PlaylistItem> out;
+    if(!readPlaylistArrayWithMigration(m_paths,sourceKey,&a,error,true))return out;
     for(const auto& e:a)out.append(playlistItemFromJson(e.toObject()));return out;
 }
 bool Store::savePlaylistItems(const QString& sourceKey,const QVector<PlaylistItem>& items,QString* error) const
@@ -525,6 +884,8 @@ bool Store::savePlaylistItems(const QString& sourceKey,const QVector<PlaylistIte
     if(!detail::sourceKeySafe(sourceKey))return detail::reject(error,"Invalid source key");
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
     QJsonArray prior;const auto next=vectorToArray(items,playlistItemToJson);
+    if(!QFileInfo::exists(m_paths.playlistItemsFile(sourceKey))&&
+       !missingPlaylistStateAllowed(m_paths,sourceKey,error))return false;
     if(!detail::readArray(m_paths.playlistItemsFile(sourceKey),"playlist",&prior,error,true)||!detail::arrayShape(next,"playlist",error))return false;
     return detail::commitTransaction(m_paths.root(),{{"Playlists/"+sourceKey+"/items.json",QJsonDocument(next).toJson()}},error);
 }
@@ -541,26 +902,78 @@ bool Store::appendHistory(const QString& sourceKey,const QJsonObject& e,QString*
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
     if(!detail::sourceKeySafe(sourceKey))return detail::reject(error,"Invalid source key");
-    return appendLine(m_paths.playlistHistoryFile(sourceKey),QJsonDocument(e).toJson(QJsonDocument::Compact),error);
+    // Validate both the existing stream and the new event before publishing.
+    // Atomic journalled replacement prevents partial appends from corrupting
+    // canonical history when a write/flush fails or the process is interrupted.
+    if(!detail::historyEventValid(e,error))return false;
+    const auto path=m_paths.playlistHistoryFile(sourceKey);
+    QByteArray history;
+    if(QFileInfo::exists(path)&&!detail::readBytes(path,&history,error))return false;
+    if(!detail::historyValid(history,error))return false;
+    history+=QJsonDocument(e).toJson(QJsonDocument::Compact)+"\n";
+    return detail::commitTransaction(m_paths.root(),{
+        {"Playlists/"+sourceKey+"/history.jsonl",history}},error);
 }
 
-bool Store::updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error)
+bool Store::updateRepresentation(const QString& itemKey,const QString& kind,const Representation& representation,QString* error,const QString& metadataPath)
 {
     SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
-    QString stateError;auto items=loadCanonicalItems(&stateError);
+    QString stateError;
+    auto items=m_representationBatchActive?m_representationBatchItems:loadCanonicalItems(&stateError);
     if(!stateError.isEmpty())return detail::reject(error,stateError);
     for(auto& item:items){
         if(item.key==itemKey){
             if(kind=="video") item.video=representation;
             else if(kind=="audio") item.audio=representation;
             else { if(error) *error="Unknown representation kind"; return false; }
-            if(item.video.state=="complete"&&item.audio.state=="complete") item.recoveryStatus="not_required";
-            else if(isUnavailable(item.availability)) item.recoveryStatus="unrecovered";
+            if(!metadataPath.isEmpty()){
+                if(!m_paths.isSafeRelative(metadataPath)||!metadataPath.startsWith("Metadata/"))
+                    return detail::reject(error,"Unsafe metadata path");
+                const auto absoluteMetadata=m_paths.absoluteFromRelative(metadataPath);
+                if(absoluteMetadata.isEmpty()||!detail::noLinks(absoluteMetadata)||!QFileInfo(absoluteMetadata).isDir())
+                    return detail::reject(error,"Missing or linked metadata directory");
+                item.metadataPath=metadataPath;
+            }
+            updateRecoveryStatus(item);
+            if(m_representationBatchActive){
+                m_representationBatchItems=std::move(items);
+                return true;
+            }
             return saveCanonicalItems(items,error);
         }
     }
     if(error) *error="Canonical item not found";
     return false;
+}
+
+
+bool Store::beginRepresentationBatch(QString* error)
+{
+    SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
+    if(m_representationBatchActive)return detail::reject(error,"Representation batch is already active");
+    QString stateError;
+    auto items=loadCanonicalItems(&stateError);
+    if(!stateError.isEmpty())return detail::reject(error,stateError);
+    m_representationBatchItems=std::move(items);
+    m_representationBatchActive=true;
+    return true;
+}
+
+bool Store::commitRepresentationBatch(QString* error)
+{
+    SyncLock lock(m_paths);if(!lock.tryLock())return detail::reject(error,lock.errorString());
+    if(!m_representationBatchActive)return true;
+    const auto items=m_representationBatchItems;
+    if(!saveCanonicalItems(items,error))return false;
+    m_representationBatchItems.clear();
+    m_representationBatchActive=false;
+    return true;
+}
+
+void Store::cancelRepresentationBatch()
+{
+    m_representationBatchItems.clear();
+    m_representationBatchActive=false;
 }
 
 bool Store::updateCanonicalMetadata(const QString& itemKey,const QString& title,const QString& uploader,const QString& availability,const QString& originalUrl,QString* error)
@@ -575,6 +988,7 @@ bool Store::updateCanonicalMetadata(const QString& itemKey,const QString& title,
             if(!availability.isEmpty()) item.availability=availability;
             if(!originalUrl.isEmpty()) item.originalUrl=originalUrl;
             item.lastSeen=nowIso();
+            updateRecoveryStatus(item);
             return saveCanonicalItems(items,error);
         }
     }
@@ -588,7 +1002,7 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
     QString error;
     SyncLock lock(m_paths);if(!lock.tryLock()){summary.error=lock.errorString();return summary;}
     if(!detail::sourceKeySafe(source.key)||snapshot.sourceKey!=source.key){summary.error="Snapshot/source identity mismatch or unsafe source key";return summary;}
-    if(!initialize(&error)){ summary.error=error; return summary; }
+    if(!initialize(&error,lock.acquiredFreshly())){ summary.error=error; return summary; }
 
     auto prior=loadPlaylistItems(source.key,&error);
     if(!error.isEmpty()){ summary.error=error; return summary; }
@@ -598,9 +1012,14 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
     QHash<QString,int> priorIndex;
     QHash<QString,QVector<int>> priorPlaceholders;
     QHash<QString,int> priorOccurrences;
+    QHash<QString,QVector<int>> priorResolvedOccurrences;
+    QSet<QString> knownEntryKeys;
     for(int i=0;i<prior.size();++i){
-        const int ordinal=++priorOccurrences[prior[i].itemKey];
-        if(prior[i].entryKey.isEmpty())prior[i].entryKey=prior[i].itemKey+"#"+QString::number(ordinal);
+        ++priorOccurrences[prior[i].itemKey];
+        knownEntryKeys.insert(prior[i].entryKey);
+        if(!prior[i].providerId.isEmpty())priorResolvedOccurrences[prior[i].itemKey].append(i);
+        // loadPlaylistItems has already validated or explicitly migrated every
+        // occurrence identity. Never synthesize identities silently here.
         priorIndex[prior[i].entryKey]=i;
         if(prior[i].providerId.isEmpty()&&prior[i].itemKey.startsWith("placeholder:"))
             priorPlaceholders[placeholderFingerprint(source.key,prior[i].title,prior[i].url)].append(i);
@@ -610,25 +1029,87 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
 
     QByteArray history;
     if(QFileInfo::exists(m_paths.playlistHistoryFile(source.key)) && !detail::readBytes(m_paths.playlistHistoryFile(source.key),&history,&error)){summary.error=error;return summary;}
-    if(!history.isEmpty()&&!history.endsWith('\n')){summary.error="Incomplete history record; preserve and repair before reconciliation";return summary;}
+    if(!detail::historyValid(history,&error)){summary.error=error;return summary;}
     const auto record=[&](const QJsonObject& event){history+=QJsonDocument(event).toJson(QJsonDocument::Compact)+"\n";};
     QVector<PlaylistItem> result;
     QSet<QString> observedKeys;
-    QHash<QString,int> observedOccurrences;
+    QHash<QString,int> nextOccurrence=priorOccurrences;
     const auto scanTime=snapshot.scannedAt.isEmpty()?nowIso():snapshot.scannedAt;
     QSet<int> matchedPrior;
 
-    for(auto p:snapshot.items){
+    const auto normalizePlaceholderField=[](QString value){
+        return value.trimmed().normalized(QString::NormalizationForm_KC).toCaseFolded();
+    };
+    const auto unavailablePlaceholderTitle=[&](const QString& title){
+        const auto normalized=normalizePlaceholderField(title);
+        return normalized=="[private video]"||normalized=="private video"||
+               normalized=="[deleted video]"||normalized=="deleted video"||
+               normalized=="[unavailable item]"||normalized=="unavailable item"||
+               normalized=="[unavailable video]"||normalized=="unavailable video";
+    };
+    const auto resolvedNeighbor=[](const QVector<PlaylistItem>& items,int index,int step){
+        for(int i=index+step;i>=0&&i<items.size();i+=step){
+            if(items[i].membership=="removed")continue;
+            if(!items[i].providerId.isEmpty())return items[i].providerId;
+        }
+        return QString();
+    };
+    const auto conservativePlaceholderDriftCandidate=[&](const PlaylistItem& observed,int observedIndex){
+        QVector<int> candidates;
+        const auto observedTitle=normalizePlaceholderField(observed.title);
+        const auto observedUrl=normalizePlaceholderField(observed.url);
+        for(int i=0;i<prior.size();++i){
+            const auto& candidate=prior[i];
+            if(matchedPrior.contains(i)||candidate.membership=="removed"||!candidate.providerId.isEmpty()||
+               !candidate.itemKey.startsWith("placeholder:"+source.key+":"))continue;
+
+            const auto candidateTitle=normalizePlaceholderField(candidate.title);
+            const auto candidateUrl=normalizePlaceholderField(candidate.url);
+            const bool stableUrl=!observedUrl.isEmpty()&&!candidateUrl.isEmpty()&&observedUrl==candidateUrl;
+            const bool stableTitle=!observedTitle.isEmpty()&&!candidateTitle.isEmpty()&&observedTitle==candidateTitle;
+            const bool stableUnavailableClass=unavailablePlaceholderTitle(observed.title)&&unavailablePlaceholderTitle(candidate.title);
+            if(!stableUrl&&!stableTitle&&!stableUnavailableClass)continue;
+
+            const bool stablePosition=observed.position>=0&&
+                (candidate.position==observed.position||candidate.lastPosition==observed.position);
+            const auto priorBefore=resolvedNeighbor(prior,i,-1);
+            const auto priorAfter=resolvedNeighbor(prior,i,1);
+            const auto currentBefore=resolvedNeighbor(snapshot.items,observedIndex,-1);
+            const auto currentAfter=resolvedNeighbor(snapshot.items,observedIndex,1);
+            const bool stableNeighbors=!priorBefore.isEmpty()&&!priorAfter.isEmpty()&&
+                priorBefore==currentBefore&&priorAfter==currentAfter;
+
+            // A stable URL is strong provider evidence. Title-only or sentinel
+            // continuity additionally requires position or two-sided resolved
+            // neighbors, so a new unrelated unresolved item is not silently
+            // merged merely because it has a generic placeholder title.
+            if(stableUrl||stablePosition||stableNeighbors)candidates.append(i);
+        }
+        return candidates.size()==1?candidates.front():-1;
+    };
+
+    for(int snapshotIndex=0;snapshotIndex<snapshot.items.size();++snapshotIndex){
+        auto p=snapshot.items[snapshotIndex];
         if(!p.providerId.isEmpty()&&!detail::videoIdSafe(p.providerId)){summary.error="Invalid provider identity";return summary;}
         const bool unresolved=p.providerId.isEmpty();
         const auto expectedKey=unresolved?placeholderBaseKey(source.key,p.title,p.url):canonicalKey(p.providerId,source.key,p.position,p.title);
         if(p.itemKey.isEmpty()) p.itemKey=expectedKey;
+        int promotedPrior=-1;
         if(unresolved){
             if(!p.itemKey.startsWith("placeholder:"+source.key+":")){summary.error="Invalid unresolved placeholder identity";return summary;}
             const auto fingerprint=placeholderFingerprint(source.key,p.title,p.url);
             const auto candidates=priorPlaceholders.value(fingerprint);
             int priorIndexForPlaceholder=-1;
             for(const auto candidate:candidates)if(!matchedPrior.contains(candidate)){priorIndexForPlaceholder=candidate;break;}
+
+            // Descriptive metadata on unavailable/private placeholders is not
+            // durable identity. If the exact fingerprint drifted, reuse the
+            // historical occurrence only when one conservative candidate is
+            // supported by stable URL, position, or two-sided resolved-neighbor
+            // evidence. Ambiguity deliberately falls through to a fresh ID.
+            if(priorIndexForPlaceholder<0)
+                priorIndexForPlaceholder=conservativePlaceholderDriftCandidate(p,snapshotIndex);
+
             if(priorIndexForPlaceholder>=0){
                 matchedPrior.insert(priorIndexForPlaceholder);
                 p.itemKey=prior[priorIndexForPlaceholder].itemKey;
@@ -645,7 +1126,60 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             }
         }else{
             if(p.itemKey!=expectedKey){summary.error="Canonical identity mismatch";return summary;}
-            p.entryKey=p.itemKey+"#"+QString::number(++observedOccurrences[p.itemKey]);
+
+            // A resolved observation may be the same historical occurrence that
+            // was previously visible only as a placeholder. Promote only when
+            // the mapping is conservative and unambiguous. Prefer a unique
+            // position match; otherwise accept a single unmatched fingerprint
+            // candidate. Never merge into an already-existing resolved
+            // canonical identity because doing so could conflate two histories.
+            if(!canonicalIndex.contains(expectedKey)){
+                const auto fingerprint=placeholderFingerprint(source.key,p.title,p.url);
+                QVector<int> candidates;
+                for(const auto candidate:priorPlaceholders.value(fingerprint))
+                    if(!matchedPrior.contains(candidate)) candidates.append(candidate);
+                QVector<int> positionMatches;
+                for(const auto candidate:candidates)
+                    if(prior[candidate].position==p.position || prior[candidate].lastPosition==p.position)
+                        positionMatches.append(candidate);
+                if(positionMatches.size()==1) promotedPrior=positionMatches.front();
+                else if(positionMatches.isEmpty() && candidates.size()==1) promotedPrior=candidates.front();
+            }
+
+            if(promotedPrior>=0){
+                matchedPrior.insert(promotedPrior);
+                // entryKey is occurrence identity. Keeping it stable prevents
+                // the promotion from appearing as a removal plus a new row.
+                p.entryKey=prior[promotedPrior].entryKey;
+            }else{
+                QVector<int> candidates;
+                for(const auto candidate:priorResolvedOccurrences.value(p.itemKey))
+                    if(!matchedPrior.contains(candidate))candidates.append(candidate);
+
+                QVector<int> positionMatches;
+                for(const auto candidate:candidates)
+                    if(prior[candidate].position==p.position||prior[candidate].lastPosition==p.position)
+                        positionMatches.append(candidate);
+
+                int occurrencePrior=-1;
+                if(positionMatches.size()==1)occurrencePrior=positionMatches.front();
+                else if(positionMatches.isEmpty()&&candidates.size()==1)occurrencePrior=candidates.front();
+
+                if(occurrencePrior>=0){
+                    matchedPrior.insert(occurrencePrior);
+                    p.entryKey=prior[occurrencePrior].entryKey;
+                }else{
+                    // Multiple indistinguishable unmatched duplicates without a
+                    // unique positional match are genuinely ambiguous. Do not
+                    // rotate their historical IDs according to this scan's
+                    // ordinal. Allocate a fresh occurrence identity and leave
+                    // unmatched historical rows to the normal removed policy.
+                    do{
+                        p.entryKey=p.itemKey+"#"+QString::number(++nextOccurrence[p.itemKey]);
+                    }while(knownEntryKeys.contains(p.entryKey));
+                    knownEntryKeys.insert(p.entryKey);
+                }
+            }
         }
         observedKeys.insert(p.entryKey);
         const bool hadPrior=priorIndex.contains(p.entryKey);
@@ -664,6 +1198,27 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             record(historyEvent("observation_changed",p.itemKey,{{"entry_key",p.entryKey},{"position",p.position},{"title",p.title},{"availability",p.availability},{"previous_position",previous.position},{"previous_title",previous.title},{"previous_availability",previous.availability}}));
 
         int ci=canonicalIndex.value(p.itemKey,-1);
+        const bool identityPromoted = promotedPrior>=0;
+        if(identityPromoted){
+            const auto oldKey=prior[promotedPrior].itemKey;
+            const int oldCi=canonicalIndex.value(oldKey,-1);
+            if(oldCi<0){summary.error="Placeholder promotion lost canonical history";return summary;}
+            if(canonicalIndex.contains(p.itemKey)){summary.error="Placeholder promotion target already exists";return summary;}
+
+            // Move the canonical record rather than constructing a new one so
+            // representation paths, recovery status, tags and first-seen
+            // evidence remain attached to the occurrence across identity
+            // resolution.
+            auto& promoted=canonical[oldCi];
+            promoted.key=p.itemKey;
+            promoted.providerId=p.providerId;
+            canonicalIndex.remove(oldKey);
+            canonicalIndex[p.itemKey]=oldCi;
+            ci=oldCi;
+            record(historyEvent("identity_promoted",p.itemKey,{
+                {"from_item_key",oldKey},{"to_item_key",p.itemKey},
+                {"entry_key",p.entryKey},{"position",p.position}}));
+        }
         if(ci<0){
             CanonicalItem c;
             c.key=p.itemKey; c.providerId=p.providerId; c.title=p.title; c.originalUrl=p.url;
@@ -677,8 +1232,11 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             if(!p.url.isEmpty()) c.originalUrl=p.url;
             c.availability=p.availability; c.lastSeen=scanTime;
             if(c.firstSeen.isEmpty()) c.firstSeen=p.firstSeen;
-            if(isUnavailable(p.availability) && (c.video.state!="complete" || c.audio.state!="complete")) c.recoveryStatus="unrecovered";
-            if(c.video.state=="complete"&&c.audio.state=="complete") c.recoveryStatus="not_required";
+            // Identity promotion is a key migration, not new recovery evidence.
+            // Preserve the historical recovery state that moved with the
+            // canonical record. Later representation/metadata operations can
+            // recompute recovery status from fresh evidence normally.
+            if(!identityPromoted) updateRecoveryStatus(c);
         }
         if(isUnavailable(p.availability)) ++summary.unavailable;
         result.append(p);
@@ -725,7 +1283,13 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
         {dir+"playlist.json",QJsonDocument(sourceToJson(source)).toJson()},
         {dir+"history.jsonl",history}};
     if(!detail::commitTransaction(m_paths.root(),files,&error)){summary.error=error;return summary;}
-    if(!writeAllProjections(&error)){ summary.error="State committed, projection rebuild required: "+error; return summary; }
+    // The authoritative commit has already completed. Projection failures leave
+    // the durable dirty marker for report-only recovery; they must not erase
+    // counts or tell a caller to replay this registry/history transaction.
+    summary.committed=true;
+    summary.projectionsCurrent=writeAllProjections(&error);
+    if(!summary.projectionsCurrent)
+        summary.projectionWarning="State committed, projection rebuild required: "+error;
 
     for(const auto& p:result){
         if(p.membership=="active") ++summary.active;
@@ -735,11 +1299,12 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             if(canonical[ci].audio.state!="complete") ++summary.needsAudio;
         }
     }
-    summary.committed=true;
-    if(logger) logger->event("INFO","reconciliation","snapshot_reconciled",{
+    if(logger) logger->event(summary.projectionsCurrent?"INFO":"WARNING","reconciliation","snapshot_reconciled",{
         {"source_key",source.key},{"complete",snapshot.complete},{"observed",summary.observed},{"active",summary.active},
         {"removed",summary.removed},{"reappeared",summary.reappeared},{"unavailable",summary.unavailable},
-        {"needs_video",summary.needsVideo},{"needs_audio",summary.needsAudio}});
+        {"needs_video",summary.needsVideo},{"needs_audio",summary.needsAudio},
+        {"committed",summary.committed},{"projections_current",summary.projectionsCurrent},
+        {"projection_warning",summary.projectionWarning}});
     return summary;
 }
 
@@ -805,11 +1370,22 @@ ToolResolver::ToolResolver(RuntimeConfig config):m_config(std::move(config)){}
 
 QString ToolResolver::find(const QStringList& names,const QStringList& relativeCandidates) const
 {
+    // Package candidates are the qualification trust boundary. A same-named
+    // executable on PATH must never silently replace missing/quarantined sealed
+    // bytes during normal Archive execution.
     for(const auto& rel:relativeCandidates){
         const auto p=QDir(m_config.appDir).filePath(rel);
-        if(QFileInfo(p).exists() && QFileInfo(p).isFile() && QFileInfo(p).isExecutable()) return QDir::cleanPath(p);
+        const QFileInfo info(p);
+        if(info.exists()&&info.isFile()&&info.isExecutable()&&detail::noLinks(p))
+            return QDir::cleanPath(p);
     }
-    for(const auto& name:names){ const auto p=QStandardPaths::findExecutable(name); if(!p.isEmpty()) return p; }
+    if(!m_config.allowSystemTools)return {};
+    // Explicit development/system-tool mode is intentionally outside the
+    // qualified portable boundary and must be requested by the caller.
+    for(const auto& name:names){
+        const auto p=QStandardPaths::findExecutable(name);
+        if(!p.isEmpty())return p;
+    }
     return {};
 }
 
@@ -923,7 +1499,7 @@ Snapshot PlaylistDiscovery::discover(const Source& source)
     QStringList args={"--ignore-config","--flat-playlist","--dump-single-json","--skip-download","--ignore-errors"};
     appendYtRuntimeArgs(args,tools);
     args << "--" << source.url;
-    const auto r=runProcess(exe,args,m_config.archiveRoot,300000);
+    const auto r=runProcess(exe,args,m_config.archiveRoot,300000,m_config.cancelRequested);
     s=parse(source,r.standardOutput.toUtf8(),r.standardError,r.exitCode);
     s.scannedAt=nowIso();
     if(!r.ok){s.complete=false;if(s.error.isEmpty())s.error=r.error;}
@@ -945,32 +1521,76 @@ Snapshot PlaylistDiscovery::parse(const Source& source,const QByteArray& json,co
     const auto root=doc.object();
     if(!root.value("entries").isArray()){s.error="Playlist entries must be an array; removal inference disabled";return s;}
     const auto entries=root.value("entries").toArray();
-    bool malformed=root.contains("id")&&!source.key.isEmpty()&&root.value("id").toString()!=source.key;
+    // Requested identity is not provider evidence. Removal inference requires
+    // an explicit matching playlist ID, even for a complete-looking empty list.
+    if(!detail::sourceKeySafe(source.key)||!root.value("id").isString()||root.value("id").toString()!=source.key){
+        // Unbound observations cannot safely be attributed to this source,
+        // even as additions. Keep its historical membership entirely intact.
+        s.error="Missing or mismatched provider playlist identity; observations and removal inference refused";
+        return s;
+    }
+    bool malformed=false;
+    QSet<int> positions;
     int pos=0;
     for(const auto& value:entries){
         ++pos;
         if(!value.isObject()){malformed=true;continue;}
         const auto e=value.toObject();
         PlaylistItem p;
-        p.position=e.value("playlist_index").toInt(pos);
+        // Array order is the supported fallback only when the field is absent.
+        // Qt's toInt(default) otherwise silently repairs strings, null and
+        // fractions, which must not authorize destructive membership changes.
+        if(e.contains("playlist_index")){
+            const auto index=e.value("playlist_index");
+            const auto number=index.toDouble();
+            if(!index.isDouble()||!std::isfinite(number)||std::floor(number)!=number||number<1||number>INT_MAX){
+                malformed=true;continue;
+            }
+            p.position=static_cast<int>(number);
+        }else p.position=pos;
+        // Repeated videos are valid occurrences, but contradictory positions
+        // are not evidence of complete enumeration. Retain usable observations
+        // without granting removal authority to this snapshot.
+        if(positions.contains(p.position))malformed=true;
+        positions.insert(p.position);
         p.providerId=e.value("id").toString();
         if(!p.providerId.isEmpty()&&!detail::videoIdSafe(p.providerId)){malformed=true;continue;}
         if(p.position<1){malformed=true;continue;}
-        p.title=e.value("title").toString();
+
+        const auto rawTitle=e.value("title").toString();
+        auto rawUrl=e.value("webpage_url").toString();
+        if(rawUrl.isEmpty()) rawUrl=e.value("url").toString();
+        const auto observedAvailability=availabilityFromEntry(e);
+
+        // A provider-less observation needs stable provider evidence. A URL is
+        // usable occurrence evidence, as is an explicit unavailable/private/
+        // deleted state. A free-form title by itself is not strong enough to
+        // authorize destructive removal inference for historical entries.
+        if(p.providerId.isEmpty()&&rawUrl.isEmpty()&&!isUnavailable(observedAvailability)){
+            malformed=true;
+            continue;
+        }
+
+        p.title=rawTitle;
         if(p.title.isEmpty()) p.title="[Unavailable item]";
-        p.url=e.value("webpage_url").toString();
-        if(p.url.isEmpty()) p.url=e.value("url").toString();
+        p.url=rawUrl;
         if(!p.providerId.isEmpty()) p.url="https://www.youtube.com/watch?v="+p.providerId;
-        p.availability=availabilityFromEntry(e);
+        p.availability=observedAvailability;
         p.itemKey=p.providerId.isEmpty()?placeholderBaseKey(source.key,p.title,p.url):canonicalKey(p.providerId,source.key,p.position,p.title);
         s.items.append(p);
     }
     const bool transient=isTransientText(stderrText);
     bool truncated=false;
     for(const auto& key:QStringList{"playlist_count","n_entries"}){const auto v=root.value(key);if(v.isDouble()&&v.toDouble()>entries.size())truncated=true;}
-    const bool reportedError=stderrText.contains(QRegularExpression("(?im)^\\s*(?:ERROR|WARNING):"));
-    s.complete=!transient && !malformed && !truncated && !reportedError && exitCode==0;
-    if(malformed||truncated||reportedError)s.error="Incomplete or suspect discovery output; removal inference disabled";
+    // A generic yt-dlp WARNING is diagnostic, not proof that playlist
+    // enumeration is incomplete. Structural damage, truncation, transient
+    // failures, explicit ERROR lines and a nonzero exit remain conservative
+    // removal-confidence gates.
+    const bool reportedError=stderrText.contains(QRegularExpression("(?im)^\\s*ERROR:"));
+    const bool incompleteWarning=stderrText.contains(QRegularExpression(
+        "(?im)^\\s*WARNING:.*(?:incomplete|truncat(?:ed|ion)?|failed\\s+to\\s+(?:download|extract)|unable\\s+to\\s+(?:download|extract)|playlist.*unavailable)"));
+    s.complete=!transient && !malformed && !truncated && !reportedError && !incompleteWarning && exitCode==0;
+    if(malformed||truncated||reportedError||incompleteWarning)s.error="Incomplete or suspect discovery output; removal inference disabled";
     if(transient) s.error="Transient discovery failure detected; removal inference disabled";
     else if(exitCode!=0) s.error=QString("yt-dlp exit %1; partial observations retained but removal inference disabled").arg(exitCode);
     return s;
@@ -987,7 +1607,7 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
     if(absolute.isEmpty()||!file.isFile()||file.size()==0){result.errors<<"Missing, empty or unsafe media path";return result;}
     if(video?file.suffix().toLower()!="mp4":!QStringList{"m4a","mp4"}.contains(file.suffix().toLower()))result.errors<<"Media has the wrong container extension";
     ToolResolver tools(m_config);
-    const auto process=runProcess(tools.ffprobe(),{"-v","error","-show_streams","-show_format","-of","json",absolute},m_config.archiveRoot,60000);
+    const auto process=runProcess(tools.ffprobe(),{"-v","error","-show_streams","-show_format","-of","json",absolute},m_config.archiveRoot,60000,m_config.cancelRequested);
     if(!process.ok||!process.standardError.trimmed().isEmpty()){result.errors<<(process.error+": "+process.standardError.left(1000));return result;}
     QString parseError;const auto doc=parseJson(process.standardOutput.toUtf8(),&parseError);
     if(!doc.isObject()){result.errors<<("Invalid ffprobe JSON: "+parseError);return result;}
@@ -1000,7 +1620,7 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
         const auto stream=value.toObject();const auto type=stream.value("codec_type").toString();
         if(type=="video"&&stream.value("disposition").toObject().value("attached_pic").toInt()==0){
             ++videos;
-            if(stream.value("codec_name")!="h264"||stream.value("pix_fmt")!="yuv420p"||stream.value("width").toInt()<=0||stream.value("height").toInt()<=0||stream.value("height").toInt()>1080)result.errors<<"Video must be H.264/yuv420p at no more than 1080 lines";
+            if(stream.value("codec_name")!="h264"||stream.value("pix_fmt")!="yuv420p"||stream.value("width").toInt()<=0||stream.value("height").toInt()<=0||stream.value("width").toInt()>1920||stream.value("height").toInt()>1080)result.errors<<"Video must be H.264/yuv420p within the 1920x1080 canonical envelope";
         }
         if(type=="audio"){++audios;if(stream.value("codec_name")!="aac")result.errors<<"Every audio stream must be AAC";}
     }
@@ -1016,7 +1636,13 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
     if(video) integrityArgs<<"-map"<<"0:v?"<<"-map"<<"0:a?";
     else integrityArgs<<"-map"<<"0:a?";
     integrityArgs<<"-f"<<"null"<<"-";
-    const auto integrity=runProcess(ffmpeg,integrityArgs,m_config.archiveRoot,10*60*1000);
+    // Deep verification timeout scales with media duration. Ten minutes remains
+    // the floor for short files, while long valid media is not rejected merely
+    // because decoding it cannot finish within a fixed wall-clock ceiling.
+    const auto boundedDurationMs=std::min(24.0*60.0*60.0*1000.0,duration*2000.0);
+    const qint64 durationTimeout=static_cast<qint64>(boundedDurationMs);
+    const int integrityTimeout=static_cast<int>(std::max<qint64>(10*60*1000,durationTimeout));
+    const auto integrity=runProcess(ffmpeg,integrityArgs,m_config.archiveRoot,integrityTimeout,m_config.cancelRequested);
     if(!integrity.ok){
         const auto detail=integrity.standardError.trimmed().left(1600);
         result.errors<<("Full media integrity decode failed: "+(detail.isEmpty()?integrity.error:detail));
@@ -1027,30 +1653,115 @@ ValidationResult MediaVerifier::probe(const QString& relativePath,bool video) co
 
 MediaExecutor::MediaExecutor(RuntimeConfig c,Store& s,ActivityLogger& l):m_config(std::move(c)),m_store(s),m_logger(l),m_tools(m_config),m_verifier(m_config,l){}
 
+namespace
+{
+constexpr auto mediaVerificationProfile="full-decode-v1";
+
+void stampVerifiedRepresentation(const Paths& paths,Representation& representation,QString* error)
+{
+    const auto absolute=paths.absoluteFromRelative(representation.path);
+    QFileInfo info(absolute);
+    if(absolute.isEmpty()||!info.isFile()){
+        representation.verifiedSha256.clear();
+        representation.verifiedSize=-1;
+        representation.verificationProfile.clear();
+        return;
+    }
+    const auto hash=detail::fileDigest(absolute,error);
+    if(hash.isEmpty())return;
+    representation.verifiedSha256=hash;
+    representation.verifiedSize=info.size();
+    representation.verificationProfile=mediaVerificationProfile;
+}
+
+bool verifiedRepresentationUnchanged(const Paths& paths,const Representation& representation)
+{
+    if(representation.state!="complete"||representation.verificationProfile!=mediaVerificationProfile||
+       !QRegularExpression("^[0-9a-f]{64}$").match(representation.verifiedSha256).hasMatch()||
+       representation.verifiedSize<0)return false;
+    const auto absolute=paths.absoluteFromRelative(representation.path);
+    QFileInfo info(absolute);
+    if(absolute.isEmpty()||!info.isFile()||info.size()!=representation.verifiedSize)return false;
+    QString error;
+    return detail::fileDigest(absolute,&error)==representation.verifiedSha256;
+}
+}
+
+
 ProcessResult MediaExecutor::run(const QString& program,const QStringList& args,const QString& purpose) const
 {
     m_logger.diagnostic(QString("%1 command: %2 %3").arg(purpose,program,args.join(' ')));
-    auto r=runProcess(program,args,m_config.archiveRoot,60*60*1000);
+    auto r=runProcess(program,args,m_config.archiveRoot,60*60*1000,m_config.cancelRequested);
     m_logger.diagnostic(QString("%1 result exit=%2 stderr=%3").arg(purpose).arg(r.exitCode).arg(r.standardError.left(16000)));
     return r;
 }
 
-QString MediaExecutor::findExistingById(const QString& relativeDir,const QString& id,const QStringList& extensions) const
+bool MediaExecutor::mediaBindingValid(const QString& relativePath,const QString& providerId,const QString& kind) const
 {
-    if(!detail::videoIdSafe(id)) return {};
-    QString fallback;
+    if(!detail::videoIdSafe(providerId)||!m_store.paths().isSafeRelative(relativePath))return false;
+    const auto key=detail::digest(relativePath.toUtf8());
+    const auto bindingPath=QDir(m_store.paths().archiveState()).filePath("MediaBindings/"+key+".json");
+    if(!QFileInfo::exists(bindingPath)||!detail::noLinks(bindingPath))return false;
+    QByteArray bytes;QString error;
+    if(!detail::readBytes(bindingPath,&bytes,&error))return false;
+    const auto doc=QJsonDocument::fromJson(bytes);
+    if(!doc.isObject())return false;
+    const auto o=doc.object();
+    if(o.value("schema_version").toInt()!=1||
+       o.value("provider").toString()!="youtube"||
+       o.value("provider_id").toString()!=providerId||
+       o.value("kind").toString()!=kind||
+       o.value("path").toString()!=relativePath)return false;
+    const auto absolute=m_store.paths().absoluteFromRelative(relativePath);
+    const auto expected=o.value("sha256").toString();
+    return !absolute.isEmpty()&&!expected.isEmpty()&&detail::fileDigest(absolute,&error)==expected;
+}
+
+bool MediaExecutor::writeMediaBinding(const QString& relativePath,const CanonicalItem& item,const QString& kind,QString* error) const
+{
+    if(!detail::videoIdSafe(item.providerId)||!m_store.paths().isSafeRelative(relativePath))
+        return detail::reject(error,"Cannot bind unsafe media identity");
+    const auto absolute=m_store.paths().absoluteFromRelative(relativePath);
+    const auto hash=detail::fileDigest(absolute,error);if(hash.isEmpty())return false;
+    const QJsonObject binding{{"schema_version",1},{"provider","youtube"},{"provider_id",item.providerId},
+        {"item_key",item.key},{"kind",kind},{"path",relativePath},{"sha256",hash},{"bound_at",nowIso()}};
+    const auto key=detail::digest(relativePath.toUtf8());
+    const auto target=QDir(m_store.paths().archiveState()).filePath("MediaBindings/"+key+".json");
+    return atomicWrite(target,QJsonDocument(binding).toJson(QJsonDocument::Indented),error);
+}
+
+QString MediaExecutor::findAttemptById(const QString& relativeDir,const QString& id,const QString& attempt,const QStringList& extensions) const
+{
+    if(!detail::videoIdSafe(id)||attempt.isEmpty())return {};
     QDirIterator it(QDir(m_config.archiveRoot).filePath(relativeDir),QDir::Files,QDirIterator::Subdirectories);
     while(it.hasNext()){
-        const auto p=it.next(); const QFileInfo fi(p);
-        if(!fi.fileName().contains("["+id+"]")) continue;
-        if(!extensions.isEmpty() && !extensions.contains(fi.suffix().toLower())) continue;
-        const auto rel=Paths(m_config.archiveRoot).relativeToRoot(p);
-        if(!Paths(m_config.archiveRoot).isSafeRelative(rel))continue;
-        if(fallback.isEmpty())fallback=rel;
-        const auto verified=relativeDir=="Video"?m_verifier.verifyVideo(rel):m_verifier.verifyAudio(rel);
+        const auto p=it.next();const QFileInfo fi(p);
+        if(!fi.fileName().contains("["+id+"]")||!fi.fileName().contains("["+attempt+"]"))continue;
+        if(!extensions.isEmpty()&&!extensions.contains(fi.suffix().toLower()))continue;
+        const auto rel=m_store.paths().relativeToRoot(p);
+        // The unique attempt marker establishes which completed child invocation
+        // produced this path. Content verification belongs to the caller so that
+        // valid-but-noncanonical media can still reach the normalization path.
+        if(m_store.paths().isSafeRelative(rel))return rel;
+    }
+    return {};
+}
+
+QString MediaExecutor::findExistingById(const QString& relativeDir,const QString& id,const QStringList& extensions) const
+{
+    if(!detail::videoIdSafe(id))return {};
+    const auto kind=relativeDir=="Video"?QString("video"):QString("audio");
+    QDirIterator it(QDir(m_config.archiveRoot).filePath(relativeDir),QDir::Files,QDirIterator::Subdirectories);
+    while(it.hasNext()){
+        const auto p=it.next();const QFileInfo fi(p);
+        if(!fi.fileName().contains("["+id+"]"))continue;
+        if(!extensions.isEmpty()&&!extensions.contains(fi.suffix().toLower()))continue;
+        const auto rel=m_store.paths().relativeToRoot(p);
+        if(!m_store.paths().isSafeRelative(rel)||!mediaBindingValid(rel,id,kind))continue;
+        const auto verified=kind=="video"?m_verifier.verifyVideo(rel):m_verifier.verifyAudio(rel);
         if(verified.ok)return rel;
     }
-    return fallback;
+    return {};
 }
 
 bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
@@ -1067,17 +1778,30 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
         return false;
     };
     const QString url=item.originalUrl.isEmpty()?"https://www.youtube.com/watch?v="+item.providerId:item.originalUrl;
-    QString output="Video/%(title).120s [%(artist|UNKNOWN)s] [%(height)sp %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s].%(ext)s";
+    const auto attempt="download-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
+    QString output="Video/%(title).120s [%(artist|UNKNOWN)s] [%(height)sp %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s] ["+attempt+"].%(ext)s";
     const auto previous=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
-    if(!previous.isEmpty())output.replace(".%(ext)s"," [repair-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8)+"].%(ext)s");
+
+    // Provider-controlled metadata filenames are written only into an
+    // exclusively-created, unpredictable staging directory. The external
+    // process never receives a predictable Metadata/<title> child where a
+    // pre-existing symlink/junction could redirect writes outside the Archive.
+    QTemporaryDir metadataStaging(QDir(m_store.paths().temp()).filePath("metadata-"+attempt+"-XXXXXX"));
+    if(!metadataStaging.isValid()||!detail::noLinks(metadataStaging.path()))
+        return fail("Cannot create safe metadata staging directory");
+    const auto metadataStageRel=m_store.paths().relativeToRoot(metadataStaging.path());
+    if(metadataStageRel.isEmpty()||!m_store.paths().isSafeRelative(metadataStageRel))
+        return fail("Metadata staging directory is outside the Archive boundary");
+    const auto metadataPrefix=metadataStageRel+"/";
+
     QStringList args={
         "--ignore-config","--no-playlist","--no-overwrites","--output-na-placeholder","NA",
         "-f","bv[height<=1080][vcodec^=avc]+ba[ext=m4a]/bv[height<=1080][vcodec^=avc]+ba/bv[height<=1080]+ba/b[height<=1080]",
         "--paths","temp:Temp","--merge-output-format","mp4","-o",output,
-        "-o","infojson:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/source [%(id)s].%(ext)s",
-        "-o","description:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/description [%(id)s].%(ext)s",
-        "-o","thumbnail:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/thumbnail [%(id)s].%(ext)s",
-        "-o","subtitle:Metadata/%(title).80s [%(artist|UNKNOWN)s] [%(id)s]/Subtitles/%(language)s [%(id)s].%(ext)s",
+        "-o","infojson:"+metadataPrefix+"source [%(id)s].%(ext)s",
+        "-o","description:"+metadataPrefix+"description [%(id)s].%(ext)s",
+        "-o","thumbnail:"+metadataPrefix+"thumbnail [%(id)s].%(ext)s",
+        "-o","subtitle:"+metadataPrefix+"Subtitles/%(language)s [%(id)s].%(ext)s",
         "--download-archive","State/video-archive.txt","--windows-filenames","--embed-metadata","--embed-thumbnail","--embed-chapters",
         "--write-info-json","--write-description","--write-thumbnail","--extractor-args","youtube:skip=translated_subs",
         "--write-subs","--write-auto-subs","--sub-langs","en.*","--sleep-subtitles","1","--embed-subs",
@@ -1086,13 +1810,18 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     appendYtRuntimeArgs(args,m_tools);
     args << "--" << url;
     if(!previous.isEmpty())args=withoutDownloadArchive(args);
+    QString statePathError;
+    const QStringList videoStatePaths={"State/video-archive.txt","State/video-catalog.jsonl"};
+    if(!validateExternalToolStatePaths(m_store.paths(),videoStatePaths,&statePathError))return fail(statePathError);
     auto r=run(m_tools.ytDlp(),args,"video-download");
-    QString rel=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
+    QString rel=findAttemptById("Video",item.providerId,attempt,{"mp4","mkv","webm"});
     if(r.ok && rel.isEmpty()){
         m_logger.event("WARNING","download","video_archive_retry",{{"item_key",item.key}});
         const auto retryArgs=withoutDownloadArchive(args);
+        statePathError.clear();
+        if(!validateExternalToolStatePaths(m_store.paths(),videoStatePaths,&statePathError))return fail(statePathError);
         r=run(m_tools.ytDlp(),retryArgs,"video-download-retry-without-archive");
-        rel=findExistingById("Video",item.providerId,{"mp4","mkv","webm"});
+        rel=findAttemptById("Video",item.providerId,attempt,{"mp4","mkv","webm"});
     }
     if(!r.ok && rel.isEmpty()) return fail(r.error+" "+r.standardError.left(600));
     if(rel.isEmpty()) return fail("Downloaded video could not be located");
@@ -1100,7 +1829,13 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
     if(!verify.ok){
         const auto input=Paths(m_config.archiveRoot).absoluteFromRelative(rel);
         const auto token=QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const auto tempRel="Temp/normalize-"+token+".mp4";const auto tmp=Paths(m_config.archiveRoot).absoluteFromRelative(tempRel);
+        // Own all staging bytes until publication. RAII also covers encoder,
+        // verifier, and rename failures without touching the downloaded original.
+        if(!detail::noLinks(m_store.paths().temp()))return fail("Unsafe normalization staging directory",rel);
+        QTemporaryDir staging(QDir(m_store.paths().temp()).filePath("normalize-"+token+"-XXXXXX"));
+        if(!staging.isValid()||!detail::noLinks(staging.path()))return fail("Cannot create normalization staging directory",rel);
+        const auto tmp=staging.filePath("normalized.mp4");
+        const auto tempRel=m_store.paths().relativeToRoot(tmp);
         const QStringList fargs={"-nostdin","-n","-i",input,"-map","0:v:0","-map","0:a:0?","-map","0:s?","-map_metadata","0","-map_chapters","0",
             "-vf","scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
             "-c:v","libx264","-preset","medium","-crf","18","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k","-c:s","mov_text",tmp};
@@ -1113,8 +1848,39 @@ bool MediaExecutor::downloadVideo(const CanonicalItem& item,QString* error)
         rel=normalized;verify=m_verifier.verifyVideo(rel);
     }
     if(!verify.ok) return fail("Video verification failed: "+verify.errors.join("; "),rel);
+    QString finalizationError;
+    if(!writeMediaBinding(rel,item,"video",&finalizationError))
+        return fail("Media binding finalization failed: "+finalizationError,rel);
+
+    QString metadataPath;
+    const auto metadataEntries=QDir(metadataStaging.path()).entryInfoList(
+        QDir::AllEntries|QDir::NoDotAndDotDot|QDir::Hidden|QDir::System);
+    if(!metadataEntries.isEmpty()){
+        QString stagingError;
+        if(!validateOwnedStagingTree(m_store.paths(),metadataStaging.path(),&stagingError))
+            return fail("Metadata staging validation failed: "+stagingError,rel);
+
+        // Generate the canonical destination only after the child has exited.
+        // rename() is the publication boundary: a collision fails instead of
+        // traversing/reusing an attacker-controlled destination.
+        const auto metadataPathCandidate="Metadata/youtube-"+item.providerId+"-"+
+            QUuid::createUuid().toString(QUuid::WithoutBraces).left(12);
+        const auto metadataDestination=m_store.paths().absoluteFromRelative(metadataPathCandidate);
+        if(metadataDestination.isEmpty()||QFileInfo::exists(metadataDestination)||
+           !QDir().rename(metadataStaging.path(),metadataDestination))
+            return fail("Unable to publish validated metadata staging directory",rel);
+
+        metadataStaging.setAutoRemove(false);
+        metadataPath=metadataPathCandidate;
+    }
+
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
-    if(!m_store.updateRepresentation(item.key,"video",done,error))return false;
+    finalizationError.clear();
+    stampVerifiedRepresentation(m_store.paths(),done,&finalizationError);
+    if(!finalizationError.isEmpty())return fail("Video fingerprint finalization failed: "+finalizationError,rel);
+    finalizationError.clear();
+    if(!m_store.updateRepresentation(item.key,"video",done,&finalizationError,metadataPath))
+        return fail("Video completion state could not be committed: "+finalizationError,rel);
     m_logger.event("INFO","verification","video_complete",{{"item_key",item.key},{"path",rel}});
     return true;
 }
@@ -1134,32 +1900,40 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
     };
     const QString url=item.originalUrl.isEmpty()?"https://www.youtube.com/watch?v="+item.providerId:item.originalUrl;
     const auto previous=findExistingById("Audio",item.providerId,{"m4a","mp4"});
+    const auto attempt="download-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8);
     QStringList args={"--ignore-config","--no-playlist","--no-overwrites","--output-na-placeholder","NA","-f","ba[ext=m4a]/ba","--paths","temp:Temp",
-        "-o","Audio/%(title).120s [%(artist|UNKNOWN)s] [m4a %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s].%(ext)s",
+        "-o","Audio/%(title).120s [%(artist|UNKNOWN)s] [m4a %(duration)ss %(upload_date>%y%m%d|UNKNOWN)s] [%(id)s] ["+attempt+"].%(ext)s",
         "--download-archive","State/audio-archive.txt","--windows-filenames","-x","--audio-format","m4a","--audio-quality","192K","--no-keep-video",
         "--embed-metadata","--embed-thumbnail","--embed-chapters","--parse-metadata","%(artist|UNKNOWN)s:%(meta_artist)s",
         "--print-to-file","after_move:%(.{id,title,artist,meta_artist,uploader,upload_date,duration,ext,webpage_url,filepath})j","State/audio-catalog.jsonl"};
     appendYtRuntimeArgs(args,m_tools);
     args << "--" << url;
-    if(!previous.isEmpty()){
-        const auto outputIndex=args.indexOf("-o")+1;
-        args[outputIndex].replace(".%(ext)s"," [repair-"+QUuid::createUuid().toString(QUuid::WithoutBraces).left(8)+"].%(ext)s");
-        args=withoutDownloadArchive(args);
-    }
+    if(!previous.isEmpty())args=withoutDownloadArchive(args);
+    QString statePathError;
+    const QStringList audioStatePaths={"State/audio-archive.txt","State/audio-catalog.jsonl"};
+    if(!validateExternalToolStatePaths(m_store.paths(),audioStatePaths,&statePathError))return fail(statePathError);
     auto r=run(m_tools.ytDlp(),args,"audio-download");
-    QString rel=findExistingById("Audio",item.providerId,{"m4a","mp4"});
+    QString rel=findAttemptById("Audio",item.providerId,attempt,{"m4a","mp4"});
     if(r.ok && rel.isEmpty()){
         m_logger.event("WARNING","download","audio_archive_retry",{{"item_key",item.key}});
         const auto retryArgs=withoutDownloadArchive(args);
+        statePathError.clear();
+        if(!validateExternalToolStatePaths(m_store.paths(),audioStatePaths,&statePathError))return fail(statePathError);
         r=run(m_tools.ytDlp(),retryArgs,"audio-download-retry-without-archive");
-        rel=findExistingById("Audio",item.providerId,{"m4a","mp4"});
+        rel=findAttemptById("Audio",item.providerId,attempt,{"m4a","mp4"});
     }
     if(!r.ok && rel.isEmpty()) return fail(r.error+" "+r.standardError.left(600));
     if(rel.isEmpty()) return fail("Downloaded audio could not be located");
     auto verify=m_verifier.verifyAudio(rel);
     if(!verify.ok){
         const auto token=QUuid::createUuid().toString(QUuid::WithoutBraces);
-        const auto tempRel="Temp/normalize-"+token+".m4a";const auto tmp=Paths(m_config.archiveRoot).absoluteFromRelative(tempRel);
+        // Own all staging bytes until publication. RAII also covers encoder,
+        // verifier, and rename failures without touching the downloaded original.
+        if(!detail::noLinks(m_store.paths().temp()))return fail("Unsafe normalization staging directory",rel);
+        QTemporaryDir staging(QDir(m_store.paths().temp()).filePath("normalize-"+token+"-XXXXXX"));
+        if(!staging.isValid()||!detail::noLinks(staging.path()))return fail("Cannot create normalization staging directory",rel);
+        const auto tmp=staging.filePath("normalized.m4a");
+        const auto tempRel=m_store.paths().relativeToRoot(tmp);
         const auto input=Paths(m_config.archiveRoot).absoluteFromRelative(rel);
         const auto result=run(m_tools.ffmpeg(),{"-nostdin","-n","-i",input,"-map","0:a:0","-vn","-map_metadata","0","-map_chapters","0","-c:a","aac","-b:a","192k",tmp},"audio-normalization");
         const auto staged=m_verifier.verifyAudio(tempRel);
@@ -1170,16 +1944,24 @@ bool MediaExecutor::downloadAudio(const CanonicalItem& item,QString* error)
         rel=normalized;verify=m_verifier.verifyAudio(rel);
     }
     if(!verify.ok)return fail("Audio verification failed: "+verify.errors.join("; "),rel);
+    QString finalizationError;
+    if(!writeMediaBinding(rel,item,"audio",&finalizationError))
+        return fail("Media binding finalization failed: "+finalizationError,rel);
     Representation done; done.state="complete"; done.path=rel; done.origin="automatic_download"; done.verifiedAt=nowIso();
-    if(!m_store.updateRepresentation(item.key,"audio",done,error))return false;
+    finalizationError.clear();
+    stampVerifiedRepresentation(m_store.paths(),done,&finalizationError);
+    if(!finalizationError.isEmpty())return fail("Audio fingerprint finalization failed: "+finalizationError,rel);
+    finalizationError.clear();
+    if(!m_store.updateRepresentation(item.key,"audio",done,&finalizationError))
+        return fail("Audio completion state could not be committed: "+finalizationError,rel);
     m_logger.event("INFO","verification","audio_complete",{{"item_key",item.key},{"path",rel}});
     return true;
 }
 
-bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool wantAudio,QString* error)
+bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool wantAudio,QString* error,bool rebuildProjections)
 {
     SyncLock lock(m_store.paths());if(!lock.tryLock())return detail::reject(error,lock.errorString());
-    if(!m_store.initialize(error))return false;
+    if(!m_store.initialize(error,lock.acquiredFreshly()))return false;
     QString stateError;const auto current=m_store.loadCanonicalItems(&stateError);if(!stateError.isEmpty())return detail::reject(error,stateError);
     CanonicalItem item;bool found=false;for(const auto& c:current)if(c.key==requested.key){item=c;found=true;break;}
     if(!found||!detail::videoIdSafe(item.providerId))return detail::reject(error,"Missing or invalid canonical download target");
@@ -1188,11 +1970,25 @@ bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool 
         if((kind=="video"&&!wantVideo)||(kind=="audio"&&!wantAudio))continue;
         auto representation=kind=="video"?item.video:item.audio;
         const auto check=[&](const QString& p){return kind=="video"?m_verifier.verifyVideo(p):m_verifier.verifyAudio(p);};
-        if(representation.state=="complete"&&check(representation.path).ok)continue;
+        if(representation.state=="complete"&&verifiedRepresentationUnchanged(m_store.paths(),representation))continue;
+        if(representation.state=="complete"){
+            const auto verified=check(representation.path);
+            if(verified.ok){
+                representation.verifiedAt=nowIso();
+                QString fingerprintError;
+                stampVerifiedRepresentation(m_store.paths(),representation,&fingerprintError);
+                if(!fingerprintError.isEmpty()){errors<<fingerprintError;continue;}
+                QString updateError;
+                if(!m_store.updateRepresentation(item.key,kind,representation,&updateError))errors<<updateError;
+                continue;
+            }
+        }
         // A state flag is not evidence that the file still exists or is readable.
         const auto existing=findExistingById(kind=="video"?"Video":"Audio",item.providerId,kind=="video"?QStringList{"mp4","mkv","webm"}:QStringList{"m4a","mp4"});
         if(!existing.isEmpty()&&check(existing).ok){
             representation.state="complete";representation.path=existing;representation.verifiedAt=nowIso();representation.error.clear();
+            QString fingerprintError;stampVerifiedRepresentation(m_store.paths(),representation,&fingerprintError);
+            if(!fingerprintError.isEmpty()){errors<<fingerprintError;continue;}
             if(representation.origin.isEmpty())representation.origin="existing_archive";
             QString e;if(!m_store.updateRepresentation(item.key,kind,representation,&e))errors<<e;continue;
         }
@@ -1200,20 +1996,53 @@ bool MediaExecutor::syncItem(const CanonicalItem& requested,bool wantVideo,bool 
             representation.state="failed";representation.error="Previously complete media is missing or failed verification";
             QString e;if(!m_store.updateRepresentation(item.key,kind,representation,&e)){errors<<e;continue;}
         }
-        if(isUnavailable(item.availability)){errors<<kind+": source is unavailable; external recovery required";continue;}
+        if(isUnavailable(item.availability)){
+            Representation blocked=representation;
+            blocked.state="blocked_unavailable";
+            const auto reason=kind+": source is unavailable; external recovery required";
+            if(!blocked.error.contains(reason))blocked.error=blocked.error.isEmpty()?reason:blocked.error+" | "+reason;
+            QString e;
+            if(!m_store.updateRepresentation(item.key,kind,blocked,&e))errors<<e;
+            errors<<reason;
+            continue;
+        }
         QString e;const bool ok=kind=="video"?downloadVideo(item,&e):downloadAudio(item,&e);if(!ok)errors<<kind+": "+e;
     }
-    if(!m_store.writeAllProjections(&stateError))errors<<stateError;
+    if(rebuildProjections&&!m_store.writeAllProjections(&stateError))errors<<stateError;
     if(error)*error=errors.join(" | ");return errors.isEmpty();
 }
 
 bool MediaExecutor::syncItems(const QVector<CanonicalItem>& items,const std::function<bool()>& shouldStop,QStringList* failures)
 {
+    QString batchError;
+    if(!m_store.beginRepresentationBatch(&batchError)){
+        if(failures)failures->append(batchError);
+        return false;
+    }
     bool all=true;
+    QSet<QString> processedKeys;
     for(const auto& item:items){
-        if(shouldStop && shouldStop()){all=false;if(failures)failures->append("Stopped before all items completed");break;}
+        if(processedKeys.contains(item.key))continue;
+        processedKeys.insert(item.key);
+        if(shouldStop && shouldStop()){
+            all=false;
+            if(failures)failures->append("Stopped before all items completed");
+            break;
+        }
         QString e;
-        if(!syncItem(item,true,true,&e)){ all=false; if(failures) failures->append(item.key+": "+e); }
+        if(!syncItem(item,true,true,&e,false)){
+            all=false;
+            if(failures)failures->append(item.key+": "+e);
+        }
+    }
+    if(!m_store.commitRepresentationBatch(&batchError)){
+        m_store.cancelRepresentationBatch();
+        if(failures)failures->append(batchError);
+        return false;
+    }
+    if(!m_store.writeAllProjections(&batchError)){
+        if(failures)failures->append(batchError);
+        all=false;
     }
     return all;
 }
@@ -1222,24 +2051,64 @@ RecoveryImporter::RecoveryImporter(RuntimeConfig c,Store& s,ActivityLogger& l):m
 
 ValidationResult RecoveryImporter::validate(const QString& packageDir) const
 {
+    QByteArray manifestBytes;
+    QString error;
+    if(!detail::readBytes(QDir(packageDir).filePath("manifest.json"),&manifestBytes,&error)){
+        ValidationResult r;r.errors<<error;return r;
+    }
+    return validateSnapshot(packageDir,manifestBytes);
+}
+
+ValidationResult RecoveryImporter::validateSnapshot(const QString& packageDir,const QByteArray& manifestBytes) const
+{
     ValidationResult r;SyncLock lock(m_store.paths());
     if(!lock.tryLock()){r.errors<<lock.errorString();return r;}
     const QFileInfo dirInfo(packageDir);
     if(!dirInfo.isDir()||!detail::noLinks(packageDir)){r.errors<<"Package is not an unlinked directory";return r;}
-    QByteArray bytes;QString pe;
-    if(!detail::readBytes(QDir(packageDir).filePath("manifest.json"),&bytes,&pe)){r.errors<<pe;return r;}
-    if(bytes.size()>1024*1024){r.errors<<"Manifest exceeds the 1 MiB safety limit";return r;}
-    const auto doc=parseJson(bytes,&pe);
+    QDirIterator tree(packageDir,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,QDirIterator::Subdirectories);
+    while(tree.hasNext()){
+        const auto path=tree.next();
+        const QFileInfo info=tree.fileInfo();
+        const auto rel=QDir(packageDir).relativeFilePath(path);
+        if(!detail::relativeSafe(rel)||!detail::noLinks(path)||info.isSymLink()){
+            r.errors<<"Recovery package contains a linked or unsafe entry: "+rel;
+            continue;
+        }
+        if(!info.isFile()&&!info.isDir())
+            r.errors<<"Recovery package contains a special filesystem entry: "+rel;
+    }
+
+    QString pe;
+    if(manifestBytes.size()>1024*1024){r.errors<<"Manifest exceeds the 1 MiB safety limit";return r;}
+    const auto doc=parseJson(manifestBytes,&pe);
     if(!doc.isObject()){r.errors<<("Invalid manifest.json: "+pe);return r;}
     const auto o=doc.object();
     if(o.value("schema_version")!=QJsonValue(1))r.errors<<"schema_version must be the number 1";
     r.packageId=o.value("package_id").toString();
     if(!detail::sourceKeySafe(r.packageId)||r.packageId!=dirInfo.fileName())r.errors<<"package_id must match its safe directory name (letters, digits, underscore or hyphen, 1 to 160 characters)";
     if(detail::sourceKeySafe(r.packageId)&&QFileInfo::exists(QDir(m_store.paths().importsAccepted()).filePath(r.packageId)))r.errors<<"An accepted package already has this identity; existing evidence is immutable";
-    const auto target=o.value("target").toObject();const auto id=target.value("youtube_id").toString();r.itemKey=target.value("item_key").toString();
+    // Archive Mode owns this filename after acceptance. Rejecting it before
+    // any package mutation prevents submitted evidence from being overwritten.
+    if(QFileInfo::exists(QDir(packageDir).filePath("receipt.json")))
+        r.errors<<"receipt.json is reserved for the Archive-generated package receipt";
+    if(!o.value("target").isObject())r.errors<<"target must be an object";
+    const auto target=o.value("target").toObject();
+    const auto itemKeyValue=target.value("item_key");
+    const auto youtubeIdValue=target.value("youtube_id");
+    const auto id=youtubeIdValue.toString();
+    r.itemKey=itemKeyValue.toString();
+
+    // Keep runtime validation identical to the published recovery-package
+    // schema. External agents must never see a package accepted here that the
+    // schema rejects, especially placeholder identities.
+    if(target.contains("item_key")&&(!itemKeyValue.isString()||
+       !QRegularExpression("^youtube:[A-Za-z0-9_-]{11}$").match(r.itemKey).hasMatch()))
+        r.errors<<"target.item_key must be a canonical YouTube item key";
+    if(target.contains("youtube_id")&&(!youtubeIdValue.isString()||!detail::videoIdSafe(id)))
+        r.errors<<"target.youtube_id must be an 11-character YouTube ID";
     if(r.itemKey.isEmpty()&&detail::videoIdSafe(id))r.itemKey="youtube:"+id;
-    if(r.itemKey.isEmpty())r.errors<<"target.item_key or a valid target.youtube_id is required";
-    if(target.contains("youtube_id")&&!detail::videoIdSafe(id))r.errors<<"target.youtube_id must be an 11-character YouTube ID";
+    if(!target.contains("item_key")&&!target.contains("youtube_id"))
+        r.errors<<"target.item_key or target.youtube_id is required";
     const auto provenance=o.value("provenance").toObject();
     if(provenance.value("method").toString().trimmed().isEmpty())r.errors<<"provenance.method is required";
     if(provenance.contains("confidence")&&!QStringList{"low","medium","high","verified"}.contains(provenance.value("confidence").toString()))r.errors<<"Invalid provenance.confidence";
@@ -1284,26 +2153,30 @@ bool RecoveryImporter::normalizeVideo(const QString& input,const QString& output
     const QStringList args={"-nostdin","-n","-i",input,"-map","0:v:0","-map","0:a:0?","-map_metadata","0","-map_chapters","0",
                             "-vf","scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2",
                             "-c:v","libx264","-preset","medium","-crf","18","-pix_fmt","yuv420p","-c:a","aac","-b:a","192k",output};
-    const auto r=runProcess(m_tools.ffmpeg(),args,m_config.archiveRoot,60*60*1000);
+    const auto r=runProcess(m_tools.ffmpeg(),args,m_config.archiveRoot,60*60*1000,m_config.cancelRequested);
     if(!r.ok){if(error)*error=r.error+" "+r.standardError.left(1000);return false;} return true;
 }
 
 bool RecoveryImporter::normalizeAudio(const QString& input,const QString& output,QString* error) const
 {
     const QStringList args={"-nostdin","-n","-i",input,"-vn","-map_metadata","0","-map_chapters","0","-c:a","aac","-b:a","192k",output};
-    const auto r=runProcess(m_tools.ffmpeg(),args,m_config.archiveRoot,60*60*1000);
+    const auto r=runProcess(m_tools.ffmpeg(),args,m_config.archiveRoot,60*60*1000,m_config.cancelRequested);
     if(!r.ok){if(error)*error=r.error+" "+r.standardError.left(1000);return false;} return true;
 }
 
-bool RecoveryImporter::ingest(const QString& packageDir,QString* error)
+bool RecoveryImporter::ingest(const QString& packageDir,QString* error,QString* projectionWarning)
 {
+    if(error)error->clear();
+    if(projectionWarning)projectionWarning->clear();
     SyncLock lock(m_store.paths());if(!lock.tryLock())return detail::reject(error,lock.errorString());
-    if(!m_store.initialize(error))return false;
+    if(!m_store.initialize(error,lock.acquiredFreshly()))return false;
     const auto absolute=QFileInfo(packageDir).absoluteFilePath();
     const auto pending=m_store.paths().importsPending();
     if(QFileInfo(absolute).absolutePath()!=pending||!detail::noLinks(absolute))return detail::reject(error,"Only direct, unlinked Pending packages can be ingested");
-    const auto vr=validate(absolute);if(!vr.ok)return detail::reject(error,vr.errors.join("; "));
-    QByteArray manifestBytes;if(!detail::readBytes(QDir(absolute).filePath("manifest.json"),&manifestBytes,error))return false;
+    QByteArray manifestBytes;
+    if(!detail::readBytes(QDir(absolute).filePath("manifest.json"),&manifestBytes,error))return false;
+    const auto vr=validateSnapshot(absolute,manifestBytes);
+    if(!vr.ok)return detail::reject(error,vr.errors.join("; "));
     const auto manifest=QJsonDocument::fromJson(manifestBytes).object();const auto reps=manifest.value("representations").toObject();
     QString stateError;auto items=m_store.loadCanonicalItems(&stateError);if(!stateError.isEmpty())return detail::reject(error,stateError);
     int index=-1;for(int i=0;i<items.size();++i)if(items[i].key==vr.itemKey){index=i;break;}
@@ -1335,18 +2208,26 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error)
         const auto hash=detail::fileDigest(output,error);if(hash.isEmpty())return false;
         moves.append(QJsonObject{{"from",stagedRel},{"to",destRel},{"sha256",hash}});promoted.append(destRel);
         Representation done;done.state="complete";done.path=destRel;done.origin="external_recovery";done.verifiedAt=nowIso();
+        const auto published=Paths(m_config.archiveRoot).absoluteFromRelative(destRel);
+        done.verifiedSha256=hash;done.verifiedSize=QFileInfo(published).exists()?QFileInfo(published).size():QFileInfo(output).size();done.verificationProfile=mediaVerificationProfile;
         if(kind=="video")target.video=done;else target.audio=done;
     }
-    target.recoveryStatus=target.video.state=="complete"&&target.audio.state=="complete"?"not_required":(isUnavailable(target.availability)?"unrecovered":target.recoveryStatus);
+    updateRecoveryStatus(target);
     const auto canonical=vectorToArray(items,canonicalToJson);if(!detail::arrayShape(canonical,"canonical",error))return false;
     for(auto it=inputHashes.begin();it!=inputHashes.end();++it)if(detail::fileDigest(it.key(),error)!=it.value())return detail::reject(error,"Submitted media changed during normalization");
     const auto manifestHash=detail::digest(manifestBytes);
     if(detail::fileDigest(QDir(absolute).filePath("manifest.json"),error)!=manifestHash)return detail::reject(error,"Submitted manifest changed during normalization");
-    // Bind every included package file, not just the manifest. Evidence remains inspectable in Accepted.
-    QJsonObject evidenceHashes;QDirIterator files(absolute,QDir::Files|QDir::Hidden,QDirIterator::Subdirectories);
-    while(files.hasNext()){const auto file=files.next();const auto rel=QDir(absolute).relativeFilePath(file);if(rel=="receipt.json")continue;
-        if(!detail::relativeSafe(rel)||!detail::noLinks(file))return detail::reject(error,"Unsafe file in recovery package");
-        const auto hash=detail::fileDigest(file,error);if(hash.isEmpty())return false;evidenceHashes[rel]=hash;
+    const auto finalSnapshot=validateSnapshot(absolute,manifestBytes);
+    if(!finalSnapshot.ok)return detail::reject(error,"Recovery package changed during normalization: "+finalSnapshot.errors.join("; "));
+
+    QJsonObject evidenceHashes;
+    QDirIterator evidence(absolute,QDir::AllEntries|QDir::Hidden|QDir::System|QDir::NoDotAndDotDot,QDirIterator::Subdirectories);
+    while(evidence.hasNext()){
+        const auto path=evidence.next();const auto info=evidence.fileInfo();const auto rel=QDir(absolute).relativeFilePath(path);
+        if(!detail::relativeSafe(rel)||!detail::noLinks(path)||info.isSymLink())return detail::reject(error,"Unsafe entry in recovery package: "+rel);
+        if(info.isDir())continue;
+        if(!info.isFile())return detail::reject(error,"Special entry in recovery package: "+rel);
+        const auto hash=detail::fileDigest(path,error);if(hash.isEmpty())return false;evidenceHashes[rel]=hash;
     }
     const QJsonObject receipt{{"schema_version",1},{"package_id",vr.packageId},{"item_key",vr.itemKey},{"result","accepted"},{"accepted_at",nowIso()},{"manifest_sha256",manifestHash},{"file_sha256",evidenceHashes},{"promoted_paths",promoted},{"transaction_id",transactionId}};
     QMap<QString,QByteArray> writes={{"State/ArchiveMode/items.json",QJsonDocument(canonical).toJson()},
@@ -1367,20 +2248,34 @@ bool RecoveryImporter::ingest(const QString& packageDir,QString* error)
         return false;
     }
     staging.setAutoRemove(true);
-    if(!m_store.writeAllProjections(error))return false;
-    m_logger.event("INFO","import","recovery_package_accepted",{{"package_id",vr.packageId},{"item_key",vr.itemKey}});return true;
+    // Media promotion, registry/history, receipt and Accepted placement are
+    // already durable. Do not classify a report-path failure as a failed import
+    // or replay normalization. writeAllProjections retains the dirty marker.
+    QString reportError,warning;
+    const bool projectionsCurrent=m_store.writeAllProjections(&reportError);
+    if(!projectionsCurrent)warning="State committed, projection rebuild required: "+reportError;
+    if(projectionWarning)*projectionWarning=warning;
+    m_logger.event(projectionsCurrent?"INFO":"WARNING","import","recovery_package_accepted",{
+        {"package_id",vr.packageId},{"item_key",vr.itemKey},{"projections_current",projectionsCurrent},
+        {"projection_warning",warning}});
+    return true;
 }
 
-int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bool()>& shouldStop)
+int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bool()>& shouldStop,QStringList* warnings)
 {
     SyncLock lock(m_store.paths());if(!lock.tryLock()){if(failures)failures->append(lock.errorString());return 0;}
-    QString initError;if(!m_store.initialize(&initError)){if(failures)failures->append(initError);return 0;}
+    QString initError;if(!m_store.initialize(&initError,lock.acquiredFreshly())){if(failures)failures->append(initError);return 0;}
     QDir d(m_store.paths().importsPending());int accepted=0;
     for(const auto& name:d.entryList(QDir::Dirs|QDir::NoDotAndDotDot,QDir::Name)){
         if(shouldStop&&shouldStop()){if(failures)failures->append("Stopped before all packages completed");break;}
         const auto dir=d.filePath(name);const auto validation=validate(dir);QString error;
         if(validation.ok){
-            if(ingest(dir,&error)){++accepted;continue;}
+            QString warning;
+            if(ingest(dir,&error,&warning)){
+                ++accepted;
+                if(warnings&&!warning.isEmpty())warnings->append(name+": "+warning);
+                continue;
+            }
             // Tool, storage and interrupted-transaction failures stay retryable in Pending.
             if(failures)failures->append(name+": retryable failure: "+error);
             m_logger.event("ERROR","import","recovery_package_pending",{{"package_id",name},{"reason",error}});
@@ -1389,11 +2284,18 @@ int RecoveryImporter::ingestPending(QStringList* failures,const std::function<bo
         }
         error=validation.errors.join("; ");
         if(!detail::sourceKeySafe(name)||!detail::noLinks(dir)){if(failures)failures->append(name+": "+error);continue;}
-        QJsonObject receipt{{"schema_version",1},{"package_id",name},{"result","rejected"},{"rejected_at",nowIso()},{"reason",error}};
-        QString receiptError;
-        if(!m_store.writeReceipt(dir,receipt,&receiptError)){if(failures)failures->append(name+": "+receiptError);continue;}
+        const QJsonObject receipt{{"schema_version",1},{"package_id",name},{"result","rejected"},{"rejected_at",nowIso()},{"reason",error}};
         const auto dest=QDir(m_store.paths().importsRejected()).filePath(name+"-"+QUuid::createUuid().toString(QUuid::WithoutBraces));
-        if(!QDir().rename(dir,dest))error+="; rejection move failed, package remains Pending";
+        if(!QDir().rename(dir,dest)){
+            error+="; rejection move failed, package remains Pending";
+        }else{
+            // Rejected packages are forensic input. Keep their bytes exactly as
+            // submitted and place our diagnostic receipt beside, not inside,
+            // the moved directory.
+            QString receiptError;
+            if(!detail::writeBytes(dest+".receipt.json",QJsonDocument(receipt).toJson(QJsonDocument::Indented),&receiptError))
+                error+="; rejection receipt could not be written: "+receiptError;
+        }
         if(failures)failures->append(name+": "+error);
         m_logger.event("WARNING","import","recovery_package_rejected",{{"package_id",name},{"reason",error}});
     }
@@ -1415,6 +2317,7 @@ SyncLock::~SyncLock(){unlock();}
 bool SyncLock::tryLock(int timeoutMs)
 {
     if(m_lock)return true;
+    m_acquiredFreshly=false;
     if(!m_paths.ensureLayout(&m_error))return false;
     auto path=QDir(m_paths.archiveState()).filePath("sync.lock");
     if(!detail::noLinks(path)){m_error="Linked Archive lock path refused";return false;}
@@ -1428,10 +2331,27 @@ bool SyncLock::tryLock(int timeoutMs)
         m_lock=held;return true;
     }
     auto next=std::make_shared<ArchiveLockState>(path);
-    if(!next->file.tryLock(qMax(0,timeoutMs))){m_error="Another Archive operation is active or the lock could not be acquired";return false;}
-    m_lock=next;archiveLocks[path]=next;m_error.clear();return true;
+    if(!next->file.tryLock(qMax(0,timeoutMs))){
+        qint64 ownerPid=0;QString ownerHost,ownerApp;
+        const bool haveOwner=next->file.getLockInfo(&ownerPid,&ownerHost,&ownerApp);
+
+        // With staleLockTime(0), Qt will not remove an old lock by age. Its
+        // explicit stale-removal API still performs the strong dead-owner
+        // checks needed after a crash. Never remove a lock that may be live.
+        if(next->file.error()==QLockFile::LockFailedError &&
+           next->file.removeStaleLockFile() &&
+           next->file.tryLock(qMax(0,timeoutMs))){
+            m_lock=next;archiveLocks[path]=next;m_acquiredFreshly=true;m_error.clear();return true;
+        }
+
+        m_error="Another Archive operation is active or the lock could not be acquired";
+        if(haveOwner)m_error+=QString(" (pid %1, host %2, app %3)").arg(ownerPid).arg(ownerHost,ownerApp);
+        return false;
+    }
+    m_lock=next;archiveLocks[path]=next;m_acquiredFreshly=true;m_error.clear();return true;
 }
-void SyncLock::unlock(){QMutexLocker guard(&archiveLocksMutex);m_lock.reset();}
+void SyncLock::unlock(){QMutexLocker guard(&archiveLocksMutex);m_lock.reset();m_acquiredFreshly=false;}
 QString SyncLock::errorString() const{return m_error;}
+bool SyncLock::acquiredFreshly() const{return m_acquiredFreshly;}
 
 } // namespace archive

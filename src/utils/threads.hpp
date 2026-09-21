@@ -19,6 +19,8 @@
 
 #include <QThread>
 #include <QEventLoop>
+#include <QPointer>
+#include <QObject>
 
 #include <type_traits>
 
@@ -138,6 +140,52 @@ namespace utils
 
 			run( meaw{ std::move( bgt ) } ) ;
 		}
+
+		template< typename T,
+			  typename std::enable_if< !std::is_void< decltype( std::declval< T >().bg() ) >::value,int >::type = 0 >
+		void run( QObject * context,T bgt )
+		{
+			using result_t = decltype( std::declval< T >().bg() ) ;
+			struct guarded
+			{
+				QPointer< QObject > context ;
+				T task ;
+				result_t bg()
+				{
+					return task.bg() ;
+				}
+				void fg( result_t&& value )
+				{
+					if( context ){
+						task.fg( std::move( value ) ) ;
+					}
+				}
+			} ;
+			run( guarded{ context,std::move( bgt ) } ) ;
+		}
+
+		template< typename T,
+			  typename std::enable_if< std::is_void< decltype( std::declval< T >().bg() ) >::value,int >::type = 0 >
+		void run( QObject * context,T bgt )
+		{
+			struct guarded
+			{
+				QPointer< QObject > context ;
+				T task ;
+				void bg()
+				{
+					task.bg() ;
+				}
+				void fg()
+				{
+					if( context ){
+						task.fg() ;
+					}
+				}
+			} ;
+			run( guarded{ context,std::move( bgt ) } ) ;
+		}
+
 
 		template< typename BackGroundTask,
 			 typename UiThreadResult,

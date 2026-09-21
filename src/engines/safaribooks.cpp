@@ -162,9 +162,7 @@ QString safaribooks::commandString( const engines::engine::exeArgs::cmd& cmd )
 	for( int i = 0 ; i < args.size() ; i++ ){
 
 		if( i > 0 && args[ i - 1 ] == "--cred" ){
-			m += " \"" + args[ i ] + "\"" ;
-
-			//m += " \"" + QObject::tr( "<REDACTED>" ) + "\"" ;
+			m += " \"" + QObject::tr( "<REDACTED>" ) + "\"" ;
 		}else{
 			m += " \"" + args[ i ] + "\"" ;
 		}
@@ -182,12 +180,14 @@ void safaribooks::sendCredentials( const QString& credentials,QProcess& exe )
 			exe.write( m_engine.userName().toUtf8() + "\n" ) ;
 			exe.write( m_engine.password().toUtf8() + "\n" ) ;
 		}else{
-			auto m = util::split( credentials,':',true ) ;
+			// Credentials are serialized as username:password for compatibility.
+			// Split exactly once so delimiter characters inside the password remain intact.
+			const auto separator = credentials.indexOf( ':' ) ;
 
-			if( m.size() > 1 ){
+			if( separator > 0 ){
 
-				exe.write( m.at( 0 ).toUtf8() + "\n" ) ;
-				exe.write( m.at( 1 ).toUtf8() + "\n" ) ;
+				exe.write( credentials.left( separator ).toUtf8() + "\n" ) ;
+				exe.write( credentials.mid( separator + 1 ).toUtf8() + "\n" ) ;
 			}
 		}
 
@@ -251,9 +251,17 @@ void safaribooks::updateDownLoadCmdOptions( const engines::engine::baseEngine::u
 {
 	if( s.urls.size() > 0 ){
 
-		const auto m = util::split( s.urls[ 0 ],'/',true ) ;
+		const auto input = s.urls[ 0 ].trimmed() ;
+		const auto m = util::split( input,'/',true ) ;
 
-		s.urls[ 0 ] = m.last() ;
+		// Slash-only, whitespace-only or otherwise component-less input is
+		// malformed. Do not retain a whitespace token as a fake identifier.
+		if( input.isEmpty() || m.isEmpty() || m.last().trimmed().isEmpty() ){
+			s.urls.clear() ;
+			return ;
+		}
+
+		s.urls[ 0 ] = m.last().trimmed() ;
 	}
 
 	s.ourOptions.append( "--destination" ) ;

@@ -18,6 +18,7 @@
  */
 
 #include "yt-dlp.h"
+#include "json_media_size.hpp"
 
 #include <QJsonObject>
 #include <QJsonArray>
@@ -26,6 +27,8 @@
 
 #include "../networkAccess.h"
 #include "../utility.h"
+#include <cmath>
+#include <limits>
 
 #include "../configure.h"
 #include "../settings.h"
@@ -187,6 +190,26 @@ static QString _Windows64BitBinaryName()
 	return "yt-dlp.exe" ;
 }
 
+static QString _WindowsArm64BinaryName()
+{
+	return "yt-dlp_arm64.exe" ;
+}
+
+static QString _WindowsBinaryName()
+{
+	const utility::CPU cpu ;
+
+	if( cpu.x86_32() ){
+		return _Windows32BitBinaryName() ;
+	}else if( cpu.aarch64() ){
+		return _WindowsArm64BinaryName() ;
+	}else if( cpu.x86_64() ){
+		return _Windows64BitBinaryName() ;
+	}else{
+		return {} ;
+	}
+}
+
 static QString _NicolaasjanYtdlpFor32BitWin7()
 {
 	return "yt-dlp_x86_win7.exe" ;
@@ -224,16 +247,15 @@ void yt_dlp::checkIfBinaryExist( const QString& runTimeBinPath,const QString& th
 
 			// left on purpose
 		}else{
-			if( utility::CPU().x86_32() ){
-
-				destPath += "/" + _Windows32BitBinaryName() ;
-			}else{
-				destPath += "/" + _Windows64BitBinaryName() ;
+			const auto binaryName = _WindowsBinaryName() ;
+			if( binaryName.isEmpty() ){
+				return ;
 			}
+			destPath += "/" + binaryName ;
 
 			if( !QFile::exists( destPath ) ){
 
-				auto srcPath = thirdPartyBinPath + "/ytdlp/" + _Windows32BitBinaryName() ;
+				const auto srcPath = thirdPartyBinPath + "/ytdlp/" + binaryName ;
 
 				utility::copyFile( srcPath,destPath ) ;
 			}
@@ -300,6 +322,7 @@ utility::addJsonCmd::entry::args yt_dlp::entryCmd( const QString& e )
 		data.emplace_back( "win7amd64",_NicolaasjanYtdlpFor64BitWin7() ) ;
 		data.emplace_back( "x86",_Windows32BitBinaryName() ) ;
 		data.emplace_back( "amd64",_Windows64BitBinaryName() ) ;
+		data.emplace_back( "aarch64",_WindowsArm64BinaryName() ) ;
 
 	}else if( e == "MacOS" ){
 
@@ -323,6 +346,10 @@ utility::addJsonCmd::entry::args yt_dlp::entryCmdNightly( const QString& e )
 		data.emplace_back( "win7amd64",_NicolaasjanYtdlpFor64BitWin7() ) ;
 		data.emplace_back( "x86","yt-dlp_x86-nightly.exe" ) ;
 		data.emplace_back( "amd64","yt-dlp-nightly.exe" ) ;
+		// Nightly publishes the native ARM64 asset as yt-dlp_arm64.exe.
+		// Keep "-nightly" in the managed command identity so the existing
+		// nightly asset matcher removes it and selects yt-dlp_arm64.exe exactly.
+		data.emplace_back( "aarch64","yt-dlp_arm64-nightly.exe" ) ;
 
 	}else if( e == "MacOS" ){
 
@@ -976,10 +1003,15 @@ public:
 		}
 
 		if( dd.isDouble() ){
-
-			m_duration = QString::number( static_cast< int >( dd.toDouble() ) ) ;
-		}else{
-			m_duration = QString::number( dd.toInt() ) ;
+			const auto value = dd.toDouble() ;
+			if( std::isfinite( value ) && value >= 0.0 &&
+			    value <= static_cast< double >( std::numeric_limits< qint64 >::max() ) ){
+				m_duration = QString::number( static_cast< qint64 >( value ) ) ;
+			}
+		}else if( dd.isString() ){
+			bool ok = false ;
+			const auto value = dd.toString().toLongLong( &ok ) ;
+			if( ok && value >= 0 )m_duration = QString::number( value ) ;
 		}
 
 		for( const auto& it : array ){
@@ -1142,7 +1174,7 @@ private:
 
 			ss = QString( "Proto: %1\n" ).arg( proto ) ;
 		}else{
-			auto m = QString( "Proto: %1%2\ncontainer: %2\n" ) ;
+			auto m = QString( "Proto: %1\ncontainer: %2\n" ) ;
 			ss = m.arg( proto,container ) ;
 		}
 
@@ -1212,39 +1244,25 @@ private:
 	}
 	QString fileSizeRaw( const QJsonObject& e )
 	{
-		auto m = e.value( "filesize" ).toInt( -1 ) ;
-
-		if( m == -1 ){
-
-			m = e.value( "filesize_approx" ).toInt( -1 ) ;
-
-			if( m == -1 ){
-
-				return "0" ;
-			}else{
-				return QString::number( m ) ;
-			}
-		}else{
-			return QString::number( m ) ;
+		qint64 bytes=0 ;
+		if( engineJson::nonNegativeByteCount( e.value( "filesize" ),&bytes ) ){
+			return QString::number( bytes ) ;
 		}
+		if( engineJson::nonNegativeByteCount( e.value( "filesize_approx" ),&bytes ) ){
+			return QString::number( bytes ) ;
+		}
+		return "0" ;
 	}
 	QString fileSize( const QJsonObject& e )
 	{
-		auto m = e.value( "filesize" ).toInt( -1 ) ;
-
-		if( m == -1 ){
-
-			m = e.value( "filesize_approx" ).toInt( -1 ) ;
-
-			if( m == -1 ){
-
-				return "NA" ;
-			}else{
-				return "~" + m_locale.formattedDataSize( m ) ;
-			}
-		}else{
-			return m_locale.formattedDataSize( m ) ;
+		qint64 bytes=0 ;
+		if( engineJson::nonNegativeByteCount( e.value( "filesize" ),&bytes ) ){
+			return m_locale.formattedDataSize( bytes ) ;
 		}
+		if( engineJson::nonNegativeByteCount( e.value( "filesize_approx" ),&bytes ) ){
+			return "~" + m_locale.formattedDataSize( bytes ) ;
+		}
+		return "NA" ;
 	}
 	void append( QStringList& s,const char * str,const QString& sstr,bool formatBitrate )
 	{
@@ -1517,31 +1535,42 @@ void yt_dlp::updateDownLoadCmdOptions( const engines::engine::baseEngine::update
 		s.ourOptions.append( settings.downloadFolder() ) ;
 	}
 
+	// Assemble the same effective option list yt-dlp will receive before
+	// deriving playlist metadata reconstruction from its final output template.
+	// This keeps engine-default, per-row/user, UI and extra option sources
+	// behaviorally equivalent while preserving baseEngine precedence.
+	engines::engine::baseEngine::updateDownLoadCmdOptions( s,e,extraOpts ) ;
+
 	QStringList mm ;
 
 	for( int m = s.ourOptions.size() - 1 ; m > -1 ; m-- ){
 
-		if( s.ourOptions[ m ] == "-o" ){
+		QString outputTemplate ;
+		const auto& option = s.ourOptions[ m ] ;
 
-			if( m + 1 < s.ourOptions.size() ){
+		if( option == "-o" || option == "--output" ){
 
-				auto& e = s.ourOptions[ m + 1 ] ;
+			if( m + 1 < s.ourOptions.size() ) outputTemplate = s.ourOptions[ m + 1 ] ;
+		}else if( option.startsWith( "--output=" ) ){
 
-				auto w = s.uiIndex.toString( true,s.ourOptions ) ;
-				auto ww = s.uiIndex.toString( false,s.ourOptions ) ;
+			outputTemplate = option.mid( 9 ) ;
+		}
 
-				this->parseMetadata( mm,e,"%(autonumber)s",ww ) ;
-				this->parseMetadata( mm,e,"%(playlist_index)s",w ) ;
-				this->parseMetadata( mm,e,"%(playlist_autonumber)s",w ) ;
-				this->parseMetadata( mm,e,"%(playlist_id)s",s.playlist_id ) ;
-				this->parseMetadata( mm,e,"%(playlist_title)s",s.playlist_title ) ;
-				this->parseMetadata( mm,e,"%(playlist)s",s.playlist ) ;
-				this->parseMetadata( mm,e,"%(playlist_count)s",s.playlist_count ) ;
-				this->parseMetadata( mm,e,"%(playlist_uploader)s",s.playlist_uploader ) ;
-				this->parseMetadata( mm,e,"%(playlist_uploader_id)s",s.playlist_uploader_id ) ;
-				this->parseMetadata( mm,e,"%(n_entries)s",s.uiIndex.total() ) ;
-			}
+		if( !outputTemplate.isEmpty() ){
 
+			auto w = s.uiIndex.toString( true,s.ourOptions ) ;
+			auto ww = s.uiIndex.toString( false,s.ourOptions ) ;
+
+			this->parseMetadata( mm,outputTemplate,"%(autonumber)s",ww ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_index)s",w ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_autonumber)s",w ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_id)s",s.playlist_id ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_title)s",s.playlist_title ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist)s",s.playlist ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_count)s",s.playlist_count ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_uploader)s",s.playlist_uploader ) ;
+			this->parseMetadata( mm,outputTemplate,"%(playlist_uploader_id)s",s.playlist_uploader_id ) ;
+			this->parseMetadata( mm,outputTemplate,"%(n_entries)s",s.uiIndex.total() ) ;
 			break ;
 		}
 	}
@@ -1550,8 +1579,6 @@ void yt_dlp::updateDownLoadCmdOptions( const engines::engine::baseEngine::update
 
 		s.ourOptions.append( mm ) ;
 	}
-
-	engines::engine::baseEngine::updateDownLoadCmdOptions( s,e,extraOpts ) ;
 
 	if( !utils::misc::containsAny( s.ourOptions,"-f","--format","-S","--format-sort" ) ){
 
@@ -1601,7 +1628,7 @@ const QByteArray& yt_dlp::yt_dlplFilter::operator()( Logger::Data& s )
 
 			auto m = m_parent.Settings().downloadFolder() ;
 
-			utility::deleteTmpFiles( m,m_fileNames ) ;
+			utility::deleteTmpFiles( m,m_ownedFileNames ) ;
 		}
 
 	}else if( s.lastLineIsProgressLine() ){
@@ -1762,7 +1789,7 @@ const QByteArray& yt_dlp::yt_dlplFilter::parseOutput( const Logger::Data::QByteA
 			auto m = e.mid( e.indexOf( " " ) + 1 ) ;
 			m.truncate( m.indexOf( " has already been downloaded" ) ) ;
 
-			this->setFileName( m ) ;
+			this->setFileName( m,false ) ;
 		}
 		if( e.contains( "] Destination: " ) ){
 
@@ -1792,16 +1819,22 @@ const QByteArray& yt_dlp::yt_dlplFilter::parseOutput( const Logger::Data::QByteA
 
 			return m_tmp ;
 		}
-		if( !m_mergeSeen && e.contains( " Merging formats into \"" ) ){
+		if( e.contains( " Merging formats into \"" ) ){
 
-			m_mergeSeen = true ;
+			const auto openingQuote = e.indexOf( '"' ) ;
+			if( openingQuote < 0 ){
+				return m_tmp ;
+			}
 
-			auto m = e.mid( e.indexOf( '"' ) + 1 ) ;
-			auto s = m.lastIndexOf( '"' ) ;
+			auto m = e.mid( openingQuote + 1 ) ;
+			const auto closingQuote = m.lastIndexOf( '"' ) ;
+			if( closingQuote <= 0 ){
+				return m_tmp ;
+			}
 
-			if( s != -1 ){
-
-				m.truncate( s ) ;
+			m.truncate( closingQuote ) ;
+			if( m.trimmed().isEmpty() ){
+				return m_tmp ;
 			}
 
 			this->setFileName( m ) ;
@@ -1826,13 +1859,13 @@ const QByteArray& yt_dlp::yt_dlplFilter::parseOutput( const Logger::Data::QByteA
 	return m_preProcessing.text() ;
 }
 
-void yt_dlp::yt_dlplFilter::setFileName( const QByteArray& fileName )
+void yt_dlp::yt_dlplFilter::setFileName( const QByteArray& fileName,bool ownedByInvocation )
 {
 	if( !fileName.isEmpty() ){
 
-		auto _add = [ this ]( const QByteArray& fn ){
+		auto _add = []( std::vector< QByteArray >& files,const QByteArray& fn ){
 
-			for( const auto& it : m_fileNames ){
+			for( const auto& it : files ){
 
 				if( it == fn ){
 
@@ -1840,16 +1873,20 @@ void yt_dlp::yt_dlplFilter::setFileName( const QByteArray& fileName )
 				}
 			}
 
-			m_fileNames.emplace_back( fn ) ;
+			files.emplace_back( fn ) ;
 		} ;
+
+		QByteArray normalized = fileName ;
 
 		if( utility::platformisFlatPak() ){
 
 			auto m = m_parent.Settings().downloadFolder().size() ;
+			normalized = fileName.mid( m + 1 ) ;
+		}
 
-			_add( fileName.mid( m + 1 ) ) ;
-		}else{
-			_add( fileName ) ;
+		_add( m_fileNames,normalized ) ;
+		if( ownedByInvocation ){
+			_add( m_ownedFileNames,normalized ) ;
 		}
 	}
 }

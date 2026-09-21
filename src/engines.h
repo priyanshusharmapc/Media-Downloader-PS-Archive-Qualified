@@ -30,6 +30,7 @@
 #include <QProcess>
 #include <QDateTime>
 #include <QNetworkProxy>
+#include <QLockFile>
 
 #include <vector>
 #include <functional>
@@ -40,6 +41,7 @@
 #include "utils/threads.hpp"
 #include "utils/qprocess.hpp"
 #include "utils/miscellaneous.hpp"
+#include "archive/archiveprocess.h"
 
 class tableWidget ;
 class settings ;
@@ -54,6 +56,13 @@ class engines
 {
 public:
 	static bool filePathIsValid( const QFileInfo& ) ;
+	static bool executableOwnedByBinRoot( const QString& executable,const QString& binRoot ) ;
+
+	// Rendering helpers are intentionally separate from process arguments and
+	// environment. They scrub credentials only from diagnostics, never from the
+	// values delivered to the child process.
+	static QString redactLogArgument( const QString& ) ;
+	static QString redactLogEnvironment( const QString&,const QString& ) ;
 
 	class file
 	{
@@ -62,15 +71,15 @@ public:
 			m_filePath( path ),m_file( m_filePath ),m_logger( logger )
 		{
 		}
-		void write( const QString& ) ;
-		void write( const QJsonDocument&,
+		bool write( const QString& ) ;
+		bool write( const QJsonDocument&,
 			    QJsonDocument::JsonFormat = QJsonDocument::Indented ) ;
-		void write( const QJsonObject&,
+		bool write( const QJsonObject&,
 			    QJsonDocument::JsonFormat = QJsonDocument::Indented ) ;
 		QByteArray readAll() ;
 		QStringList readAllAsLines() ;
 		template< typename Function >
-		static void readAll( const QString& filePath,Logger& logger,Function function )
+		static void readAll( QObject * context,const QString& filePath,Logger& logger,Function function )
 		{
 			class meaw
 			{
@@ -97,7 +106,7 @@ public:
 					QByteArray m_data ;
 				} ;
 				meaw( const QString& file,Function f,Logger& l ) :
-					m_filePath( file ),m_function( std::move( f ) ),m_logger( l )
+					m_filePath( file ),m_function( std::move( f ) ),m_logger( &l )
 				{
 				}
 				result bg()
@@ -117,17 +126,20 @@ public:
 
 						m_function( true,r.data() ) ;
 					}else{
-						engines::file( m_filePath,m_logger ).failToOpenForReading() ;
+						engines::file( m_filePath,*m_logger ).failToOpenForReading() ;
 						m_function( false,r.data() ) ;
 					}
 				}
 			private:
 				QString m_filePath ;
 				Function m_function ;
-				Logger& m_logger ;
+				Logger * m_logger ;
 			} ;
 
-			utils::qthread::run( meaw( filePath,std::move( function ),logger ) ) ;
+			// Both the logger access and arbitrary owner callback are foreground
+			// operations guarded by the caller's QObject lifetime. Background work
+			// owns only the immutable path and never dereferences UI/controller state.
+			utils::qthread::run( context,meaw( filePath,std::move( function ),logger ) ) ;
 		}
 	private:
 		void failToOpenForReading() ;
@@ -293,23 +305,36 @@ public:
 			return this->add( m_enginePath,e ) ;
 		}
 		QString socketPath() ;
+		QString socketLockPath() const ;
 		void confirmPaths( Logger& ) const ;
 	private:
 		QString archiveFilePathByName( const QString& name,const QString& ext = ".txt" ) const
 		{
-			auto o = this->add( m_dataPath,"archiveFile-" + name + ext ) ;
+			const auto current = this->add( m_dataPath,"archiveFile-" + name + ext ) ;
 
 			if( name == "yt-dlp" ){
+				// Legacy migration mutates the same durable deduplication state used
+				// by downloads and Clear Archive. Serialize it across app instances.
+				QLockFile migrationLock( current + ".lock" ) ;
+				migrationLock.setStaleLockTime( 30000 ) ;
+				if( !migrationLock.tryLock( 10000 ) ){
+					return current ;
+				}
 
-				auto m = this->add( m_dataPath,"subscriptions_archive_file.txt" ) ;
+				const auto legacy = this->add( m_dataPath,"subscriptions_archive_file.txt" ) ;
+				if( QFile::exists( current ) ){
+					return current ;
+				}
 
-				if( QFile::exists( m ) ){
-
-					QFile::rename( m,o ) ;
+				if( QFile::exists( legacy ) ){
+					if( QFile::rename( legacy,current ) || QFile::exists( current ) ){
+						return current ;
+					}
+					return legacy ;
 				}
 			}
 
-			return o ;
+			return current ;
 		}
 		QString add( const QString& basePath,const QString& toAdd ) const
 		{
@@ -866,7 +891,7 @@ public:
 
 			virtual QString deleteEngineBinFolder( const QString& ) ;
 
-			virtual void runCommandOnDownloadedFile( const std::vector< QByteArray >& ) ;
+			virtual void runCommandOnDownloadedFile( const std::vector< QByteArray >&,const QString& ) ;
 
 			virtual QString commandString( const engines::engine::exeArgs::cmd& ) ;
 
@@ -1231,31 +1256,45 @@ public:
 		public:
 			uvic( const engines::engine& engine,
 			      const Context& ctx,
-			      Function function ) :
+			      Function function,
+			      QString executable,
+			      QStringList arguments,
+			      QProcessEnvironment environment,
+			      std::shared_ptr< std::atomic_bool > cancel ) :
 				m_engine( engine ),
 				m_ctx( ctx ),
-				m_function( std::move( function ) )
+				m_function( std::move( function ) ),
+				m_executable( std::move( executable ) ),
+				m_arguments( std::move( arguments ) ),
+				m_environment( std::move( environment ) ),
+				m_cancel( std::move( cancel ) )
 			{
 			}
-			void operator()( const utils::qprocess::outPut& e )
+			archive::ProcessResult bg()
 			{
-				if( e.success() ){
-
-					m_engine.setVersionString( e.stdOut ) ;
+				// Version probes are external processes too. Run them off the GUI
+				// thread with the same finite deadline, bounded output and complete
+				// process-tree cancellation contract used by Archive operations.
+				return archive::detail::runContainedProcess(
+					m_executable,m_arguments,QString(),10000,m_cancel.get(),&m_environment ) ;
+			}
+			void fg( archive::ProcessResult result )
+			{
+				if( result.ok ){
+					m_engine.setVersionString( result.standardOutput ) ;
 				}
 
 				m_ctx.TabManager().enableAll() ;
-
 				m_function() ;
-			}
-			uvic< Context,Function > move()
-			{
-				return std::move( *this ) ;
 			}
 		private:
 			const engines::engine& m_engine ;
 			const Context& m_ctx ;
 			Function m_function ;
+			QString m_executable ;
+			QStringList m_arguments ;
+			QProcessEnvironment m_environment ;
+			std::shared_ptr< std::atomic_bool > m_cancel ;
 		} ;
 
 		template< typename Context,typename Function >
@@ -1266,23 +1305,24 @@ public:
 				const auto& engine = *this ;
 
 				if( engine.versionInfo().valid() ){
-
 					ff() ;
 				}else{
 					ctx.TabManager().disableAll() ;
 
-					const auto& exe = engine.exePath() ;
-					QStringList args{ engine.versionArgument() } ;
+					const auto exe = engine.exePath() ;
+					const engines::engine::exeArgs::cmd command(
+						exe,QStringList{ engine.versionArgument() } ) ;
+					this->setPermissions( exe.realExe() ) ;
 
-					engines::engine::exeArgs::cmd cmd( exe,args ) ;
+					auto cancel = std::make_shared< std::atomic_bool >( false ) ;
+					QObject::connect( &ctx.mainWidget(),&QObject::destroyed,
+						[ cancel ](){ cancel->store( true ) ; } ) ;
 
-					this->setPermissions( cmd.exe() ) ;
-
-					uvic< Context,Function > meaw( engine,ctx,std::move( ff ) ) ;
-
-					auto m = QProcess::SeparateChannels ;
-
-					utils::qprocess::run( cmd.exe(),cmd.args(),m,meaw.move() ) ;
+					utils::qthread::run(
+						&ctx.mainWidget(),
+						uvic< Context,Function >(
+							engine,ctx,std::move( ff ),command.exe(),command.args(),
+							engine.processEnvironment(),std::move( cancel ) ) ) ;
 				}
 			}else{
 				ff() ;
@@ -1348,9 +1388,9 @@ public:
 		{
 			return m_engine->commandString( cmd ) ;
 		}
-		void runCommandOnDownloadedFile( const std::vector< QByteArray >& fileNames ) const
+		void runCommandOnDownloadedFile( const std::vector< QByteArray >& fileNames,const QString& downloadFolder ) const
 		{
-			m_engine->runCommandOnDownloadedFile( fileNames ) ;
+			m_engine->runCommandOnDownloadedFile( fileNames,downloadFolder ) ;
 		}
 		const QStringList& defaultDownLoadCmdOptions() const
 		{

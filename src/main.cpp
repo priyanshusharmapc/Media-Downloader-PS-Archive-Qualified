@@ -69,9 +69,9 @@ int start( int argc,char * argv[],
 
 	if( utility::platformisFlatPak() ){
 
-		mqApp.setDesktopFileName( "io.github.mhogomchungu.media-downloader" ) ;
+		mqApp.setDesktopFileName( "io.github.priyanshusharmapc.MediaDownloaderPSArchive" ) ;
 	}else{
-		mqApp.setDesktopFileName( "media-downloader" ) ;
+		mqApp.setDesktopFileName( "media-downloader-ps-archive" ) ;
 	}
 #endif
 
@@ -102,12 +102,6 @@ int start( int argc,char * argv[],
 int main( int argc,char * argv[] )
 {
 	utility::cliArguments cargs( argc,argv ) ;
-	if(qEnvironmentVariable("ARCHIVE_GUI_TEST_HOOK")=="1"){
-		QCoreApplication qualificationApp(argc,argv);
-		archive::ui::persistRoot(qEnvironmentVariable("ARCHIVE_GUI_TEST_ROOT"));
-		return 0;
-	}
-
 	if( utility::onlyWantedVersionInfo( cargs ) ){
 
 		return 0 ;

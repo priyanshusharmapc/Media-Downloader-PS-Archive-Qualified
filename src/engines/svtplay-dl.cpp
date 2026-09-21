@@ -22,6 +22,8 @@
 #include "../util.hpp"
 #include "../utils/miscellaneous.hpp"
 #include "../utility.h"
+#include <cmath>
+#include <limits>
 
 const char * svtplay_dl::testData()
 {
@@ -405,7 +407,11 @@ svtplay_dl::svtplay_dl( const engines& engs,const engines::engine& engine,QJsonO
 
 	obj.insert( "ArchiveContainsFolder",utility::platformIsWindows() ) ;
 
-	obj.insert( "DownloadUrl","https://api.github.com/repos/spaam/svtplay-dl/tags" ) ;
+	// The tag feed does not provide a trusted payload SHA-256. Keep the
+	// installed/system engine usable, but do not expose an update action that
+	// the mandatory verifier must reject.
+	obj.insert( "DownloadUrl","" ) ;
+	obj.insert( "AutoUpdate",false ) ;
 }
 
 void svtplay_dl::updateOutPutChannel( QProcess::ProcessChannel& s ) const
@@ -504,6 +510,8 @@ std::vector<engines::engine::baseEngine::mediaInfo> svtplay_dl::mediaProperties(
 
 		}else if( n == 3 ){
 
+			// Exact-three-token rows contain only the prefix, format and method.
+			// Do not consume a fourth field from an already empty token list.
 			a.takeAt( 0 ) ;
 
 			auto format = a.takeAt( 0 ) ;
@@ -511,7 +519,7 @@ std::vector<engines::engine::baseEngine::mediaInfo> svtplay_dl::mediaProperties(
 			if( _add( s,format ) ){
 
 				auto method     = "Method: " + a.takeAt( 0 ) ;
-				auto codec      = a.takeAt( 0 ) ;
+				auto codec      = QString( "N/A" ) ;
 				auto resolution = "N/A" ;
 				auto notes      = method ;
 
@@ -684,32 +692,43 @@ public:
 
 		if( dd.size() == 2 ){
 
-			auto x = dd[ 0 ].toDouble() ;
-			auto y = dd[ 1 ].toDouble() ;
+			bool xOk = false ;
+			bool yOk = false ;
+			const auto x = dd[ 0 ].toDouble( &xOk ) ;
+			const auto y = dd[ 1 ].toDouble( &yOk ) ;
 
-			auto z = x / y ;
+			if( !xOk || !yOk || !std::isfinite( x ) || !std::isfinite( y ) ||
+			    x < 0.0 || y <= 0.0 ){
+				m_tmp = "[00/00] (NA), " + a ;
+				return { m_tmp,m_engine,m_callables } ;
+			}
 
-			auto zz = QString::number( z * 100,'f',2 ) ;
+			const auto z = x / y ;
+			if( !std::isfinite( z ) || z < 0.0 ){
+				m_tmp = "[00/00] (NA), " + a ;
+				return { m_tmp,m_engine,m_callables } ;
+			}
 
-			auto ss = "[" + dd[ 0 ] + "/" + dd[ 1 ] + "] (" + zz + "%), " + a ;
-
-			m_tmp = ss.toUtf8() ;
+			const auto zz = QString::number( z * 100.0,'f',2 ) ;
+			m_tmp = ( "[" + dd[ 0 ] + "/" + dd[ 1 ] + "] (" + zz + "%), " + a ).toUtf8() ;
 
 			if( !d.mainLogger() ){
+				const auto current = d.svtData().size() ;
+				const auto currentText = l.formattedDataSize( current ).toUtf8() ;
 
-				auto ss = d.svtData().size() ;
+				QByteArray totalText = "NA" ;
+				if( z > 0.0 ){
+					const auto estimate = static_cast< double >( current ) / z ;
+					if( std::isfinite( estimate ) && estimate >= 0.0 &&
+					    estimate <= static_cast< double >( std::numeric_limits< qint64 >::max() ) ){
+						totalText = l.formattedDataSize( static_cast< qint64 >( estimate ) ).toUtf8() ;
+					}
+				}
 
-				auto ll = l.formattedDataSize( ss ).toUtf8() ;
-
-				auto mm = static_cast< qint64 >( ss / z ) ;
-
-				auto lll = l.formattedDataSize( mm ).toUtf8() ;
-
-				m_tmp = ll + "/~" + lll + ", " + m_tmp ;
+				m_tmp = currentText + "/~" + totalText + ", " + m_tmp ;
 			}
 
 			if( x == y ){
-
 				d.svtData().reset() ;
 			}
 		}else{

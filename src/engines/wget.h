@@ -43,6 +43,7 @@ public:
 	const QByteArray& replaceUndesirableText( const QByteArray& ) override ;
 
 	void setProxySetting( engines::engine::baseEngine::optionsEnvironment&,QStringList&,const QString& ) override ;
+	static void applyProxySetting( engines::engine::baseEngine::optionsEnvironment&,QStringList&,const QString& ) ;
 
 	QString updateTextOnCompleteDownlod( const QString& uiText,
 					     const QString& bkText,

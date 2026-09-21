@@ -23,6 +23,7 @@
 
 #include <QHeaderView>
 #include <QBuffer>
+#include <QUuid>
 
 void tableWidget::setDownloadingOptions( tableWidget::type type,
 					 int row,
@@ -221,6 +222,12 @@ void tableWidget::replace( tableWidget::entry e,int r,sizeHint s )
 {
 	auto row = static_cast< size_t >( r ) ;
 
+	// Repainting/replacing row content must not create a new asynchronous job
+	// identity. Removed rows disappear with their token; newly added rows receive
+	// a fresh token, preventing stale callbacks from binding to a re-added URL.
+	if( e.stableIdentity.isEmpty() ){
+		e.stableIdentity = m_items[ row ].stableIdentity ;
+	}
 	m_items[ row ] = e.move() ;
 
 	auto label = new QLabel() ;
@@ -262,6 +269,10 @@ int tableWidget::addRow()
 
 int tableWidget::addItem( tableWidget::entry e,tableWidget::sizeHint s )
 {
+	if( e.stableIdentity.isEmpty() ){
+		e.stableIdentity = QUuid::createUuid().toString( QUuid::WithoutBraces ) ;
+	}
+
 	auto row = m_table.rowCount() ;
 
 	if( e.showFirst && row ){
@@ -325,6 +336,24 @@ bool tableWidget::isRunning( int row ) const
 	return reportFinished::finishedStatus::isRunning( *this,row  ) ;
 }
 
+bool tableWidget::allEntriesTerminal( int firstRow ) const
+{
+	using status = reportFinished::finishedStatus ;
+
+	for( int row = firstRow ; row < m_table.rowCount() ; ++row ){
+
+		const auto& state = this->runningState( row ) ;
+
+		if( !status::finishedWithSuccess( state ) &&
+		    !status::finishedWithError( state ) &&
+		    !status::finishedCancelled( state ) ){
+			return false ;
+		}
+	}
+
+	return m_table.rowCount() > firstRow ;
+}
+
 bool tableWidget::finishedWithSuccess( int row ) const
 {
 	return reportFinished::finishedStatus::finishedWithSuccess( *this,row ) ;
@@ -339,7 +368,10 @@ int tableWidget::nextAvailableEntryToDownload( int row ) const
 {
 	for( ; row < m_table.rowCount() ; row++ ){
 
-		if( !this->runningOrFinishedWithSuccess( row ) ){
+		// Recursive workers may claim only entries that have never been
+		// dispatched in this queue run. Cancelled/error terminal rows stay
+		// terminal until an explicit user retry resets their state.
+		if( reportFinished::finishedStatus::notStarted( this->runningState( row ) ) ){
 
 			return row ;
 		}
@@ -383,7 +415,12 @@ void tableWidget::selectRow( QTableWidgetItem * current,QTableWidgetItem * previ
 		}else{
 			_update_table_row( current,true ) ;
 
-			if( QGuiApplication::keyboardModifiers() != Qt::ControlModifier ){
+			const auto modifiers = QGuiApplication::keyboardModifiers() ;
+
+			// Let Qt's ExtendedSelection model preserve Ctrl, Shift and
+			// Ctrl+Shift gestures. Only a plain click should collapse the
+			// selection to the current row.
+			if( !( modifiers & ( Qt::ControlModifier | Qt::ShiftModifier | Qt::MetaModifier ) ) ){
 
 				auto currentRow = current->row() ;
 
@@ -592,9 +629,9 @@ bool tableWidget::containsHiddenRows()
 	return false ;
 }
 
-bool tableWidget::allFinishedWithSuccess()
+bool tableWidget::allFinishedWithSuccess( int firstRow )
 {
-	for( int i = 0 ; i < m_table.rowCount() ; i++ ){
+	for( int i = firstRow ; i < m_table.rowCount() ; i++ ){
 
 		if( !reportFinished::finishedStatus::finishedWithSuccess( this->runningState( i ) ) ){
 
@@ -602,7 +639,7 @@ bool tableWidget::allFinishedWithSuccess()
 		}
 	}
 
-	return true ;
+	return m_table.rowCount() > firstRow ;
 }
 
 int tableWidget::finishWithSuccess()
@@ -657,20 +694,22 @@ QString tableWidget::completeProgress( int firstRow )
 		}
 	}
 
-	auto z = completed + errored + cancelled ;
+	const qint64 z = static_cast< qint64 >( completed ) + errored + cancelled ;
 
 	auto m = QString::number( z ) + "/" + QString::number( rowCount ) ;
+	const qint64 rawPercentage = rowCount > 0 ? z * 100 / rowCount : 0 ;
+	const auto percentage = rawPercentage < 0 ? 0 : ( rawPercentage > 100 ? 100 : rawPercentage ) ;
 
-	auto a = m + "(" + QString::number( z * 100 / rowCount ) + "%)" ;
+	auto a = m + "(" + QString::number( percentage ) + "%)" ;
 	auto b = QString::number( running ) ;
 	auto c = QString::number( notStarted ) ;
 	auto d = QString::number( completed ) ;
 	auto e = QString::number( errored ) ;
 	auto f = QString::number( cancelled ) ;
 
-	if( a.startsWith( "100" ) ){
+	if( rowCount > 0 && z == rowCount ){
 
-		a = "100" ;
+		a = "100%" ;
 	}
 
 	return QObject::tr( "Completed: %1, Running: %2, Not Started: %3, Succeeded: %4, Failed: %5, Cancelled: %6" ).arg( a,b,c,d,e,f ) ;

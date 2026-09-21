@@ -25,7 +25,6 @@
 #include <QStringList>
 #include <QTableWidgetItem>
 #include <QDebug>
-#include <QTime>
 
 #include "logwindow.h"
 #include "util.hpp"
@@ -43,12 +42,26 @@ public:
 		QString formattedDataSize( qint64 ) const ;
 		static QString secondsToString( int s )
 		{
-			if( s < 3600 ){
+			// Duration formatting must not use QTime because QTime wraps at 24h.
+			// Negative/unknown values are clamped to zero instead of wrapping.
+			const auto total = s > 0 ? s : 0 ;
+			const auto seconds = total % 60 ;
+			const auto totalMinutes = total / 60 ;
+			const auto minutes = totalMinutes % 60 ;
 
-				return QTime( 0,0,0,0 ).addSecs( s ).toString( "mm:ss" ) ;
-			}else{
-				return QTime( 0,0,0,0 ).addSecs( s ).toString( "hh:mm:ss" ) ;
+			if( total < 3600 ){
+
+				return QString( "%1:%2" )
+					.arg( totalMinutes,2,10,QChar( '0' ) )
+					.arg( seconds,2,10,QChar( '0' ) ) ;
 			}
+
+			const auto hours = total / 3600 ;
+
+			return QString( "%1:%2:%3" )
+				.arg( hours,2,10,QChar( '0' ) )
+				.arg( minutes,2,10,QChar( '0' ) )
+				.arg( seconds,2,10,QChar( '0' ) ) ;
 		}
 	private:
 		QLocale m_locale ;
@@ -312,11 +325,17 @@ public:
 		}
 		const QByteArray& lastText() const
 		{
+			static const QByteArray empty ;
+			if( m_processOutputs.empty() || m_processOutputs.rbegin()->entries().empty() ){
+				return empty ;
+			}
 			return m_processOutputs.rbegin()->entries().rbegin()->text() ;
 		}
 		bool lastLineIsProgressLine() const
 		{
-			return m_processOutputs.rbegin()->entries().rbegin()->progressLine() ;
+			return !m_processOutputs.empty() &&
+			       !m_processOutputs.rbegin()->entries().empty() &&
+			       m_processOutputs.rbegin()->entries().rbegin()->progressLine() ;
 		}
 		QByteArray debugOutPut() const ;
 		QByteArray join( const QByteArray& joiner ) const ;
@@ -351,29 +370,31 @@ public:
 			}
 			void replaceLast( const QByteArray& e )
 			{
-				m_entries->rbegin()->replace( e ) ;
+				if( m_entries && !m_entries->empty() )m_entries->rbegin()->replace( e ) ;
 			}
 			void removeLast()
 			{
-				m_entries->pop_back() ;
+				if( m_entries && !m_entries->empty() )m_entries->pop_back() ;
 			}
 			QByteArray takeLast()
 			{
+				if( !m_entries || m_entries->empty() )return {} ;
 				auto m = this->lastText() ;
 				this->removeLast() ;
 				return m ;
 			}
 			size_t size() const
 			{
-				return m_entries->size() ;
+				return m_entries ? m_entries->size() : 0 ;
 			}
 			operator bool() const
 			{
-				return m_entries != nullptr ;
+				return m_entries != nullptr && !m_entries->empty() ;
 			}
 			const QByteArray& lastText() const
 			{
-				return m_entries->rbegin()->text() ;
+				static const QByteArray empty ;
+				return m_entries && !m_entries->empty() ? m_entries->rbegin()->text() : empty ;
 			}
 		private:
 			std::vector< Logger::Data::processOutput::outputEntry > * m_entries = nullptr ;
@@ -404,7 +425,7 @@ public:
 		}
 		bool doneDownloading() const
 		{
-			return m_processOutputs.rbegin()->doneDownloading() ;
+			return !m_processOutputs.empty() && m_processOutputs.rbegin()->doneDownloading() ;
 		}
 		template< typename Filter >
 		void replaceOrAdd( const Filter& filter )

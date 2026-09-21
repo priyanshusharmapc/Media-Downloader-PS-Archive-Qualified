@@ -39,6 +39,7 @@ public:
 		~you_getFilter() override ;
 	private:
 		QByteArray m_title ;
+		QByteArray m_outputFile ;
 		QByteArray m_tmp ;
 		engines::engine::baseEngine::preProcessing m_preProcessing ;
 		int m_processId ;

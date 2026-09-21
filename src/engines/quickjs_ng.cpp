@@ -28,6 +28,7 @@ utility::addJsonCmd::entry::args quickjs_ng::entryCmd( const QString& e )
 		data.emplace_back( "win7x86","qjs-windows-x86.exe" ) ;
 		data.emplace_back( "win7amd64","qjs-windows-x86_64.exe" ) ;
 		data.emplace_back( "x86","qjs-windows-x86.exe" ) ;
+		data.emplace_back( "aarch64","qjs-windows-x86_64.exe" ) ;
 		data.emplace_back( "amd64","qjs-windows-x86_64.exe" ) ;
 
 	}else if( e == "MacOS" ){
@@ -138,12 +139,19 @@ quickjs_ng::nameAndExe quickjs_ng::getNameAndExe()
 
 	if( utility::platformIsWindows() ){
 
-		if( cpu.x86_64() ){
+		if( cpu.x86_64() || cpu.aarch64() ){
 
+			// quickjs-ng does not publish a native Windows ARM64 binary. Keep
+			// the documented x64 emulation target consistent across update,
+			// discovery and removal instead of silently switching to x86.
 			return str( "qjs-windows-x86_64.exe" ) ;
 		}else{
 			return str( "qjs-windows-x86.exe" ) ;
 		}
+	}else if( utility::platformIsOSX() ){
+
+		// The macOS release uses one executable name for supported CPU variants.
+		return str( "qjs-darwin" ) ;
 	}else{
 		if( cpu.x86_64() ){
 

@@ -25,6 +25,7 @@
 #include "settings.h"
 #include "utils/threads.hpp"
 #include "context.hpp"
+#include "archive/archiveprocess.h"
 
 #include <QFile>
 
@@ -33,6 +34,11 @@
 #include <QJsonArray>
 #include <QDir>
 #include <QDateTime>
+#include <QUrl>
+#include <QLockFile>
+#include <QUuid>
+#include <QPointer>
+#include <QWidget>
 
 #include <chrono>
 
@@ -47,6 +53,223 @@ static QString _sslLibraryVersionString()
 	return {} ;
 }
 #endif
+
+namespace
+{
+utils::qprocess::outPut runBoundedExtractor( const QString& program,const QStringList& args )
+{
+    // Update extractors operate on untrusted archives. Give them a generous
+    // but finite deadline and reuse Archive's process-tree containment so a
+    // hung extractor or child cannot pin update state forever.
+    constexpr int extractionTimeoutMs = 5 * 60 * 1000 ;
+    const auto result = archive::detail::runContainedProcess(
+        program,args,QString(),extractionTimeoutMs ) ;
+
+    auto status = result.ok ? utils::qprocess::outPut::ExitStatus::NormalExit
+                            : utils::qprocess::outPut::ExitStatus::Crashed ;
+    auto error = result.standardError.toUtf8() ;
+    if( !result.error.isEmpty() ){
+        if( !error.isEmpty() )error += "\n" ;
+        error += result.error.toUtf8() ;
+    }
+    return { result.exitCode,status,result.standardOutput.toUtf8(),error } ;
+}
+
+bool updatePathExists( const QString& path )
+{
+    const QFileInfo info( path ) ;
+    return info.exists() || info.isSymLink() ;
+}
+
+QString removeUpdatePath( const QString& path )
+{
+    if( !updatePathExists( path ) )return {} ;
+    const QFileInfo info( path ) ;
+    return info.isDir() && !info.isSymLink() ? utility::removeFolder( path ) : utility::removeFile( path ) ;
+}
+
+QString uniqueUpdateSibling( const QString& path,const QString& tag )
+{
+    return path + "." + tag + "-" + QUuid::createUuid().toString( QUuid::WithoutBraces ) ;
+}
+
+struct ParsedReleaseDigest
+{
+    bool present = false ;
+    bool valid = true ;
+    QString sha256 ;
+    QString error ;
+};
+
+ParsedReleaseDigest parseReleaseSha256( QString digest )
+{
+    ParsedReleaseDigest out ;
+    digest = digest.trimmed() ;
+    if( digest.isEmpty() ){
+        return out ;
+    }
+
+    out.present = true ;
+    QString hex = digest ;
+    const auto separator = digest.indexOf( ':' ) ;
+    if( separator >= 0 ){
+        const auto algorithm = digest.left( separator ).trimmed() ;
+        if( algorithm.compare( "sha256",Qt::CaseInsensitive ) != 0 ){
+            out.valid = false ;
+            out.error = QObject::tr( "Unsupported release digest algorithm: %1" ).arg( algorithm ) ;
+            return out ;
+        }
+        hex = digest.mid( separator + 1 ).trimmed() ;
+    }
+
+    if( hex.size() != 64 ){
+        out.valid = false ;
+        out.error = QObject::tr( "Malformed SHA-256 release digest" ) ;
+        return out ;
+    }
+
+    for( const auto ch : hex ){
+        const auto c = ch.toLower() ;
+        const bool digit = c >= QLatin1Char( '0' ) && c <= QLatin1Char( '9' ) ;
+        const bool alpha = c >= QLatin1Char( 'a' ) && c <= QLatin1Char( 'f' ) ;
+        if( !digit && !alpha ){
+            out.valid = false ;
+            out.error = QObject::tr( "Malformed SHA-256 release digest" ) ;
+            return out ;
+        }
+    }
+
+    out.sha256 = hex.toLower() ;
+    return out ;
+}
+
+QString restoreUpdateBackup( const QString& backup,const QString& destination )
+{
+    if( backup.isEmpty() || !updatePathExists( backup ) )return {} ;
+    const auto cleanup = removeUpdatePath( destination ) ;
+    if( !cleanup.isEmpty() )return QObject::tr( "Failed to remove incomplete update at %1: %2" ).arg( destination,cleanup ) ;
+    const auto restore = utility::rename( backup,destination ) ;
+    if( !restore.isEmpty() )return QObject::tr( "Failed to restore previous engine at %1: %2" ).arg( destination,restore ) ;
+    return {} ;
+}
+
+// Promote one already-validated staged path. The live destination is moved to
+// a sibling backup only at the final commit boundary. If promotion fails, the
+// previous payload is restored before the attempt is reported as failed.
+QString promoteUpdatePath( const QString& staged,const QString& destination,QString* cleanupWarning = nullptr )
+{
+    if( cleanupWarning )cleanupWarning->clear() ;
+    if( !updatePathExists( staged ) )return QObject::tr( "Staged engine payload is missing: %1" ).arg( staged ) ;
+
+    QString backup ;
+    if( updatePathExists( destination ) ){
+        backup = uniqueUpdateSibling( destination,"mdps-update-backup" ) ;
+        const auto save = utility::rename( destination,backup ) ;
+        if( !save.isEmpty() )return QObject::tr( "Failed to preserve previous engine before update: %1" ).arg( save ) ;
+    }
+
+    const auto promote = utility::rename( staged,destination ) ;
+    if( !promote.isEmpty() ){
+        const auto rollback = restoreUpdateBackup( backup,destination ) ;
+        return rollback.isEmpty()
+            ? QObject::tr( "Failed to promote staged engine: %1" ).arg( promote )
+            : QObject::tr( "Failed to promote staged engine: %1; rollback also failed: %2" ).arg( promote,rollback ) ;
+    }
+
+    if( !backup.isEmpty() ){
+        const auto cleanup = removeUpdatePath( backup ) ;
+        if( cleanupWarning && !cleanup.isEmpty() )*cleanupWarning = QObject::tr( "Updated engine is active but old backup cleanup failed: %1" ).arg( cleanup ) ;
+    }
+    return {} ;
+}
+
+struct UpdateMove
+{
+    QString destination ;
+    QString backup ;
+    bool promoted = false ;
+};
+
+// Archive extraction completes in a private directory first. Top-level entries
+// are then committed as one rollback-capable batch. Existing payloads remain in
+// backup until every staged entry has been promoted successfully.
+QString promoteUpdateDirectoryContents( const QString& stageRoot,const QString& liveRoot,QString* cleanupWarning = nullptr )
+{
+    if( cleanupWarning )cleanupWarning->clear() ;
+    QDir stage( stageRoot ) ;
+    if( !stage.exists() )return QObject::tr( "Update staging directory is missing: %1" ).arg( stageRoot ) ;
+
+    const auto entries = stage.entryInfoList( QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,QDir::Name ) ;
+    if( entries.isEmpty() )return QObject::tr( "Extracted update contains no payload" ) ;
+
+    const auto backupRoot = QDir( liveRoot ).filePath( ".mdps-update-backup-" + QUuid::createUuid().toString( QUuid::WithoutBraces ) ) ;
+    QVector< UpdateMove > moves ;
+    QString failure ;
+
+    for( const auto& entry : entries ){
+        const auto source = entry.filePath() ;
+        const auto destination = QDir( liveRoot ).filePath( entry.fileName() ) ;
+        UpdateMove move ; move.destination = destination ;
+
+        if( updatePathExists( destination ) ){
+            if( !QDir().mkpath( backupRoot ) ){
+                failure = QObject::tr( "Unable to create update rollback directory: %1" ).arg( backupRoot ) ;
+                moves.append( move ) ;
+                break ;
+            }
+            move.backup = QDir( backupRoot ).filePath( entry.fileName() ) ;
+            const auto save = utility::rename( destination,move.backup ) ;
+            if( !save.isEmpty() ){
+                failure = QObject::tr( "Failed to preserve existing engine entry %1: %2" ).arg( destination,save ) ;
+                moves.append( move ) ;
+                break ;
+            }
+        }
+
+        const auto promote = utility::rename( source,destination ) ;
+        if( !promote.isEmpty() ){
+            failure = QObject::tr( "Failed to promote extracted engine entry %1: %2" ).arg( destination,promote ) ;
+            moves.append( move ) ;
+            break ;
+        }
+        move.promoted = true ;
+        moves.append( move ) ;
+    }
+
+    if( !failure.isEmpty() ){
+        QStringList rollbackErrors ;
+        for( auto it = moves.crbegin(); it != moves.crend(); ++it ){
+            if( it->promoted ){
+                const auto remove = removeUpdatePath( it->destination ) ;
+                if( !remove.isEmpty() )rollbackErrors << remove ;
+            }
+            if( !it->backup.isEmpty() && updatePathExists( it->backup ) ){
+                const auto restore = utility::rename( it->backup,it->destination ) ;
+                if( !restore.isEmpty() )rollbackErrors << restore ;
+            }
+        }
+        if( rollbackErrors.isEmpty() ){
+            removeUpdatePath( backupRoot ) ;
+        }else{
+            // Never delete forensic recovery material when restoration failed.
+            // The backup directory is intentionally retained for manual repair.
+            failure += QObject::tr( "; rollback errors: %1; previous payload retained at %2" )
+                .arg( rollbackErrors.join( "; " ),backupRoot ) ;
+        }
+        return failure ;
+    }
+
+    const auto backupCleanup = removeUpdatePath( backupRoot ) ;
+    const auto stageCleanup = removeUpdatePath( stageRoot ) ;
+    if( cleanupWarning ){
+        QStringList warnings ;
+        if( !backupCleanup.isEmpty() )warnings << backupCleanup ;
+        if( !stageCleanup.isEmpty() )warnings << stageCleanup ;
+        *cleanupWarning = warnings.join( "; " ) ;
+    }
+    return {} ;
+}
+}
 
 networkAccess::networkAccess( const Context& ctx ) :
 	m_ctx( ctx ),
@@ -110,41 +333,41 @@ networkAccess::networkAccess( const Context& ctx ) :
 
 void networkAccess::updateMediaDownloader( networkAccess::Status status,const QJsonDocument& json ) const
 {
-	class meaw
-	{
-	public:
-		meaw( bool Qt6 ) : m_name( Qt6 ? "MediaDownloaderQt6" : "MediaDownloaderQt5" )
-		{
+	const auto expectedName = utility::Qt6Version() ? QStringLiteral( "MediaDownloaderQt6.zip" )
+	                                               : QStringLiteral( "MediaDownloaderQt5.zip" ) ;
+	const auto expectedPrefix = QStringLiteral(
+		"/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified/releases/download/" ) ;
+
+	QVector< QJsonObject > matches ;
+	const auto root = json.object() ;
+	const auto assets = root.value( "assets" ).toArray() ;
+	for( const auto& value : assets ){
+		if( !value.isObject() )continue ;
+		const auto obj = value.toObject() ;
+		if( obj.value( "name" ).toString() != expectedName )continue ;
+
+		const auto url = obj.value( "browser_download_url" ).toString() ;
+		const QUrl parsed( url ) ;
+		if( parsed.scheme().compare( "https",Qt::CaseInsensitive ) != 0 ||
+		    parsed.host().compare( "github.com",Qt::CaseInsensitive ) != 0 ||
+		    !parsed.path().startsWith( expectedPrefix ) ||
+		    QFileInfo( parsed.path() ).fileName() != expectedName ){
+			continue ;
 		}
-		bool operator()( const QJsonObject& obj )
-		{
-			auto url = obj.value( "browser_download_url" ).toString() ;
-
-			if( url.contains( "media-downloader-git" ) ){
-
-				return url.contains( m_name + ".git.zip" ) ;
-			}else{
-				return url.contains( m_name ) && url.endsWith( ".zip" ) ;
-			}
-		}
-	private:
-		QString m_name ;
-	} ;
-
-	auto obj = utility::parseJsonDataFromGitHub( json,meaw( utility::Qt6Version() ) ) ;
-
-	if( obj.isEmpty() ){
-
-		status.done() ;
-
-		auto m = QObject::tr( "Failed to parse json file from github" ) ;
-
-		this->post( m_appName,m,status.id() ) ;
-
-		m_tabManager.enableAll() ;
-	}else{
-		this->updateMediaDownloader( networkAccess::updateMDOptions( obj,status.move() ) ) ;
+		matches.append( obj ) ;
 	}
+
+	if( matches.size() != 1 ){
+		status.done() ;
+		this->post( m_appName,
+			QObject::tr( "Update failed: expected exactly one release asset named %1, found %2" )
+				.arg( expectedName ).arg( matches.size() ),
+			status.id() ) ;
+		m_tabManager.enableAll() ;
+		return ;
+	}
+
+	this->updateMediaDownloader( networkAccess::updateMDOptions( matches.first(),status.move() ) ) ;
 }
 
 void networkAccess::updateMediaDownloader( networkAccess::Status status ) const
@@ -200,30 +423,58 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 {
 	if( p.finished() ){
 
+		const auto receivedHash = md.hashCalculator->result() ;
 		md.file.close() ;
 
-		if( p.success() ){			
+		if( md.file.writeFailed() || !md.file.verifyPersistedHash( receivedHash ) ){
+			md.status.done() ;
+			this->post( m_appName,QObject::tr( "Download Failed: persisted payload integrity check failed: %1" ).arg( md.file.writeError() ),md.id ) ;
+			utility::removeFile( md.tmpFile ) ;
+			m_tabManager.enableAll() ;
+			return ;
+		}
 
-			if( md.hash.isEmpty() ){
+		if( p.success() ){
 
-				auto m = QObject::tr( "Skipping Checking Download Hash" ) ;
+			const auto digest = parseReleaseSha256( md.hash ) ;
+			if( !digest.valid ){
+				md.status.done() ;
+				this->post( m_appName,QObject::tr( "Download Failed: invalid release digest metadata: %1" ).arg( digest.error ),md.id ) ;
+				const auto cleanupError = utility::removeFile( md.tmpFile ) ;
+				if( !cleanupError.isEmpty() ){
+					this->failedToRemove( m_appName,md.tmpFile,cleanupError,md.id ) ;
+				}
+				m_tabManager.enableAll() ;
+				return ;
+			}
 
-				this->post( m_appName,m,md.id ) ;
-
-				this->extractMediaDownloader( md.move() ) ;
+			if( !digest.present ){
+				md.status.done() ;
+				this->post( m_appName,QObject::tr( "Download Failed: release asset has no required SHA-256 digest" ),md.id ) ;
+				const auto cleanupError = utility::removeFile( md.tmpFile ) ;
+				if( !cleanupError.isEmpty() ){
+					this->failedToRemove( m_appName,md.tmpFile,cleanupError,md.id ) ;
+				}
+				m_tabManager.enableAll() ;
+				return ;
 			}else{
-				auto m = md.hashCalculator->result().toHex().toLower() ;
+				auto actual = receivedHash.toHex().toLower() ;
 
 				if( utility::cliArguments::useFakeMdHash() ){
 
-					m = "bogusHashValue" ;
+					actual = "bogusHashValue" ;
 				}
 
-				if( md.hash == m ){
+				if( digest.sha256 == actual ){
 
 					this->extractMediaDownloader( md.move() ) ;
 				}else{
-					this->hashDoNotMatch( md.hash,m,md.id ) ;
+					this->hashDoNotMatch( digest.sha256,actual,md.id ) ;
+
+					const auto cleanupError = utility::removeFile( md.tmpFile ) ;
+					if( !cleanupError.isEmpty() ){
+						this->failedToRemove( m_appName,md.tmpFile,cleanupError,md.id ) ;
+					}
 
 					md.status.done() ;
 
@@ -231,6 +482,11 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 				}
 			}
 		}else{
+			const auto cleanupError = utility::removeFile( md.tmpFile ) ;
+			if( !cleanupError.isEmpty() ){
+				this->failedToRemove( m_appName,md.tmpFile,cleanupError,md.id ) ;
+			}
+
 			md.status.done() ;
 
 			this->post( m_appName,this->reportError( p ),md.id ) ;
@@ -240,9 +496,11 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 	}else{
 		auto data = p.data() ;
 
-		md.hashCalculator->addData( data ) ;
-
-		md.file.write( data ) ;
+		if( md.file.write( data ) ){
+			// The digest must describe bytes accepted by the file device, not
+			// merely bytes delivered by the network stack.
+			md.hashCalculator->addData( data ) ;
+		}
 
 		auto speed = md.speed.calculate( p ) ;
 
@@ -252,7 +510,9 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 
 void networkAccess::updateMediaDownloader( networkAccess::updateMDOptions md ) const
 {
-	auto e = m_ctx.Engines().engineDirPaths().tmp( md.name ) ;
+	const auto attemptName = ".mdps-app-update-" +
+		QUuid::createUuid().toString( QUuid::WithoutBraces ) + "-" + md.name ;
+	auto e = m_ctx.Engines().engineDirPaths().tmp( attemptName ) ;
 
 	md.tmpFile = QDir::fromNativeSeparators( e ) ;
 
@@ -283,20 +543,60 @@ void networkAccess::updateMediaDownloader( networkAccess::updateMDOptions md ) c
 	}
 }
 
-void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils::qprocess::outPut& s ) const
+void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils::qprocess::outPut& result ) const
 {
-	auto mm = utility::removeFile( md.tmpFile ) ;
+	const auto archiveCleanup = utility::removeFile( md.tmpFile ) ;
 
-	if( !mm.isEmpty() ){
-
-		this->failedToRemove( m_appName,md.tmpFile,mm,md.id ) ;
+	if( !archiveCleanup.isEmpty() ){
+		this->failedToRemove( m_appName,md.tmpFile,archiveCleanup,md.id ) ;
 	}
 
-	if( s.success() ){
+	auto cleanupStage = [&](){
+		if( !md.extractStagePath.isEmpty() ){
+			const auto cleanup = utility::removeFolder( md.extractStagePath ) ;
+			if( !cleanup.isEmpty() ){
+				this->failedToRemove( m_appName,md.extractStagePath,cleanup,md.id ) ;
+			}
+		}
+	} ;
 
-		auto mm = md.name ;
+	if( result.success() ){
 
-		auto extractedPath = md.tmpPath + "/" + mm.mid( 0,mm.size() - 4 ) ;
+		const auto baseName = md.name.left( md.name.size() - 4 ) ;
+		const auto extractedPath = QDir( md.extractStagePath ).filePath( baseName ) ;
+		const auto expectedExecutable = QDir( extractedPath ).filePath( "media-downloader.exe" ) ;
+
+		if( !QFileInfo( extractedPath ).isDir() || !QFileInfo( expectedExecutable ).isFile() ){
+			md.status.done() ;
+			this->post( m_appName,QObject::tr( "Failed To Extract: updater archive is missing the expected application layout" ),md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
+
+		QString treeError ;
+		if( !utility::updaterTreeIsSafe( extractedPath,&treeError ) ){
+			md.status.done() ;
+			this->post( m_appName,QObject::tr( "Failed To Extract: unsafe updater filesystem tree: %1" ).arg( treeError ),md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
+
+		QLockFile updaterLock( QDir( md.tmpPath ).filePath( ".mdps-updater-startup.lock" ) ) ;
+		updaterLock.setStaleLockTime( 30000 ) ;
+		if( !updaterLock.tryLock( 10000 ) ){
+			md.status.done() ;
+			this->post( m_appName,QObject::tr( "Application update is busy in another instance" ),md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
+
+		const auto oldStage = utility::removeFolder( md.finalPath ) ;
+		if( !oldStage.isEmpty() ){
+			md.status.done() ;
+			this->failedToRemove( m_appName,md.finalPath,oldStage,md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
 
 		auto e = utility::rename( extractedPath,md.finalPath ) ;
 
@@ -308,6 +608,7 @@ void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils:
 
 			QDir().rmdir( md.finalPath + "/local" ) ;
 
+			cleanupStage() ;
 			md.status.done() ;
 
 			auto m = QObject::tr( "Update Complete, Restart To Use New Version" ) ;
@@ -317,11 +618,14 @@ void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils:
 			md.status.done() ;
 
 			this->failedToRename( md.name,extractedPath,md.finalPath,e,md.id ) ;
+			cleanupStage() ;
 		}
 	}else{
 		md.status.done() ;
 
-		this->failedToExtract( md.exeArgs,s,md.id ) ;
+		this->failedToExtract( md.exeArgs,result,md.id ) ;
+		cleanupStage() ;
+        m_tabManager.enableAll() ;
 	}
 }
 
@@ -385,44 +689,77 @@ void networkAccess::extractMediaDownloader( networkAccess::updateMDOptions md ) 
 	const auto& paths = m_ctx.Engines().engineDirPaths() ;
 
 	md.tmpPath = paths.basePath() ;
-
 	md.finalPath = paths.updateNewPath() ;
+	md.extractStagePath = QDir( md.tmpPath ).filePath(
+		".mdps-app-update-extract-" + QUuid::createUuid().toString( QUuid::WithoutBraces ) ) ;
 
 	class meaw
 	{
 	public:
-		meaw( const networkAccess& na,networkAccess::updateMDOptions md ) :
-			m_parent( na ),m_md( md.move() )
+		meaw( const networkAccess * parent,networkAccess::updateMDOptions md ) :
+			m_parent( parent ),m_md( md.move() )
 		{
 		}
-		void bg()
+		QString bg()
 		{
-			m_err = utility::removeFolder( m_md.finalPath ) ;
-		}
-		void fg()
-		{
-			if( !m_err.isEmpty() ){
-
-				m_parent.failedToRemove( m_parent.m_appName,m_md.finalPath,m_err,m_md.id ) ;
+			// Background work touches only this attempt's private extraction path.
+			// Shared update_new replacement happens later under the same updater
+			// lock used by restart-time promotion.
+			const QFileInfo attemptInfo( m_md.extractStagePath ) ;
+			if( attemptInfo.exists() || attemptInfo.isSymLink() ){
+				return QObject::tr( "Updater extraction path unexpectedly already exists: %1" ).arg( m_md.extractStagePath ) ;
 			}
 
-			auto exe = m_parent.m_ctx.Engines().findExecutable( "bsdtar.exe" ) ;
+			if( !QDir().mkpath( m_md.extractStagePath ) ){
+				return QObject::tr( "Failed to create unique updater extraction directory: %1" ).arg( m_md.extractStagePath ) ;
+			}
+			return {} ;
+		}
+		void fg( QString&& error )
+		{
+			if( !error.isEmpty() ){
+				m_parent->failedToRemove( m_parent->m_appName,m_md.finalPath,error,m_md.id ) ;
+				m_md.status.done() ;
+				utility::removeFile( m_md.tmpFile ) ;
+				utility::removeFolder( m_md.extractStagePath ) ;
+				m_parent->m_tabManager.enableAll() ;
+				return ;
+			}
 
-			auto args = QStringList{ "-x","-f",m_md.tmpFile,"-C",m_md.tmpPath } ;
+			auto exe = m_parent->m_ctx.Engines().findExecutable( "bsdtar.exe" ) ;
 
-			auto m = QProcess::MergedChannels ;
+			if( exe.isEmpty() ){
+				m_md.status.done() ;
+				m_parent->post( m_parent->m_appName,QObject::tr( "Failed To Extract: bsdtar.exe was not found" ),m_md.id ) ;
+				utility::removeFile( m_md.tmpFile ) ;
+				utility::removeFolder( m_md.extractStagePath ) ;
+				m_parent->m_tabManager.enableAll() ;
+				return ;
+			}
 
+			auto args = QStringList{ "-x","-f",m_md.tmpFile,"-C",m_md.extractStagePath } ;
 			m_md.exeArgs = { exe,args } ;
 
-			utils::qprocess::run( exe,args,m,m_md.move(),&m_parent,&networkAccess::emDownloader ) ;
+			QPointer< QWidget > guard( &m_parent->m_ctx.mainWidget() ) ;
+			const auto * parent = m_parent ;
+			auto moved = m_md.move() ;
+
+            utils::qthread::run(
+                [ exe,args ](){ return runBoundedExtractor( exe,args ) ; },
+                [ guard,parent,md = std::move( moved ) ]( utils::qprocess::outPut&& output ) mutable {
+                    if( guard ){
+                        parent->emDownloader( std::move( md ),output ) ;
+                    }
+                } ) ;
 		}
 	private:
-		QString m_err ;
-		const networkAccess& m_parent ;
+		const networkAccess * m_parent ;
 		networkAccess::updateMDOptions m_md ;
 	} ;
 
-	utils::qthread::run( meaw( *this,md.move() ) ) ;
+	// Foreground continuation is bound to the main widget lifetime. The worker
+	// itself does not touch networkAccess or Context.
+	utils::qthread::run( &m_ctx.mainWidget(),meaw( this,md.move() ) ) ;
 }
 
 QNetworkRequest networkAccess::networkRequest( const QString& url,const QByteArray& userAgent,const QByteArray& referer ) const
@@ -601,11 +938,13 @@ void networkAccess::download( networkAccess::Opts opts ) const
 	}else{
 		auto m = QObject::tr( "Failed To Open Path For Writing: %1" ).arg( opts.filePath ) ;
 
-		this->post( engine.name(),m,opts.id ) ;
+		// A file-open failure belongs to this engine attempt, not to the
+		// startup scan as a whole. Feed it through the same failed-download
+		// path as transport errors so versionInfo advances to the next engine.
+		opts.reportFailed() ;
+		opts.networkError.add( m,"Err: " + utility::errorMessage() ) ;
 
-		opts.reportDone() ;
-
-		m_ctx.TabManager().enableAll() ;
+		this->finished( opts.move() ) ;
 	}
 }
 
@@ -615,24 +954,40 @@ void networkAccess::downloadP( networkAccess::Opts& opts,const utils::network::p
 
 	if( p.finished() ){
 
+		const auto receivedHash = opts.hashCalculator->result() ;
 		opts.file.close() ;
 
-		if( p.success() ){
+		if( opts.file.writeFailed() || !opts.file.verifyPersistedHash( receivedHash ) ){
+			opts.reportFailed() ;
+			opts.networkError.add( QObject::tr( "Download Failed: persisted payload integrity check failed: %1" ).arg( opts.file.writeError() ) ) ;
+		}else if( p.success() ){
 
-			if( opts.metadata.hash().isEmpty() ){
+			auto expected = opts.metadata.hash().trimmed().toLower() ;
+			// Specialized release parsers can bypass the generic normalizer.
+			// Accept only the explicit GitHub sha256: algorithm prefix, strip it,
+			// then validate the canonical 64 hexadecimal digits.
+			if( expected.startsWith( "sha256:",Qt::CaseInsensitive ) ){
+				expected = expected.mid( 7 ).trimmed().toLower() ;
+			}
+			bool digestValid = expected.size() == 64 ;
+			for( const auto ch : expected ){
+				const auto lc = ch.toLower() ;
+				if( !( ( lc >= QLatin1Char( '0' ) && lc <= QLatin1Char( '9' ) ) ||
+				       ( lc >= QLatin1Char( 'a' ) && lc <= QLatin1Char( 'f' ) ) ) ){
+					digestValid = false ;
+					break ;
+				}
+			}
 
-				auto m = QObject::tr( "Skipping Checking Download Hash" ) ;
-
-				this->post( m_appName,m,opts.id ) ;
+			if( !digestValid ){
+				opts.reportFailed() ;
+				opts.networkError.add( QObject::tr(
+					"Download Failed: release asset is missing a valid trusted SHA-256 digest" ) ) ;
 			}else{
-				auto m = opts.hashCalculator->result().toHex().toLower() ;
-
-				if( opts.metadata.hash() != m ){
-
-					this->hashDoNotMatch( opts.metadata.hash(),m,opts.id ) ;
-
+				const auto actual = receivedHash.toHex().toLower() ;
+				if( expected != actual ){
+					this->hashDoNotMatch( expected,actual,opts.id ) ;
 					opts.reportFailed() ;
-
 					opts.networkError.setbadDownload() ;
 				}
 			}
@@ -646,9 +1001,9 @@ void networkAccess::downloadP( networkAccess::Opts& opts,const utils::network::p
 	}else{
 		auto data = p.data() ;
 
-		opts.hashCalculator->addData( data ) ;
-
-		opts.file.write( data ) ;
+		if( opts.file.write( data ) ){
+			opts.hashCalculator->addData( data ) ;
+		}
 
 		auto speed = opts.speed.calculate( p ) ;
 
@@ -667,6 +1022,15 @@ void networkAccess::finished( networkAccess::Opts opts ) const
 			this->post( engine.name(),it,opts.id ) ;
 		}
 
+		// Failed or rejected component payloads are not recovery evidence.
+		const QFileInfo rejectedPayload( opts.filePath ) ;
+		if( rejectedPayload.exists() && rejectedPayload.isFile() ){
+			const auto cleanupError = utility::removeFile( opts.filePath ) ;
+			if( !cleanupError.isEmpty() ){
+				this->failedToRemove( engine.name(),opts.filePath,cleanupError,opts.id ) ;
+			}
+		}
+
 		m_tabManager.enableAll() ;
 
 		engine.setBroken() ;
@@ -683,95 +1047,154 @@ void networkAccess::finished( networkAccess::Opts opts ) const
 
 			this->post( engine.name(),mm,opts.id ) ;
 
-			QFileInfo ff( opts.exeBinPath ) ;
+            QLockFile updateLock( QDir( opts.tempPath ).filePath( ".mdps-component-update.lock" ) ) ;
+            updateLock.setStaleLockTime( 30000 ) ;
+            if( !updateLock.tryLock( 10000 ) ){
+                opts.reportFailed() ;
+                opts.networkError.add( QObject::tr( "Component update is busy in another application instance" ) ) ;
+                engine.setBroken() ;
+                this->printVersion( opts.move(),true ) ;
+                return ;
+            }
 
-			if( ff.isDir() ){
+            // Prove the staged payload can be activated before the live
+            // destination is touched. Rename preserves mode bits on POSIX.
+            if( !utility::setPermissions( opts.file.src() ) ){
+                opts.reportFailed() ;
+                opts.networkError.add( QObject::tr( "Downloaded engine could not be made executable" ) ) ;
+                engine.setBroken() ;
+                this->printVersion( opts.move(),true ) ;
+                return ;
+            }
 
-				auto m = utility::removeFolder( opts.exeBinPath ) ;
+            QString cleanupWarning ;
+            const auto m = promoteUpdatePath( opts.file.src(),opts.exeBinPath,&cleanupWarning ) ;
 
-				if( !m.isEmpty() ){
+            if( m.isEmpty() ){
 
-					this->failedToRemove( engine.name(),opts.exeBinPath,m,opts.id ) ;
-				}
-			}else{
-				auto m = utility::removeFile( opts.exeBinPath ) ;
+                if( !utility::setPermissions( opts.exeBinPath ) ){
+                    opts.reportFailed() ;
+                    opts.networkError.add( QObject::tr( "Promoted engine is not executable" ) ) ;
+                    engine.setBroken() ;
+                    this->printVersion( opts.move(),true ) ;
+                    return ;
+                }
 
-				if( !m.isEmpty() ){
+                engine.updateCmdPath( m_ctx.logger(),opts.exeBinPath ) ;
 
-					this->failedToRemove( engine.name(),opts.exeBinPath,m,opts.id ) ;
-				}
-			}
+                if( !cleanupWarning.isEmpty() )this->post( engine.name(),cleanupWarning,opts.id ) ;
 
-			auto m = opts.file.rename( opts.exeBinPath ) ;
+                this->printVersion( opts.move(),true ) ;
+            }else{
+                this->failedToRename( engine.name(),opts.file.src(),opts.exeBinPath,m,opts.id ) ;
 
-			if( m.isEmpty() ){
-
-				utility::setPermissions( opts.file.src() ) ;
-
-				engine.updateCmdPath( m_ctx.logger(),opts.exeBinPath ) ;
-
-				this->printVersion( opts.move(),true ) ;
-			}else{
-				this->failedToRename( engine.name(),opts.file.src(),opts.exeBinPath,m,opts.id ) ;
-
-				engine.setBroken() ;
-				this->printVersion( opts.move(),true ) ;
-			}
+                engine.setBroken() ;
+                this->printVersion( opts.move(),true ) ;
+            }
 		}
 	}
 }
 
 void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
-					 const utils::qprocess::outPut& s ) const
+                                     const utils::qprocess::outPut& result ) const
 {
-	const auto& engine = opts.engine() ;
+    const auto& engine = opts.engine() ;
 
-	if( s.success() ){
+    if( !result.success() ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->failedToExtract( opts.exeArgs,result,opts.id ) ;
+        engine.setBroken() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 
-		auto err = utility::removeFile( opts.filePath ) ;
+    if( engine.archiveContainsFolder() ){
+        // Normalize a versioned top-level folder entirely inside staging. The
+        // previously working engine is still untouched at this point.
+        auto rename = engine.renameArchiveFolder( opts.metadata.fileName(),opts.updateStagePath ) ;
+        if( !rename.success() ){
+            removeUpdatePath( opts.updateStagePath ) ;
+            this->failedToRename( engine.name(),rename.src(),rename.dst(),rename.err(),opts.id ) ;
+            engine.setBroken() ;
+            this->printVersion( opts.move(),true ) ;
+            return ;
+        }
+    }
 
-		if( !err.isEmpty() ){
+    // Validate the expected executable in staging before touching the live
+    // engine tree. A successfully extracted but structurally wrong archive is
+    // an update failure, not a payload that should be committed and diagnosed
+    // only after the previous working version has been discarded.
+    const auto expectedRelative = QDir( opts.tempPath ).relativeFilePath( opts.exeBinPath ) ;
+    const auto stagedExecutable = QDir( opts.updateStagePath ).filePath( expectedRelative ) ;
+    if( QDir::isAbsolutePath( expectedRelative ) || expectedRelative == ".." || expectedRelative.startsWith( "../" ) ||
+        !QFileInfo( stagedExecutable ).isFile() ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Extracted update is missing the expected executable: %1" ).arg( expectedRelative ),opts.id ) ;
+        engine.setBroken() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 
-			this->failedToRemove( engine.name(),opts.filePath,err,opts.id ) ;
+    if( !utility::setPermissions( stagedExecutable ) ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Extracted engine executable could not be made executable" ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 
-			engine.setBroken() ;
-			this->printVersion( opts.move(),true ) ;
+    QString treeError ;
+    if( !utility::updaterTreeIsSafe( opts.updateStagePath,&treeError ) ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Extracted component tree is unsafe: %1" ).arg( treeError ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 
-			return ;
-		}
+    QLockFile updateLock( QDir( opts.tempPath ).filePath( ".mdps-component-update.lock" ) ) ;
+    updateLock.setStaleLockTime( 30000 ) ;
+    if( !updateLock.tryLock( 10000 ) ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Component update is busy in another application instance" ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 
-		if( engine.archiveContainsFolder() ){
+    QString cleanupWarning ;
+    const auto promotion = promoteUpdateDirectoryContents( opts.updateStagePath,opts.tempPath,&cleanupWarning ) ;
+    if( !promotion.isEmpty() ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->failedToRename( engine.name(),opts.updateStagePath,opts.tempPath,promotion,opts.id ) ;
+        engine.setBroken() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 
-			auto m = engine.renameArchiveFolder( opts.filePath,opts.tempPath ) ;
+    if( !cleanupWarning.isEmpty() )this->post( engine.name(),cleanupWarning,opts.id ) ;
 
-			if( m.success() ){
+    const auto finalExecutable = engine.archiveContainsFolder()
+        ? engine.updateCmdPath( m_ctx.logger(),opts.tempPath )
+        : opts.exeBinPath ;
+    if( !utility::setPermissions( finalExecutable ) ){
+        this->post( engine.name(),QObject::tr( "Promoted engine failed executable-permission verification" ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 
-				auto exe = engine.updateCmdPath( m_ctx.logger(),opts.tempPath ) ;
+    // The downloaded archive is no longer required after a fully successful
+    // promotion. Cleanup failure is diagnostic and does not undo a good engine.
+    const auto cleanup = utility::removeFile( opts.filePath ) ;
+    if( !cleanup.isEmpty() )this->failedToRemove( engine.name(),opts.filePath,cleanup,opts.id ) ;
 
-				QFile f( exe ) ;
-
-				f.setPermissions( f.permissions() | QFileDevice::ExeOwner ) ;
-			}else{
-				this->failedToRename( engine.name(),m.src(),m.dst(),m.err(),opts.id ) ;
-
-				engine.setBroken() ;
-				this->printVersion( opts.move(),true ) ;
-
-				return ;
-			}
-		}else{
-			QFile f( opts.exeBinPath ) ;
-
-			f.setPermissions( f.permissions() | QFileDevice::ExeOwner ) ;
-		}
-
-		this->printVersion( opts.move(),true ) ;
-	}else{		
-		this->failedToExtract( opts.exeArgs,s,opts.id ) ;
-
-		engine.setBroken() ;
-		this->printVersion( opts.move(),true ) ;
-	}
+    this->printVersion( opts.move(),true ) ;
 }
 
 void networkAccess::postStartDownloading( const QString& engineName,int id ) const
@@ -817,32 +1240,22 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 
 	this->post( engine.name(),mm,opts.id ) ;
 
-	if( engine.archiveContainsFolder() ){
-
-		auto m = engine.deleteEngineBinFolder( opts.tempPath ) ;
-
-		if( !m.isEmpty() ){
-
-			m = QObject::tr( "Trouble Ahead, Failed To Delete Folder: %1" ).arg( m ) ;
-
-			this->post( engine.name(),m,opts.id ) ;
-		}
-	}else{
-		auto m = engine.removeFiles( { opts.exeBinPath },QFileInfo( opts.exeBinPath ).absolutePath() ) ;
-
-		if( m.size() ){
-
-			this->failedToRemove( engine.name(),m,opts.id ) ;
-		}
-	}
-
+    // Materialize the complete archive away from the live engine tree. No
+    // existing executable or folder is removed before extraction succeeds.
+    opts.updateStagePath = QDir( opts.tempPath ).filePath( ".mdps-update-stage-" + QUuid::createUuid().toString( QUuid::WithoutBraces ) ) ;
+    if( !QDir().mkpath( opts.updateStagePath ) ){
+        this->post( engine.name(),QObject::tr( "Failed to create engine update staging directory: %1" ).arg( opts.updateStagePath ),opts.id ) ;
+        engine.setBroken() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
 	QStringList extractorArgs ;
 	QString extractorExe ;
 
 	if( utility::platformIsWindows() ){
 
 		extractorExe = m_ctx.Engines().findExecutable( "bsdtar.exe" ) ;
-		extractorArgs = QStringList{ "-x","-f",opts.filePath,"-C",opts.tempPath } ;
+		extractorArgs = QStringList{ "-x","-f",opts.filePath,"-C",opts.updateStagePath } ;
 	}else{
 		extractorExe = m_ctx.Engines().findExecutable( "bsdtar" ) ;
 
@@ -852,10 +1265,10 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 
 			if( !extractorExe.isEmpty() ){
 
-				extractorArgs = QStringList{ opts.filePath,"-d",opts.tempPath } ;
+				extractorArgs = QStringList{ opts.filePath,"-d",opts.updateStagePath } ;
 			}
 		}else{
-			extractorArgs = QStringList{ "-x","-f",opts.filePath,"-C",opts.tempPath } ;
+			extractorArgs = QStringList{ "-x","-f",opts.filePath,"-C",opts.updateStagePath } ;
 		}
 	}
 
@@ -875,6 +1288,7 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 
 		this->post( engine.name(),m + ": " + mm,opts.id ) ;
 
+        removeUpdatePath( opts.updateStagePath ) ;
 		engine.setBroken() ;
 		this->printVersion( opts.move(),true ) ;
 	}else{
@@ -883,7 +1297,16 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 
 		opts.exeArgs = { exe,args } ;
 
-		utils::qprocess::run( exe,args,opts.move(),this,&networkAccess::extractArchiveOuput ) ;
+		QPointer< QWidget > guard( &m_ctx.mainWidget() ) ;
+		const auto * parent = this ;
+		auto moved = opts.move() ;
+        utils::qthread::run(
+            [ exe,args ](){ return runBoundedExtractor( exe,args ) ; },
+            [ guard,parent,opts = std::move( moved ) ]( utils::qprocess::outPut&& output ) mutable {
+                if( guard ){
+                    parent->extractArchiveOuput( std::move( opts ),output ) ;
+                }
+            } ) ;
 	}
 }
 
@@ -996,13 +1419,16 @@ QString networkAccess::downloadSpeed::calculate( const utils::network::progress&
 		}
 	}
 
-	if( totalSize == 0 ){
+	if( totalSize <= 0 ){
 
 		auto current = m_locale.formattedDataSize( received ) ;
 
 		return QString( "%1 at %2" ).arg( current,m_dataSpeed ) ;
 	}else{
-		auto perc       = double( received ) * 100 / double( totalSize ) ;
+		// Keep diagnostic byte counts exact, but never present an impossible
+		// progress percentage above 100 when a server revises/misreports length.
+		const auto rawPerc = double( received ) * 100 / double( totalSize ) ;
+		const auto perc = rawPerc > 100.0 ? 100.0 : rawPerc ;
 		auto size       = m_locale.formattedDataSize( totalSize ) ;
 		auto current    = m_locale.formattedDataSize( received ) ;
 		auto percentage = QString::number( perc,'f',2 ) ;

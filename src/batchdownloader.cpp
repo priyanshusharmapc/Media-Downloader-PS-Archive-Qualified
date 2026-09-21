@@ -28,6 +28,12 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QFile>
+#include <QSaveFile>
+#include <QLockFile>
+#include <QUuid>
+
+#include <cmath>
+#include <limits>
 
 batchdownloader::batchdownloader( const Context& ctx ) :
 	m_ctx( ctx ),
@@ -311,9 +317,9 @@ batchdownloader::batchdownloader( const Context& ctx ) :
 
 void batchdownloader::addClipboardUrl()
 {
-	auto m = utility::clipboardText() ;
+	auto m = utility::clipboardText().trimmed() ;
 
-	if( m.startsWith( "http" ) ){
+	if( utility::isHttpUrl( m ) ){
 
 		this->addToList( m,{ this->showMetaData(),this->autoDownloadWhenAdded() } ) ;
 
@@ -590,11 +596,20 @@ void batchdownloader::showCustomContext()
 		}
 	}
 
-	connect( mm,&QMenu::triggered,[ this ]( QAction * ac ){
+	const auto engineTargetUrl = row >= 0 && row < m_table.rowCount() ? m_table.url( row ) : QString() ;
+	const auto engineTargetText = row >= 0 && row < m_table.rowCount() ? m_table.entryAt( row ).uiText : QString() ;
+
+	connect( mm,&QMenu::triggered,[ this,row,engineTargetUrl,engineTargetText ]( QAction * ac ){
+
+		if( row < 0 || row >= m_table.rowCount() ||
+		    m_table.url( row ) != engineTargetUrl ||
+		    m_table.entryAt( row ).uiText != engineTargetText ){
+			return ;
+		}
 
 		auto u = tableWidget::type::EngineName ;
 
-		m_table.setDownloadingOptions( u,m_table.currentRow(),ac->objectName() ) ;
+		m_table.setDownloadingOptions( u,row,ac->objectName() ) ;
 	} ) ;
 
 	auto subMenu = utility::setUpMenu( m_ctx,{},false,false,true,&m ) ;
@@ -605,14 +620,16 @@ void batchdownloader::showCustomContext()
 
 	connect( subMenu,&QMenu::triggered,[ this,row ]( QAction * ac ){
 
-		auto m = util::split( ac->objectName(),'\n',true ) ;
+		const auto m = ac->objectName().split( '\n',Qt::KeepEmptyParts ) ;
 
 		auto u = tableWidget::type::DownloadOptions ;
 
-		if( m.size() > 1 ){
+		if( m.size() >= 2 ){
 
+			// Preserve an intentionally empty options field; the menu label is
+			// metadata and must never become backend command text.
 			m_table.setDownloadingOptions( u,row,m[ 0 ],m[ 1 ] ) ;
-		}else{
+		}else if( m.size() == 1 ){
 			m_table.setDownloadingOptions( u,row,m[ 0 ] ) ;
 		}
 	} ) ;
@@ -626,11 +643,22 @@ void batchdownloader::showCustomContext()
 
 void batchdownloader::init_done()
 {
-	auto m = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
+	const auto shared = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
 
-	if( QFile::exists( m ) ){
-
-		this->getListFromFile( m,true ) ;
+	if( QFile::exists( shared ) ){
+		// Snapshot the exact recovery generation under the same lock used by
+		// writers, but leave the shared recovery file in place until parsing
+		// succeeds. A crash during restore therefore cannot strand the only
+		// durable copy in a private pathname.
+		QLockFile lock( shared + ".lock" ) ;
+		lock.setStaleLockTime( 30000 ) ;
+		if( lock.tryLock( 10000 ) && QFile::exists( shared ) ){
+			const auto claimed = shared + ".consume-" +
+				QUuid::createUuid().toString( QUuid::WithoutBraces ) + ".json" ;
+			if( QFile::copy( shared,claimed ) ){
+				this->getListFromFile( claimed,true ) ;
+			}
+		}
 	}
 
 	m_initDone = true ;
@@ -673,9 +701,13 @@ void batchdownloader::retranslateUi()
 
 void batchdownloader::tabEntered()
 {
-	auto m = m_ui.cbEngineTypeBD->currentText() ;
-	auto s = m_settings.lastUsedOption( m,settings::tabName::batch ) ;
-	m_ui.lineEditBDUrlOptions->setText( s ) ;
+	if( !m_ui.lineEditBDUrlOptions->isModified() ){
+
+		auto m = m_ui.cbEngineTypeBD->currentText() ;
+		auto s = m_settings.lastUsedOption( m,settings::tabName::batch ) ;
+		m_ui.lineEditBDUrlOptions->setText( s ) ;
+	}
+
 	m_ui.lineEditBDUrl->setFocus() ;
 }
 
@@ -883,8 +915,9 @@ void batchdownloader::setThumbnail( const std::vector< QByteArray >& fileNames,
 				   const engines::engine& engine,
 				   int row )
 {
-	auto m = m_settings.downloadFolder() ;
-	auto downloadFolder = engine.downloadFolder( m ) ;
+	const auto& entry = m_table.entryAt( row ) ;
+	const auto jobFolder = entry.downloadFolder.isEmpty() ? m_settings.downloadFolder() : entry.downloadFolder ;
+	auto downloadFolder = engine.downloadFolder( jobFolder ) ;
 
 	class meaw
 	{
@@ -973,9 +1006,15 @@ void batchdownloader::getMetaData( const engines::engine& eng,const Items::entry
 		m_table.replace( e.move(),row ) ;
 	}
 
-	util::Timer( 1000,[ this,row,uiText ]( int counter ){
+	const auto identity = m_table.entryAt( row ).stableIdentity ;
+
+	util::Timer( 1000,[ this,identity,uiText ]( int counter ){
 
 		using ff = reportFinished::finishedStatus ;
+		const auto row = m_table.rowWithIdentity( identity ) ;
+		if( row < 0 ){
+			return true ;
+		}
 
 		if( ff::running( m_table.runningState( row ) ) ){
 
@@ -998,7 +1037,7 @@ void batchdownloader::getMetaData( const engines::engine& eng,const Items::entry
 
 	m_table.selectLast() ;
 
-	this->showThumbnail( eng,row,url ) ;
+	this->showThumbnail( eng,row,url,identity ) ;
 }
 
 void batchdownloader::updateMetaData( const QString& url,int row )
@@ -1117,6 +1156,21 @@ void batchdownloader::addItemToUi( const engines::engine& engine,Items::entry s 
 	m_table.setEngineName( s.engineName,row ) ;
 	m_table.setExtraDownloadOptions( s.downloadExtraOptions,row ) ;
 
+	// Restore command-affecting per-row state that is deliberately stored
+	// outside the ordinary download-options string.
+	if( !s.subtitle.isEmpty() ){
+		m_table.setDownloadingOptions( tableWidget::type::subtitleOption,row,s.subtitle ) ;
+	}
+	if( !s.timeInterval.isEmpty() ){
+		m_table.setDownloadingOptions( tableWidget::type::DownloadTimeInterval,row,s.timeInterval ) ;
+	}
+	if( !s.chapters.isEmpty() ){
+		m_table.setDownloadingOptions( tableWidget::type::DownloadChapters,row,s.chapters ) ;
+	}
+	if( s.splitByChapters ){
+		m_table.setDownloadingOptions( tableWidget::type::SplitByChapters,row,"Yes" ) ;
+	}
+
 	if( s.downloadOptions.isEmpty() ){
 
 		m_ctx.TabManager().Configure().setDownloadOptions( row,m_table ) ;
@@ -1152,98 +1206,127 @@ void batchdownloader::addItemUiSlot( ItemEntries m )
 
 static QJsonArray _saveComments( const QJsonArray& arr )
 {
-	class comments
+	struct node
 	{
-	public:
-		void add( const QJsonObject& obj )
-		{
-			QJsonObject oo ;
-
-			oo.insert( "id",obj.value( "id" ) ) ;
-			oo.insert( "parent",obj.value( "parent" ) ) ;
-			oo.insert( "author",obj.value( "author" ) ) ;
-			oo.insert( "text",obj.value( "text" ) ) ;
-			oo.insert( "date",obj.value( "date" ) ) ;
-			oo.insert( "text replies",obj.value( "text replies" ) ) ;
-
-			m_objs.append( oo ) ;
-		}
-		void add( const QJsonObject& obj,const QString& parent )
-		{
-			for( int i = 0 ; i < m_objs.size() ; i++ ){
-
-				auto m = m_objs.at( i ).toObject() ;
-
-				if( m.value( "id" ).toString() == parent ){
-
-					this->add( obj,m,i ) ;
-				}
-			}
-		}
-		const QJsonArray& data() const
-		{
-			return m_objs ;
-		}
-	private:
-		void add( const QJsonObject& obj,QJsonObject& ss,int i )
-		{
-			auto replies = this->replies( ss ) ;
-
-			QJsonObject oo ;
-
-			oo.insert( "author",obj.value( "author" ) ) ;
-			oo.insert( "text",obj.value( "text" ) ) ;
-			oo.insert( "date",obj.value( "date" ) ) ;
-
-			replies.append( oo ) ;
-
-			ss.insert( "text replies",replies ) ;
-
-			m_objs.replace( i,ss ) ;
-		}
-		QJsonArray replies( const QJsonObject& obj ) const
-		{
-			auto arr = obj.value( "text replies" ) ;
-
-			if( arr.isUndefined() ){
-
-				return QJsonArray() ;
-			}else{
-				return arr.toArray() ;
-			}
-		}
-		QJsonArray m_objs ;
+		QJsonObject object ;
+		QVector< int > children ;
 	} ;
 
-	comments mm ;
+	QVector< node > nodes ;
+	QHash< QString,int > byId ;
+	nodes.reserve( arr.size() ) ;
 
-	for( const auto& it : arr ){
+	// Index every comment before resolving parents so input order never decides
+	// whether a reply survives export.
+	for( const auto& value : arr ){
 
-		auto obj = it.toObject() ;
+		const auto object = value.toObject() ;
+		const auto index = nodes.size() ;
+		nodes.append( { object,{} } ) ;
 
-		auto parent = obj.value( "parent" ).toString() ;
+		const auto id = object.value( "id" ).toString() ;
+		if( !id.isEmpty() && !byId.contains( id ) ){
 
-		if( parent == "root" ){
-
-			mm.add( obj ) ;
-		}else{
-			mm.add( obj,parent ) ;
+			byId.insert( id,index ) ;
 		}
 	}
 
-	QJsonArray e ;
+	QVector< int > roots ;
+	for( int i = 0 ; i < nodes.size() ; ++i ){
 
-	for( const auto& it : mm.data() ){
+		const auto parent = nodes[ i ].object.value( "parent" ).toString() ;
+		const auto parentIndex = byId.value( parent,-1 ) ;
 
-		auto obj = it.toObject() ;
+		// Missing, malformed and self-parent references remain visible as roots
+		// instead of silently discarding archival evidence.
+		if( parent == "root" || parent.isEmpty() || parentIndex < 0 || parentIndex == i ){
 
-		obj.remove( "parent" ) ;
-		obj.remove( "id" ) ;
-
-		e.append( obj ) ;
+			roots.append( i ) ;
+		}else{
+			nodes[ parentIndex ].children.append( i ) ;
+		}
 	}
 
-	return e ;
+	QVector< bool > emitted( nodes.size(),false ) ;
+	QVector< bool > active( nodes.size(),false ) ;
+
+	std::function< QJsonObject( int ) > build = [ & ]( int index ){
+
+		emitted[ index ] = true ;
+		active[ index ] = true ;
+
+		const auto& source = nodes[ index ].object ;
+		QJsonObject out ;
+		out.insert( "author",source.value( "author" ) ) ;
+		out.insert( "text",source.value( "text" ) ) ;
+		out.insert( "date",source.value( "date" ) ) ;
+
+		QJsonArray replies ;
+		for( const auto child : nodes[ index ].children ){
+
+			if( child < 0 || child >= nodes.size() || active[ child ] || emitted[ child ] ){
+
+				continue ;
+			}
+
+			replies.append( build( child ) ) ;
+		}
+
+		if( !replies.isEmpty() ){
+
+			out.insert( "text replies",replies ) ;
+		}
+
+		active[ index ] = false ;
+		return out ;
+	} ;
+
+	QJsonArray result ;
+	for( const auto root : roots ){
+
+		if( !emitted[ root ] ){
+
+			result.append( build( root ) ) ;
+		}
+	}
+
+	// A malformed parent cycle has no natural root. Emit each still-unseen
+	// component once rather than losing it from the export.
+	for( int i = 0 ; i < nodes.size() ; ++i ){
+
+		if( !emitted[ i ] ){
+
+			result.append( build( i ) ) ;
+		}
+	}
+
+	return result ;
+}
+
+bool _commentInt64( const QJsonValue& value,qint64& out )
+{
+	if( !value.isDouble() ){
+		return false ;
+	}
+
+	const auto number = value.toDouble() ;
+
+	if( !std::isfinite( number ) || std::floor( number ) != number ){
+		return false ;
+	}
+
+	// qint64::max() cannot be represented exactly as a double. The nearest
+	// double is 2^63, which is already outside qint64, so use an exclusive
+	// upper limit rather than rounding max upward and casting out of range.
+	constexpr double min = -9223372036854775808.0 ;
+	constexpr double upperExclusive = 9223372036854775808.0 ;
+
+	if( number < min || number >= upperExclusive ){
+		return false ;
+	}
+
+	out = static_cast< qint64 >( number ) ;
+	return true ;
 }
 
 template< typename Array,typename Table >
@@ -1257,15 +1340,18 @@ void _add_comments( const Array& arr,Table& table )
 		auto txt       = obj.value( "text" ).toString() ;
 		auto author    = obj.value( "author" ).toString() ;
 		auto comment   = QObject::tr( "Author: %1" ).arg( author ) ;
-		auto likeCount = QString::number( obj.value( "like_count" ).toInt() ) ;
+		qint64 likeCountValue = 0 ;
+		_commentInt64( obj.value( "like_count" ),likeCountValue ) ;
+		auto likeCount = QString::number( likeCountValue ) ;
 		auto timestamp = obj.value( "timestamp" ) ;
 
 		comment += "\n" + QObject::tr( "Like Count: %1" ).arg( likeCount ) ;
 
-		if( !timestamp.isUndefined() ){
+		qint64 timestampValue = 0 ;
 
-			auto a = timestamp.toInt() ;
-			auto b = utility::fromSecsSinceEpoch( a ) ;
+		if( !timestamp.isUndefined() && _commentInt64( timestamp,timestampValue ) ){
+
+			auto b = utility::fromSecsSinceEpoch( timestampValue ) ;
 
 			if( !b.isEmpty() ){
 
@@ -1322,7 +1408,7 @@ void batchdownloader::showComments( const QByteArray& e )
 
 		if( f.isEmpty() ){
 
-			m_commentsFileName = hh + "/MediaDowloaderComments.json" ;
+			m_commentsFileName = hh + "/MediaDownloaderComments.json" ;
 		}else{
 			this->normalizeFilePath( f ) ;
 
@@ -1400,6 +1486,25 @@ void batchdownloader::setVisibleWidgetOverMainTable( bool e )
 	}else{
 		if( e ){
 
+			const auto row = m_widgetOverMainTable.row() ;
+			m_ui.lineEditStartTimeInterval->clear() ;
+			m_ui.lineEditEndTimeInterval->clear() ;
+			m_ui.lineEditChapters->clear() ;
+			m_ui.cbSplitByChapters->setChecked( false ) ;
+
+			if( row >= 0 && row < m_table.rowCount() ){
+				const auto interval = m_table.timeInterval( row ) ;
+				const auto separator = interval.indexOf( '-' ) ;
+
+				if( separator >= 0 ){
+					m_ui.lineEditStartTimeInterval->setText( interval.left( separator ) ) ;
+					m_ui.lineEditEndTimeInterval->setText( interval.mid( separator + 1 ) ) ;
+				}
+
+				m_ui.lineEditChapters->setText( m_table.chapters( row ) ) ;
+				m_ui.cbSplitByChapters->setChecked( m_table.splitByChapters( row ) ) ;
+			}
+
 			m_ui.lineEditStartTimeInterval->setFocus() ;
 		}else{
 			m_ui.lineEditBDUrl->setFocus() ;
@@ -1424,7 +1529,8 @@ void batchdownloader::renameFile( int row )
 	if( fn.size() ){
 
 		auto nn = m_ui.plainTextEditBD->toPlainText() ;
-		auto df = m_ctx.Settings().downloadFolder() ;
+		const auto& entry = m_table.entryAt( row ) ;
+		auto df = entry.downloadFolder.isEmpty() ? m_ctx.Settings().downloadFolder() : entry.downloadFolder ;
 
 		auto& item = m_table.item( row,m_table.startPosition() ) ;
 
@@ -1444,40 +1550,46 @@ void batchdownloader::setTimeIntervals( int row )
 {
 	if( row != -1 ){
 
-		auto a = m_ui.lineEditStartTimeInterval->text() ;
-		auto b = m_ui.lineEditEndTimeInterval->text() ;
-		auto c = m_ui.lineEditChapters->text() ;
+		const auto a = m_ui.lineEditStartTimeInterval->text().trimmed() ;
+		const auto b = m_ui.lineEditEndTimeInterval->text().trimmed() ;
+		const auto chapters = m_ui.lineEditChapters->text().trimmed() ;
 
-		if( !a.isEmpty() && !b.isEmpty() ){
-
-			auto u = tableWidget::type::DownloadTimeInterval ;
-
-			m_table.setDownloadingOptions( u,row,a + "-" + b ) ;
-
-		}else if( a.isEmpty() && b.isEmpty() ){
-
-			//Left empty on purpose
-		}else{
+		if( a.isEmpty() != b.isEmpty() ){
 			return ;
 		}
 
-		if( !c.isEmpty() ){
+		auto removeUiOption = [ this,row ]( const QString& optionName ){
+			auto remove = [ & ]( QString value ){
+				auto lines = util::split( value,'\n',true ) ;
+				for( int i = lines.size() - 1 ; i >= 0 ; --i ){
+					if( lines[ i ].startsWith( optionName ) ){
+						lines.removeAt( i ) ;
+					}
+				}
+				return lines.join( '\n' ) ;
+			} ;
 
-			auto u = tableWidget::type::DownloadChapters ;
+			m_table.setUiText( remove( m_table.uiText( row ) ),row ) ;
+			m_table.setDownloadingOptionsUi( remove( m_table.downloadingOptionsUi( row ) ),row ) ;
+		} ;
 
-			m_table.setDownloadingOptions( u,row,c ) ;
-		}
-
-		if( m_ui.cbSplitByChapters->isChecked() ){
-
-			auto u = tableWidget::type::SplitByChapters ;
-
-			m_table.setDownloadingOptions( u,row,"Yes" ) ;
+		if( a.isEmpty() ){
+			m_table.setTimeInterval( {},row ) ;
+			removeUiOption( utility::stringConstants::downloadTimeInterval() + ": " ) ;
 		}else{
-			auto u = tableWidget::type::SplitByChapters ;
-
-			m_table.setDownloadingOptions( u,row,"No" ) ;
+			m_table.setDownloadingOptions( tableWidget::type::DownloadTimeInterval,row,a + "-" + b ) ;
 		}
+
+		if( chapters.isEmpty() ){
+			m_table.setChapters( {},row ) ;
+			removeUiOption( utility::stringConstants::downloadChapters() + ": " ) ;
+		}else{
+			m_table.setDownloadingOptions( tableWidget::type::DownloadChapters,row,chapters ) ;
+		}
+
+		m_table.setDownloadingOptions( tableWidget::type::SplitByChapters,
+						 row,
+						 m_ui.cbSplitByChapters->isChecked() ? "Yes" : "No" ) ;
 	}
 }
 
@@ -1554,6 +1666,9 @@ void batchdownloader::showSubtitles( const QByteArray& e )
 
 			obj.insert( "id",l.name() ) ;
 			obj.insert( "extension",m ) ;
+			// Selection reads "type" to distinguish manual subtitles from
+			// automatic captions. Keep the row discriminator aligned end-to-end.
+			obj.insert( "type",m ) ;
 			obj.insert( "resolution",l.subtitles() ) ;
 			obj.insert( "filesize",title ) ;
 			obj.insert( "info",l.notes() ) ;
@@ -1679,9 +1794,11 @@ auto _make_sort( const char * key,Table& table,Cmp cmp )
 					m_key( key ),m_obj( std::move( obj ) )
 				{
 				}
-				operator int() const
+				operator qint64() const
 				{
-					return m_obj.value( m_key ).toInt() ;
+					qint64 value = 0 ;
+					_commentInt64( m_obj.value( m_key ),value ) ;
+					return value ;
 				}
 				QJsonObject toObject() const
 				{
@@ -1720,11 +1837,11 @@ void batchdownloader::sortComments()
 
 	connect( m.addAction( tr( "Sort By Date Ascending" ) ),
 		 &QAction::triggered,
-		 _make_sort( "timestamp",m_tableWidgetBDList,std::less<int>() ) ) ;
+		 _make_sort( "timestamp",m_tableWidgetBDList,std::less<qint64>() ) ) ;
 
 	connect( m.addAction( tr( "Sort By Date Descending" ) ),
 		 &QAction::triggered,
-		 _make_sort( "timestamp",m_tableWidgetBDList,std::greater<int>() ) ) ;
+		 _make_sort( "timestamp",m_tableWidgetBDList,std::greater<qint64>() ) ) ;
 
 	connect( m.addAction( tr( "Sort By Likes" ) ),
 		 &QAction::triggered,
@@ -1749,11 +1866,22 @@ bool batchdownloader::saveSubtitles( const QString& url,const QString& ext,const
 
 			auto s = utility::networkReply( m_ctx,reply ).data() ;
 
-			QFile f( e ) ;
+			// utility::networkReply logs transport failures. Do not touch the
+			// user's chosen path unless a successful request produced bytes.
+			if( !reply.success() || s.isEmpty() ){
 
-			if( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) ){
+				return ;
+			}
 
-				f.write( s ) ;
+			QSaveFile f( e ) ;
+
+			if( f.open( QIODevice::WriteOnly ) ){
+
+				if( f.write( s ) != s.size() || !f.commit() ){
+
+					auto x = QObject::tr( "Failed To Save Subtitle To: %1" ).arg( e ) ;
+					m_ctx.logger().add( x,utility::loggerID() ) ;
+				}
 			}else{
 				auto x = QObject::tr( "Failed To Open Path For Writing: %1" ).arg( e ) ;
 				m_ctx.logger().add( x,utility::loggerID() ) ;
@@ -1856,7 +1984,7 @@ void batchdownloader::parseDataFromObject( Items& items,const QJsonObject& obj,c
 		} ;
 
 		auto a = "url" ;
-		auto b = "uploadDate" ;
+		auto b = "upload_date" ;
 
 		this->dataFromFile( items,{ array,a,b },function ) ;
 	}else{
@@ -1868,7 +1996,12 @@ void batchdownloader::parseDataFromObject( Items& items,const QJsonObject& obj,c
 		auto function = []( const QJsonValue& e ){
 
 			using tt = engines::engine::baseEngine::timer ;
-			return tt::duration( e.toInt() * 1000 ) ;
+			if( !e.isDouble() )return QString() ;
+			const auto seconds = e.toDouble() ;
+			const double maxSeconds = static_cast< double >( std::numeric_limits< qint64 >::max() / 1000LL ) ;
+			if( !std::isfinite( seconds ) || seconds < 0.0 || seconds > maxSeconds )return QString() ;
+			const auto wholeSeconds = static_cast< qint64 >( std::floor( seconds ) ) ;
+			return tt::duration( wholeSeconds * 1000LL ) ;
 		} ;
 
 		if( !array.isEmpty() ){
@@ -1883,37 +2016,76 @@ void batchdownloader::parseDataFromObject( Items& items,const QJsonObject& obj,c
 
 void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 {
-	engines::file::readAll( e,m_ctx.logger(),[ this,deleteFile,e ]( bool,QByteArray list ){
+	engines::file::readAll( this,e,m_ctx.logger(),[ this,deleteFile,e ]( bool readOk,QByteArray list ){
 
-		if( deleteFile ){
+		const auto isAutosaveSnapshot = deleteFile && e.contains( ".consume-" ) ;
+		const auto discardSnapshot = [ & ](){
+			if( isAutosaveSnapshot ){
+				QFile::remove( e ) ;
+			}
+		} ;
 
-			QFile::remove( e ) ;
+		if( !readOk || list.isEmpty() ){
+			// The shared autosave was never removed, so a failed snapshot read
+			// leaves the canonical recovery generation available for retry.
+			discardSnapshot() ;
+			return ;
 		}
 
-		if( !list.isEmpty() ){
+		Items items ;
+		auto jsonCandidate = list.trimmed() ;
 
-			Items items ;
+		if( jsonCandidate.startsWith( "\xEF\xBB\xBF" ) ){
+			jsonCandidate.remove( 0,3 ) ;
+			jsonCandidate = jsonCandidate.trimmed() ;
+		}
 
-			if( list.startsWith( '[' ) || list.startsWith( '{' ) ){
-
-				this->parseDataFromFile( items,list ) ;
-			}else{
-				list.replace( "\r","" ) ;
-
-				for( const auto& it : util::split( list,'\n',true ) ){
-
-					if( it.startsWith( "http" ) ){
-
-						items.add( it ) ;
-					}
+		if( jsonCandidate.startsWith( '[' ) || jsonCandidate.startsWith( '{' ) ){
+			this->parseDataFromFile( items,jsonCandidate ) ;
+		}else{
+			list.replace( "\r","" ) ;
+			for( const auto& it : util::split( list,'\n',true ) ){
+				const auto candidate = it.trimmed() ;
+				if( utility::isHttpUrl( candidate ) ){
+					items.add( candidate ) ;
 				}
 			}
+		}
 
-			if( items.size() ){
+		if( items.size() ){
+			m_ui.tabWidget->setCurrentIndex( 1 ) ;
+			this->parseItems( items.move(),{ false,false } ) ;
 
-				m_ui.tabWidget->setCurrentIndex( 1 ) ;
-				this->parseItems( items.move(),{ false,false } ) ;
+			if( isAutosaveSnapshot ){
+				const auto shared = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
+				QLockFile lock( shared + ".lock" ) ;
+				lock.setStaleLockTime( 30000 ) ;
+				if( lock.tryLock( 10000 ) ){
+					QFile current( shared ) ;
+					QByteArray currentBytes ;
+					if( current.open( QIODevice::ReadOnly ) ){
+						currentBytes = current.readAll() ;
+					}
+
+					// Retire the canonical file only if it is still exactly the
+					// generation that was restored. A newer shutdown save is
+					// left untouched.
+					if( currentBytes == list ){
+						if( QFile::exists( shared ) && !QFile::remove( shared ) ){
+							m_ctx.logger().add(
+								"Failed to retire restored autosave generation: " + shared,
+								utility::loggerID() ) ;
+						}
+					}
+				}
+				QFile::remove( e ) ;
+			}else if( deleteFile && !QFile::remove( e ) ){
+				m_ctx.logger().add( "Failed to remove restored autosave: " + e,utility::loggerID() ) ;
 			}
+		}else{
+			// Malformed/empty recovery evidence is never retired merely because
+			// a parser produced no jobs. Remove only the private snapshot.
+			discardSnapshot() ;
 		}
 	} ) ;
 }
@@ -1958,7 +2130,14 @@ void batchdownloader::tableItemDoubleClicked( QTableWidgetItem& item )
 
 	if( !m.isEmpty() ){
 
-		auto crow = m_table.currentRow() ;
+		const auto crow = m_listTargetRow ;
+
+		// The chooser belongs to the row that opened it. Selection can change
+		// independently while the chooser is visible, so revalidate row + URL.
+		if( crow < 0 || crow >= m_table.rowCount() || m_table.url( crow ) != m_listTargetUrl ){
+
+			return ;
+		}
 
 		if( m_listType == batchdownloader::listType::SUBTITLES ){
 
@@ -2004,11 +2183,24 @@ void batchdownloader::batchDownloaderSet()
 
 		this->saveComments( arr,e ) ;
 	}else{
-		auto crow = m_table.currentRow() ;
+		const auto crow = m_listTargetRow ;
+
+		if( crow < 0 || crow >= m_table.rowCount() || m_table.url( crow ) != m_listTargetUrl ){
+
+			return ;
+		}
 
 		if( m_listType == batchdownloader::listType::SUBTITLES ){
 
 			auto row = m_tableWidgetBDList.currentRow() ;
+
+			// Zero-result subtitle discovery and an unselected populated list
+			// both report currentRow() == -1. Keep Set a no-op until both
+			// the subtitle occurrence and owning batch row are valid.
+			if( row < 0 || row >= m_tableWidgetBDList.rowCount() || crow < 0 || crow >= m_table.rowCount() ){
+
+				return ;
+			}
 
 			auto m = m_tableWidgetBDList.item( row,0 ).text() ;
 
@@ -2038,7 +2230,8 @@ void batchdownloader::updateTitleBar()
 
 void batchdownloader::showThumbnail( const engines::engine& engine,
 				    int index,
-				    const QString& url )
+				    const QString& url,
+				    const QString& identity )
 {			
 	class events
 	{
@@ -2047,11 +2240,13 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 			const engines::engine& engine,
 			int index,
 			const QString& url,
+			const QString& identity,
 			BatchLoggerWrapper< batchdownloader::defaultLogger > logger ) :
 			m_parent( p ),
 			m_engine( engine ),
 			m_index( index ),
 			m_url( url ),
+			m_identity( identity ),
 			m_logger( logger )
 		{
 		}
@@ -2061,6 +2256,11 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 		}
 		void done( engines::ProcessExitState,const std::vector< QByteArray >& )
 		{
+			const auto row = m_parent.m_table.rowWithIdentity( m_identity ) ;
+			if( row < 0 ){
+				return ;
+			}
+
 			auto enableAll = false ;
 
 			auto data = m_logger.data() ;
@@ -2081,9 +2281,9 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 					m.setUrl( m_url ) ;
 				}
 
-				m_parent.addItem( this->index(),enableAll,m.move() ) ;
+				m_parent.addItem( row,enableAll,m.move() ) ;
 			}else{
-				m_parent.addItem( this->index(),enableAll,m_url ) ;
+				m_parent.addItem( row,enableAll,m_url ) ;
 			}
 		}
 		void disableAll()
@@ -2125,6 +2325,7 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 		const engines::engine& m_engine ;
 		int m_index ;
 		QString m_url ;
+		QString m_identity ;
 		BatchLoggerWrapper< batchdownloader::defaultLogger > m_logger ;
 	} ;
 
@@ -2151,7 +2352,7 @@ void batchdownloader::showThumbnail( const engines::engine& engine,
 	args.append( m_table.url( index ) ) ;
 
 	auto ctx = utility::make_ctx( m_ctx,
-				      events( *this,engine,index,url,wrapper ),
+				      events( *this,engine,index,url,identity,wrapper ),
 				      wrapper,
 				      m_terminator.setUp(),
 				      QProcess::ProcessChannel::StandardOutput ) ;
@@ -2269,6 +2470,12 @@ void batchdownloader::dataFromFile( Items& items,
 
 	auto title    = obj.value( "title" ).toString() ;
 	auto date     = obj.value( dFileopts.uploadDate ).toString() ;
+
+	// Application-created lists historically used uploadDate while current
+	// export uses the canonical yt-dlp-compatible upload_date key.
+	if( date.isEmpty() && dFileopts.uploadDate == "upload_date" ){
+		date = obj.value( "uploadDate" ).toString() ;
+	}
 
 	auto engineName      = obj.value( "engineName" ).toString() ;
 	auto downloadOpts    = obj.value( "downloadOptions" ).toString() ;
@@ -2439,6 +2646,17 @@ void batchdownloader::showList( batchdownloader::listType listType,
 {
 	QStringList args ;
 
+	// The chooser is an operation on the row it was opened for. Main-table
+	// selection may change while the chooser remains visible, so retain both
+	// the row and URL identity and fail closed if that row is later replaced.
+	if( listType == batchdownloader::listType::COMMENTS ){
+		m_listTargetRow = -1 ;
+		m_listTargetUrl.clear() ;
+	}else{
+		m_listTargetRow = row ;
+		m_listTargetUrl = row >= 0 && row < m_table.rowCount() ? m_table.url( row ) : QString() ;
+	}
+
 	auto& table = m_tableWidgetBDList.get() ;
 
 	table.setHorizontalHeaderLabels( engine.horizontalHeaderLabels() ) ;
@@ -2574,8 +2792,9 @@ void batchdownloader::showList( batchdownloader::listType listType,
 		events( batchdownloader& p,
 			batchdownloader::listType l,
 			const engines::engine& engine,
-			int row ) :
-			m_parent( p ),m_listType( l ),m_engine( engine ),m_row( row )
+			int row,
+			QString url ) :
+			m_parent( p ),m_listType( l ),m_engine( engine ),m_row( row ),m_url( std::move( url ) )
 		{
 		}
 		const engines::engine& engine()
@@ -2637,6 +2856,13 @@ void batchdownloader::showList( batchdownloader::listType listType,
 
 				m_parent.showComments( a ) ;
 			}else{
+				// Async media-property completion still belongs to the original
+				// row/URL. Never cache formats into a replacement row.
+				if( m_row < 0 || m_row >= m_parent.m_table.rowCount() ||
+				    m_parent.m_table.url( m_row ) != m_url ){
+					return ;
+				}
+
 				auto& logger = m_parent.m_ctx.logger() ;
 
 				auto ee = m_engine.mediaProperties( logger,a ) ;
@@ -2679,6 +2905,7 @@ void batchdownloader::showList( batchdownloader::listType listType,
 		const engines::engine& m_engine ;
 		QByteArray m_listData ;
 		int m_row ;
+		QString m_url ;
 	} ;
 
 	auto term = m_terminator.setUp( m_ui.pbCancelBatchDownloder,&QPushButton::clicked,-1 ) ;
@@ -2692,7 +2919,7 @@ void batchdownloader::showList( batchdownloader::listType listType,
 
 	BatchLoggerWrapper< outPut > logger( m_ctx.logger(),logs,outPut( *this,listType ) ) ;
 
-	events ev( *this,listType,engine,row ) ;
+	events ev( *this,listType,engine,row,url ) ;
 
 	auto ctx = utility::make_ctx( m_ctx,ev.move(),logger.move(),term.move(),ch ) ;
 
@@ -2724,6 +2951,11 @@ void batchdownloader::addItemUi( int index,bool enableAll,const utility::MediaEn
 
 void batchdownloader::networkData( utility::networkReply m )
 {
+	const auto row = m_table.rowWithIdentity( m.identity() ) ;
+	if( row < 0 ){
+		return ;
+	}
+
 	QPixmap pixmap ;
 
 	if( m.success() && pixmap.loadFromData( m.data() ) ){
@@ -2735,14 +2967,14 @@ void batchdownloader::networkData( utility::networkReply m )
 
 		auto p = pixmap.scaled( w,h ) ;
 
-		this->addItemUi( p,m.index(),m_table,m_ui,m.media() ) ;
+		this->addItemUi( p,row,m_table,m_ui,m.media() ) ;
 	}else{
 		auto& p = m_defaultVideoThumbnail ;
 
-		this->addItemUi( p,m.index(),m_table,m_ui,m.media() ) ;
+		this->addItemUi( p,row,m_table,m_ui,m.media() ) ;
 	}
 
-	this->setDownloadingOptions( m.index(),m_table ) ;
+	this->setDownloadingOptions( row,m_table ) ;
 
 	if( m_table.noneAreRunning() ){
 
@@ -2770,7 +3002,7 @@ void batchdownloader::addItem( int index,bool enableAll,const utility::MediaEntr
 
 		auto h = media.referer().toUtf8() ;
 
-		m_ctx.network().get( u,networkCtx( media,index ),this,m,g,h ) ;
+		m_ctx.network().get( u,networkCtx( media,index,m_table.entryAt( index ).stableIdentity ),this,m,g,h ) ;
 	}else{
 		this->addItemUi( index,enableAll,media ) ;
 	}
@@ -2778,7 +3010,7 @@ void batchdownloader::addItem( int index,bool enableAll,const utility::MediaEntr
 
 void batchdownloader::networkResult( const networkCtx& d,const utils::network::reply& reply )
 {
-	emit this->networkDataSignal( { m_ctx,reply,d.index(),d.media() } ) ;
+	emit this->networkDataSignal( { m_ctx,reply,d.index(),d.media(),d.identity() } ) ;
 }
 
 void batchdownloader::addToList( const QString& u,const batchdownloader::downloadOpts& opts )
@@ -2796,9 +3028,11 @@ void batchdownloader::addToList( const QString& u,const batchdownloader::downloa
 		{
 			Items items ;
 
-			for( const auto& it : util::split( m_url,'\n',true ) ){
+			for( const auto& raw : util::split( m_url,'\n',true ) ){
 
-				if( it.startsWith( "#" ) ){
+				const auto it = raw.trimmed() ;
+
+				if( it.isEmpty() || it.startsWith( "#" ) ){
 
 					continue ;
 
@@ -2841,7 +3075,9 @@ void batchdownloader::addToList( const QString& u,const batchdownloader::downloa
 
 			auto m = util::split( it,' ',true ) ;
 
-			if( m.size() < 3 ){
+			// The option list is optional. "yt-dlp URL" is a complete command;
+			// only the executable by itself is malformed.
+			if( m.size() < 2 ){
 
 				return ;
 			}
@@ -3044,8 +3280,14 @@ void batchdownloader::downloadRecursively( const engines::engine& eng,int index 
 	class meaw
 	{
 	public:
-		meaw( batchdownloader& p,const engines::engine& engine,int index ) :
-			m_parent( p ),m_engine( engine ),m_index( index )
+		meaw( batchdownloader& p,
+		      const engines::engine& defaultEngine,
+		      const engines::engine& engine,
+		      int index ) :
+			m_parent( p ),
+			m_defaultEngine( defaultEngine ),
+			m_engine( engine ),
+			m_index( index )
 		{
 		}
 		void whenCreated()
@@ -3080,17 +3322,18 @@ void batchdownloader::downloadRecursively( const engines::engine& eng,int index 
 
 			if( m != -1 ){
 
-				m_parent.downloadRecursively( m_engine,m ) ;
+				m_parent.downloadRecursively( m_defaultEngine,m ) ;
 			}
 		}
 		batchdownloader& m_parent ;
+		const engines::engine& m_defaultEngine ;
 		const engines::engine& m_engine ;
 		int m_index ;
 	} ;
 
 	const auto& engine = utility::resolveEngine( m_table,eng,m_ctx.Engines(),index ) ;
 
-	this->downloadEvent( meaw( *this,engine,index ),engine,index,true ) ;
+	this->downloadEvent( meaw( *this,eng,engine,index ),engine,index,true ) ;
 }
 
 void batchdownloader::addTextToUi( const QByteArray& data,int index )

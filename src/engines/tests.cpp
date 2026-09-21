@@ -29,12 +29,24 @@
 #include "getsauce.h"
 
 #include "../util.hpp"
+#include "../utility.h"
+#include "../directoryEntries.h"
+#include "../library.h"
 
 #include <iostream>
 #include <array>
+#include <atomic>
 
 #include <QString>
 #include <QEventLoop>
+#include <QTemporaryDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#endif
 
 #define TEST_ENGINE_PREFIX "--media-downloader-test-engine"
 
@@ -105,6 +117,21 @@ public:
 	}
 	void start( const QByteArray& )
 	{
+		for( const auto& arg : m_args.args ){
+			if( arg == TEST_ENGINE_PREFIX"-path-ownership" ){
+				return this->testPathOwnership() ;
+			}
+			if( arg == TEST_ENGINE_PREFIX"-proxy-security" ){
+				return this->testProxySecurity() ;
+			}
+			if( arg == TEST_ENGINE_PREFIX"-library-filesystem-boundary" ){
+				return this->testLibraryFilesystemBoundary() ;
+			}
+			if( arg == TEST_ENGINE_PREFIX"-library-native-mutations" ){
+				return this->testLibraryNativeMutations() ;
+			}
+		}
+
 		Tests tests ;
 
 		QString s ;
@@ -154,6 +181,285 @@ public:
 				return true ;
 			}
 		} ) ;
+	}
+	void testPathOwnership()
+	{
+		QTemporaryDir temp ;
+		if( !temp.isValid() ){
+			std::cerr << "path-ownership=FAIL temp" << std::endl ;
+			return m_args.app.exit( 1 ) ;
+		}
+		const auto root = QDir( temp.path() ).filePath( "bin" ) ;
+		const auto sibling = QDir( temp.path() ).filePath( "bin-tools" ) ;
+		QDir().mkpath( QDir( root ).filePath( "nested" ) ) ;
+		QDir().mkpath( sibling ) ;
+
+		const auto internal = QDir( root ).filePath( "tool" ) ;
+		const auto nested = QDir( root ).filePath( "nested/tool2" ) ;
+		const auto external = QDir( sibling ).filePath( "tool" ) ;
+		for( const auto& path : QStringList{ internal,nested,external } ){
+			QFile file( path ) ;
+			if( !file.open( QIODevice::WriteOnly ) ){
+				std::cerr << "path-ownership=FAIL create" << std::endl ;
+				return m_args.app.exit( 1 ) ;
+			}
+			file.write( "fixture" ) ;
+		}
+
+		const auto normalized = QDir( root ).filePath( "nested/../tool" ) ;
+		bool ok = engines::executableOwnedByBinRoot( internal,root ) &&
+			engines::executableOwnedByBinRoot( nested,root ) &&
+			engines::executableOwnedByBinRoot( normalized,root ) &&
+			!engines::executableOwnedByBinRoot( external,root ) ;
+
+#ifndef Q_OS_WIN
+		const auto linked = QDir( root ).filePath( "linked-tool" ) ;
+		if( QFile::link( external,linked ) ){
+			ok = ok && !engines::executableOwnedByBinRoot( linked,root ) ;
+		}
+#else
+		// Windows canonical paths are case-insensitive; case-only spelling must
+		// not change ownership while a sibling-prefix path must remain rejected.
+		ok = ok && engines::executableOwnedByBinRoot( internal,root.toUpper() ) &&
+			!engines::executableOwnedByBinRoot( external,root.toUpper() ) ;
+#endif
+
+		if( ok ){
+			std::cout << "path-ownership=PASS" << std::endl ;
+			m_args.app.exit( 0 ) ;
+		}else{
+			std::cerr << "path-ownership=FAIL" << std::endl ;
+			m_args.app.exit( 1 ) ;
+		}
+	}
+	void testLibraryFilesystemBoundary()
+	{
+		QTemporaryDir temp ;
+		bool ok = temp.isValid() ;
+		const auto base = temp.path() ;
+		const auto root = base + "/root" ;
+		const auto nested = root + "/nested" ;
+		const auto outside = base + "/outside" ;
+		const auto outsideFile = outside + "/sentinel.txt" ;
+		const auto outsideDirectoryFile = outside + "/directory-sentinel.txt" ;
+
+		QDir().mkpath( nested ) ;
+		QDir().mkpath( outside ) ;
+		{
+			QFile f( outsideFile ) ;
+			ok = ok && f.open( QIODevice::WriteOnly ) && f.write( "sentinel" ) == 8 ;
+		}
+		{
+			QFile f( outsideDirectoryFile ) ;
+			ok = ok && f.open( QIODevice::WriteOnly ) && f.write( "directory-sentinel" ) == 18 ;
+		}
+
+		const auto directoryLink = nested + "/external-directory" ;
+		const auto fileLink = nested + "/external-file" ;
+		bool directoryLinked = false ;
+		bool fileLinked = false ;
+#ifdef Q_OS_WIN
+		const DWORD allowUnprivilegedCreate = 0x2 ;
+		auto nativeDirectoryLink = QDir::toNativeSeparators( directoryLink ).toStdWString() ;
+		auto nativeOutside = QDir::toNativeSeparators( outside ).toStdWString() ;
+		auto nativeFileLink = QDir::toNativeSeparators( fileLink ).toStdWString() ;
+		auto nativeOutsideFile = QDir::toNativeSeparators( outsideFile ).toStdWString() ;
+		directoryLinked = CreateSymbolicLinkW( nativeDirectoryLink.c_str(),nativeOutside.c_str(),
+			SYMBOLIC_LINK_FLAG_DIRECTORY | allowUnprivilegedCreate ) != 0 ;
+		fileLinked = CreateSymbolicLinkW( nativeFileLink.c_str(),nativeOutsideFile.c_str(),
+			allowUnprivilegedCreate ) != 0 ;
+#else
+		directoryLinked = QFile::link( outside,directoryLink ) ;
+		fileLinked = QFile::link( outsideFile,fileLink ) ;
+#endif
+
+		ok = ok && directoryLinked && fileLinked ;
+		if( directoryLinked && fileLinked ){
+			std::atomic_bool keepGoing{ true } ;
+			directoryManager::removeDirectory( root,keepGoing ) ;
+			ok = ok && QFileInfo::exists( outsideFile ) && QFileInfo::exists( outsideDirectoryFile ) ;
+			ok = ok && !QFileInfo::exists( root ) ;
+		}
+
+#ifdef Q_OS_WIN
+		// Exercise the top-level reparse case directly on the Windows recursive
+		// primitive. The target sentinel must survive and only the link is removed.
+		const auto topLevelLink = base + "/top-level-link" ;
+		auto nativeTopLevelLink = QDir::toNativeSeparators( topLevelLink ).toStdWString() ;
+		const auto topLevelLinked = CreateSymbolicLinkW( nativeTopLevelLink.c_str(),nativeOutside.c_str(),
+			SYMBOLIC_LINK_FLAG_DIRECTORY | allowUnprivilegedCreate ) != 0 ;
+		ok = ok && topLevelLinked ;
+		if( topLevelLinked ){
+			std::atomic_bool keepGoing{ true } ;
+			directoryManager::removeDirectory( topLevelLink,keepGoing ) ;
+			ok = ok && QFileInfo::exists( outsideDirectoryFile ) ;
+			ok = ok && GetFileAttributesW( nativeTopLevelLink.c_str() ) == INVALID_FILE_ATTRIBUTES ;
+		}
+#endif
+
+		const auto renameRoot = base + "/rename" ;
+		QDir().mkpath( renameRoot ) ;
+		const auto source = renameRoot + "/source.txt" ;
+		const auto collision = renameRoot + "/collision.txt" ;
+		{
+			QFile f( source ) ;
+			ok = ok && f.open( QIODevice::WriteOnly ) && f.write( "source" ) == 6 ;
+		}
+		{
+			QFile f( collision ) ;
+			ok = ok && f.open( QIODevice::WriteOnly ) && f.write( "collision" ) == 9 ;
+		}
+
+		QString destination ;
+		QString error ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,"../outside.txt",destination,error ) ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,"nested/name.txt",destination,error ) ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,"nested\\name.txt",destination,error ) ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,QDir( base ).absoluteFilePath( "absolute.txt" ),destination,error ) ;
+		ok = ok && !utility::libraryRenameDestination( renameRoot,"collision.txt",destination,error ) ;
+		ok = ok && utility::libraryRenameDestination( renameRoot,"renamed.txt",destination,error ) ;
+		if( ok ){
+			ok = utility::rename( source,destination ).isEmpty() ;
+			ok = ok && QFileInfo::exists( destination ) && QFileInfo::exists( collision ) ;
+		}
+
+		if( ok ){
+			std::cout << "library-filesystem-boundary=PASS" << std::endl ;
+			m_args.app.exit( 0 ) ;
+		}else{
+			std::cerr << "library-filesystem-boundary=FAIL"
+				<< " directoryLinked=" << directoryLinked
+				<< " fileLinked=" << fileLinked << std::endl ;
+			m_args.app.exit( 1 ) ;
+		}
+	}
+
+
+	void testLibraryNativeMutations()
+	{
+#ifndef Q_OS_UNIX
+		std::cout << "library-native-mutations=SKIP non-posix" << std::endl ;
+		m_args.app.exit( 0 ) ;
+#else
+		QTemporaryDir temp ;
+		QTemporaryDir outsideTemp ;
+		bool ok = temp.isValid() && outsideTemp.isValid() ;
+		const auto rootText = temp.path() ;
+		const auto outsideText = outsideTemp.path() ;
+		const auto root = QFile::encodeName( rootText ) ;
+
+		auto childText = []( const QString& parent,const QString& name ){
+			return QDir( parent ).filePath( name ) ;
+		} ;
+		auto childNative = []( QByteArray parent,const QByteArray& name ){
+			if( !parent.endsWith( '/' ) )parent.append( '/' ) ;
+			parent.append( name ) ;
+			return parent ;
+		} ;
+		auto create = []( const QString& path ){
+			QFile file( path ) ;
+			return file.open( QIODevice::WriteOnly | QIODevice::NewOnly ) &&
+			       file.write( "fixture" ) == 7 ;
+		} ;
+
+		// Two rows can have the same display spelling while retaining distinct
+		// native identities. Confirmation must bind to the captured native path.
+		const QString sameDisplay = rootText + "/collision-display" ;
+		ok = ok && library::testPendingDirectoryMatches(
+			sameDisplay,sameDisplay,QByteArray( "native-a" ),QByteArray( "native-a" ) ) ;
+		ok = ok && !library::testPendingDirectoryMatches(
+			sameDisplay,sameDisplay,QByteArray( "native-a" ),QByteArray( "native-b" ) ) ;
+
+		// Route selected deletion through the library.cpp production seam and
+		// prove an adjacent native identity is untouched.
+		const QString firstText = childText( rootText,"collision-a" ) ;
+		const QString secondText = childText( rootText,"collision-b" ) ;
+		ok = ok && create( firstText ) && create( secondText ) ;
+		std::atomic_bool keepGoing{ true } ;
+		ok = ok && library::testRemoveNativeEntry(
+			root,root,QByteArray( "collision-a" ),keepGoing ) ;
+		ok = ok && !QFileInfo::exists( firstText ) && QFileInfo::exists( secondText ) ;
+
+		// Cancellation before worker mutation must leave the first selected file.
+		const QString cancelledText = childText( rootText,"cancel-before-worker" ) ;
+		ok = ok && create( cancelledText ) ;
+		keepGoing.store( false ) ;
+		ok = ok && !library::testRemoveNativeEntry(
+			root,root,QByteArray( "cancel-before-worker" ),keepGoing ) ;
+		ok = ok && QFileInfo::exists( cancelledText ) ;
+		keepGoing.store( true ) ;
+
+		// Delete All receives the confirmed native directory snapshot. Mutating a
+		// different sibling after confirmation cannot redirect the operation.
+		const QString confirmedText = childText( rootText,"confirmed" ) ;
+		const QString siblingText = childText( rootText,"sibling" ) ;
+		ok = ok && QDir().mkpath( confirmedText ) && QDir().mkpath( siblingText ) ;
+		ok = ok && create( childText( confirmedText,"victim" ) ) ;
+		ok = ok && create( childText( siblingText,"survivor" ) ) ;
+		ok = ok && library::testRemoveNativeDirectoryContents(
+			root,QFile::encodeName( confirmedText ),keepGoing ) ;
+		ok = ok && !QFileInfo::exists( childText( confirmedText,"victim" ) ) ;
+		ok = ok && QFileInfo::exists( childText( siblingText,"survivor" ) ) ;
+
+		// Replace an intermediate owned directory with a symlink after selection.
+		// Descriptor-relative re-resolution must refuse to traverse outside.
+		const QString insideText = childText( rootText,"inside" ) ;
+		const QString insideRealText = childText( rootText,"inside-real" ) ;
+		ok = ok && QDir().mkpath( insideText ) ;
+		ok = ok && create( childText( insideText,"victim" ) ) ;
+		ok = ok && create( childText( outsideText,"victim" ) ) ;
+		ok = ok && QDir( rootText ).rename( "inside","inside-real" ) ;
+		ok = ok && QFile::link( outsideText,insideText ) ;
+		ok = ok && !library::testRemoveNativeEntry(
+			root,QFile::encodeName( insideText ),QByteArray( "victim" ),keepGoing ) ;
+		ok = ok && QFileInfo::exists( childText( outsideText,"victim" ) ) ;
+		ok = ok && QFileInfo::exists( childText( insideRealText,"victim" ) ) ;
+
+		if( ok ){
+			std::cout << "library-native-mutations=PASS" << std::endl ;
+			m_args.app.exit( 0 ) ;
+		}else{
+			std::cerr << "library-native-mutations=FAIL" << std::endl ;
+			m_args.app.exit( 1 ) ;
+		}
+#endif
+	}
+
+	void testProxySecurity()
+	{
+		const QString secret = "DistinctiveProxySecret077" ;
+		const QString proxy = "http://proxy-user:" + secret + "@proxy.example:8080" ;
+		engines::engine::baseEngine::optionsEnvironment environment ;
+		QStringList arguments ;
+		wget::applyProxySetting( environment,arguments,proxy ) ;
+
+		QString diagnostics ;
+		const auto childEnvironment = environment.update( QProcessEnvironment(),diagnostics ) ;
+		const auto httpProxy = childEnvironment.value( "http_proxy" ) ;
+		const auto httpsProxy = childEnvironment.value( "https_proxy" ) ;
+		const auto renderedPassword = engines::redactLogArgument( "--proxy-password=" + secret ) ;
+
+		bool argvClean = true ;
+		for( const auto& argument : arguments ){
+			if( argument.contains( secret ) || argument.startsWith( "--proxy-password=" ) ){
+				argvClean = false ;
+			}
+		}
+		const bool childReceivesSecret = httpProxy.contains( secret ) && httpsProxy.contains( secret ) ;
+		const bool diagnosticsClean = !diagnostics.contains( secret ) &&
+			diagnostics.contains( "<REDACTED>" ) &&
+			!renderedPassword.contains( secret ) &&
+			renderedPassword.contains( "<REDACTED>" ) ;
+
+		if( argvClean && childReceivesSecret && diagnosticsClean ){
+			std::cout << "proxy-security=PASS" << std::endl ;
+			m_args.app.exit( 0 ) ;
+		}else{
+			std::cerr << "proxy-security=FAIL argvClean=" << argvClean
+				<< " childReceivesSecret=" << childReceivesSecret
+				<< " diagnosticsClean=" << diagnosticsClean << std::endl ;
+			m_args.app.exit( 1 ) ;
+		}
 	}
 private:
 	QList< QByteArray > m_list ;

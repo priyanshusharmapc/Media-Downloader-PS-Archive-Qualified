@@ -18,6 +18,7 @@
  */
 
 #include "logwindow.h"
+#include <QMessageBox>
 #include "ui_logwindow.h"
 
 #include "settings.h"
@@ -51,6 +52,10 @@ logWindow::logWindow( QWidget * parent,settings& s,Logger& logger ) :
 			if( m_logger.clearDownloadHistory() ){
 
 				m_ui->plainTextEdit->clear() ;
+			}else{
+				QMessageBox::warning( this,
+						      tr( "Clear Failed" ),
+						      tr( "Download history could not be removed from disk." ) ) ;
 			}
 		}else{
 			m_logger.showAllLogs() ;
@@ -96,7 +101,7 @@ void logWindow::Hide()
 	auto w = QString::number( r.width() ) ;
 	auto h = QString::number( r.height() ) ;
 
-	m_settings.setWindowDimensions( "LogWindow",x + "-" + y + "-" + w + "-" + h ) ;
+	m_settings.setWindowDimensions( "LogWindow",x + " " + y + " " + w + " " + h ) ;
 
 	this->hide() ;
 	this->clear() ;
@@ -106,6 +111,11 @@ void logWindow::Show( bool s )
 {
 	m_showDownloadHistory = s ;
 
+	// This widget instance is reused across ordinary logs and Download History.
+	// Recompute mode-specific visibility on every show so a prior ordinary-log
+	// view cannot leave the history control permanently hidden.
+	m_ui->cbEnableDownloadHistory->setVisible( m_showDownloadHistory ) ;
+
 	if( m_showDownloadHistory ){
 
 		m_ui->pbShowAll->setText( tr( "Clear" ) ) ;
@@ -114,25 +124,25 @@ void logWindow::Show( bool s )
 	}else{
 		m_ui->pbShowAll->setText( tr( "Show All" ) ) ;
 
-		m_ui->cbEnableDownloadHistory->setVisible( false ) ;
 	}
 
 	auto w = m_settings.windowsDimensions( "LogWindow" ) ;
 
 	if( !w.isEmpty() ){
 
-		auto m = util::split( w,'-',true ) ;
+		auto m = util::split( w,' ',true ) ;
 
 		if( m.size() == 4 ){
 
-			QRect r ;
+			bool xOk = false, yOk = false, widthOk = false, heightOk = false ;
+			const auto x = m.at( 0 ).toInt( &xOk ) ;
+			const auto y = m.at( 1 ).toInt( &yOk ) ;
+			const auto width = m.at( 2 ).toInt( &widthOk ) ;
+			const auto height = m.at( 3 ).toInt( &heightOk ) ;
 
-			r.setX( m.at( 0 ).toInt() ) ;
-			r.setY( m.at( 1 ).toInt() ) ;
-			r.setWidth( m.at( 2 ).toInt() ) ;
-			r.setHeight( m.at( 3 ).toInt() ) ;
-
-			this->window()->setGeometry( r ) ;
+			if( xOk && yOk && widthOk && heightOk && width > 0 && height > 0 ){
+				this->window()->setGeometry( x,y,width,height ) ;
+			}
 		}
 	}
 

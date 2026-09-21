@@ -70,21 +70,22 @@ void translator::setLanguage( const QString& e )
 		m_ctx->TabManager().textAlignmentChanged( m ) ;
 	}
 
-	m_qapp.installTranslator( [ & ](){
+	this->clear() ;
 
-		this->clear() ;
+	// English is the built-in untranslated UI and therefore requires no .qm
+	// file. For translated languages, only install a translator after a real
+	// successful load; otherwise fall back truthfully to English and persist it.
+	if( e != "en_US" ){
+		auto candidate = new QTranslator() ;
 
-		m_translator = new QTranslator() ;
-
-		auto m = m_translator->load( e,m_pathLanguageFiles ) ;
-
-		if( !m ){
-
-			//???
+		if( candidate->load( e,m_pathLanguageFiles ) ){
+			m_translator = candidate ;
+			m_qapp.installTranslator( m_translator ) ;
+		}else{
+			delete candidate ;
+			m_settings.setLocalizationLanguage( "en_US" ) ;
 		}
-
-		return m_translator ;
-	}() ) ;
+	}
 
 	for( const auto& it : m_actions ){
 

@@ -13,6 +13,8 @@ import sys
 import tempfile
 import time
 import unittest
+import zipfile
+from archive_normalization_cleanup import NormalizationCleanupCases
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--cli', required=True, type=Path)
@@ -48,7 +50,7 @@ def cleanup_path(path: Path, attempts: int = 120) -> None:
     if last:
         raise last
 
-class ArchiveIntegration(unittest.TestCase):
+class ArchiveIntegration(NormalizationCleanupCases, unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.fixture = Path(tempfile.mkdtemp(prefix='archive-media-fixtures-'))
@@ -79,7 +81,11 @@ class ArchiveIntegration(unittest.TestCase):
         shutil.copy2(CLI, self.cli)
         (self.package / 'bin').mkdir()
         shutil.copy2(FAKE, self.package / 'bin' / ('yt-dlp.exe' if os.name == 'nt' else 'yt-dlp'))
-        # Resolve actual media tools through PATH; Windows DLL search retains the CI Qt bin directory.
+        # Normal Archive execution is sealed to package-owned tool executables.
+        # Keep the real tool directories on PATH only to prove they are not used
+        # as a silent fallback when a bundled executable is removed.
+        shutil.copy2(FFMPEG, self.package / 'bin' / ('ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'))
+        shutil.copy2(FFPROBE, self.package / 'bin' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe'))
         self.env = dict(os.environ, ARCHIVE_TEST_PLAN=str(self.base / 'plan.json'))
         self.env['PATH'] = str(Path(FFMPEG).parent) + os.pathsep + str(Path(FFPROBE).parent) + os.pathsep + self.env.get('PATH', '')
         self.plan = {
@@ -130,6 +136,112 @@ class ArchiveIntegration(unittest.TestCase):
             manifest['representations'] = {'video': {'file': 'files/video.mkv'}, 'audio': {'file': 'files/audio.m4a'}}
         (directory / 'manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
         return directory
+
+    def block_catalog(self):
+        """Inject a generated-file failure without touching authoritative state."""
+        catalog = self.root / 'Playlists/PLAUDIT/catalog.csv'
+        catalog.unlink()
+        catalog.mkdir()
+        return catalog
+
+    def durable_bytes(self):
+        paths = [self.root / 'State/ArchiveMode/items.json',
+                 self.root / 'State/ArchiveMode/sources.json',
+                 self.root / 'Playlists/PLAUDIT/items.json',
+                 self.root / 'Playlists/PLAUDIT/history.jsonl']
+        paths += list((self.root / 'State/ArchiveMode/Imports/Accepted').rglob('*'))
+        return {str(p.relative_to(self.root)): p.read_bytes() for p in paths if p.is_file()}
+
+    def test_scan_projection_failure_reports_committed_and_repairs_only_reports(self):
+        self.scan()
+        catalog = self.block_catalog()
+        self.plan['discovery']['entries'][0]['title'] = 'Committed changed title'
+        self.write_plan()
+        result = self.command('scan', SOURCE_URL, expect=4)
+        self.assertIn('committed=true', result.stdout)
+        self.assertIn('projections=dirty', result.stdout)
+        self.assertIn('active=2', result.stdout)
+        self.assertIn('State committed', result.stderr)
+        self.assertEqual(self.first()['title'], 'Committed changed title')
+        marker = self.root / 'State/ArchiveMode/projections-dirty.json'
+        self.assertTrue(marker.exists())
+        committed = self.durable_bytes()
+        catalog.rmdir()
+        self.command('rebuild-projections')
+        self.assertFalse(marker.exists())
+        self.assertIn('Committed changed title', catalog.read_text())
+        self.assertEqual(self.durable_bytes(), committed)
+        self.command('rebuild-projections')
+        self.assertEqual(self.durable_bytes(), committed)
+
+    def test_recovery_projection_failure_counts_accepted_and_never_repromotes(self):
+        self.scan()
+        package = self.make_package()
+        manifest = (package / 'manifest.json').read_bytes()
+        catalog = self.block_catalog()
+        result = self.command('ingest-pending', expect=4)
+        self.assertIn('accepted=1', result.stdout)
+        self.assertIn('warnings=1', result.stdout)
+        self.assertIn('State committed', result.stderr)
+        self.assertNotIn('retryable failure', result.stderr)
+        accepted = self.root / 'State/ArchiveMode/Imports/Accepted/recovery-package'
+        self.assertFalse(package.exists())
+        self.assertEqual((accepted / 'manifest.json').read_bytes(), manifest)
+        self.assertEqual(self.first()['video']['state'], 'complete')
+        committed = self.durable_bytes()
+        media = self.media_hashes()
+        catalog.rmdir()
+        self.command('rebuild-projections')
+        self.assertIn('accepted=0', self.command('ingest-pending').stdout)
+        self.assertEqual(self.durable_bytes(), committed)
+        self.assertEqual(self.media_hashes(), media)
+
+    def test_playlist_binding_requires_active_occurrence(self):
+        scan = self.scan()
+        self.assertIn('source_key=PLAUDIT', scan.stdout)
+        matching = self.command('playlist-binding', SOURCE_URL, VIDEO_URL)
+        self.assertIn('member=true', matching.stdout)
+        self.assertIn('source_key=PLAUDIT', matching.stdout)
+        self.assertIn('item_key=youtube:' + VIDEO_ID, matching.stdout)
+        self.assertIn('active_occurrences=1', matching.stdout)
+        self.assertIn('entry_key=', matching.stdout)
+
+        unrelated = 'https://www.youtube.com/watch?v=ZZZ999yyy88'
+        rejected = self.command('playlist-binding', SOURCE_URL, unrelated, expect=1)
+        self.assertIn('member=false', rejected.stdout)
+        self.assertIn('not an active occurrence', rejected.stderr)
+
+        # A removed historical occurrence is evidence, not active membership.
+        self.plan['discovery']['entries'] = [
+            {'id': 'xyz987QWE65', 'title': 'Second historical title', 'playlist_index': 1, 'availability': 'public'}
+        ]
+        self.write_plan()
+        self.scan()
+        removed = self.command('playlist-binding', SOURCE_URL, VIDEO_URL, expect=1)
+        self.assertIn('member=false', removed.stdout)
+
+        # Duplicate active occurrences still prove membership without guessing
+        # which occurrence is the canonical target.
+        entry = {'id': VIDEO_ID, 'title': 'Known historical title', 'playlist_index': 1, 'availability': 'public'}
+        self.plan['discovery']['entries'] = [entry, dict(entry, playlist_index=2)]
+        self.write_plan()
+        self.scan()
+        duplicate = self.command('playlist-binding', SOURCE_URL, VIDEO_URL)
+        self.assertIn('member=true', duplicate.stdout)
+        self.assertIn('active_occurrences=2', duplicate.stdout)
+
+    def test_missing_sealed_ffprobe_refuses_path_substitute(self):
+        self.scan()
+        bundled = self.package / 'bin' / ('ffprobe.exe' if os.name == 'nt' else 'ffprobe')
+        self.assertTrue(bundled.exists())
+        bundled.unlink()
+        # A valid FFprobe remains visible on PATH. Qualified/default execution
+        # must still fail instead of crossing the package trust boundary.
+        result = self.command('sync-item', VIDEO_URL, expect=1)
+        self.assertIn('sync=FAIL', result.stderr)
+        item = self.first()
+        self.assertNotEqual(item['video']['state'], 'complete')
+        self.assertNotEqual(item['audio']['state'], 'complete')
 
     def test_scan_sync_verify_and_idempotent_rerun(self):
         self.scan()
@@ -184,6 +296,31 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertTrue(self.first()['video']['path'].endswith('.mp4'))
         self.command('verify-item', VIDEO_URL)
 
+    def test_unavailable_media_is_durably_blocked_then_recovers(self):
+        self.plan['discovery']['entries'][0]['availability'] = 'deleted'
+        self.write_plan()
+        self.scan()
+        before_calls = (self.base / 'calls.jsonl').read_bytes() if (self.base / 'calls.jsonl').exists() else b''
+        failed = self.command('sync-item', VIDEO_URL, expect=1)
+        item = self.first()
+        self.assertEqual(item['video']['state'], 'blocked_unavailable')
+        self.assertEqual(item['audio']['state'], 'blocked_unavailable')
+        self.assertIn('external recovery required', item['video']['error'])
+        self.assertIn('external recovery required', item['audio']['error'])
+        after_calls = (self.base / 'calls.jsonl').read_bytes() if (self.base / 'calls.jsonl').exists() else b''
+        self.assertEqual(before_calls, after_calls, 'unavailable source invoked downloader')
+        self.assertIn('source is unavailable', failed.stderr)
+
+        # When discovery later proves availability again, the normal sync path
+        # is reachable from blocked_unavailable and clears the blocking state.
+        self.plan['discovery']['entries'][0]['availability'] = 'public'
+        self.write_plan()
+        self.scan()
+        self.command('sync-item', VIDEO_URL)
+        item = self.first()
+        self.assertEqual(item['video']['state'], 'complete')
+        self.assertEqual(item['audio']['state'], 'complete')
+
     def test_missing_complete_media_cannot_report_pass(self):
         self.scan()
         self.command('sync-item', VIDEO_URL)
@@ -218,6 +355,36 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertEqual(before, {str(p.relative_to(accepted)): sha(p) for p in accepted.rglob('*') if p.is_file()})
         self.assertFalse((self.root / 'State/video-archive.txt').exists())
         self.assertFalse((self.root / 'State/audio-archive.txt').exists())
+
+    def test_submitted_receipt_is_reserved_and_rejection_preserves_every_byte(self):
+        self.scan()
+        directory = self.make_package(name='reserved-receipt')
+        submitted_receipt = b'operator supplied historical receipt\\n'
+        (directory / 'receipt.json').write_bytes(submitted_receipt)
+        before = {str(p.relative_to(directory)): p.read_bytes()
+                  for p in directory.rglob('*') if p.is_file()}
+        canonical_before = (self.root / 'State/ArchiveMode/items.json').read_bytes()
+
+        result = self.command('ingest-pending', expect=1)
+        self.assertIn('receipt.json is reserved', result.stderr)
+        self.assertFalse(directory.exists())
+
+        rejected_root = self.root / 'State/ArchiveMode/Imports/Rejected'
+        moved = [p for p in rejected_root.iterdir()
+                 if p.is_dir() and p.name.startswith('reserved-receipt-')]
+        self.assertEqual(len(moved), 1)
+        after = {str(p.relative_to(moved[0])): p.read_bytes()
+                 for p in moved[0].rglob('*') if p.is_file()}
+        self.assertEqual(after, before)
+        self.assertEqual((moved[0] / 'receipt.json').read_bytes(), submitted_receipt)
+
+        receipt_path = Path(str(moved[0]) + '.receipt.json')
+        self.assertTrue(receipt_path.is_file())
+        generated = json.loads(receipt_path.read_text())
+        self.assertEqual(generated['result'], 'rejected')
+        self.assertIn('receipt.json is reserved', generated['reason'])
+        self.assertEqual((self.root / 'State/ArchiveMode/items.json').read_bytes(),
+                         canonical_before)
 
     def test_failed_second_representation_is_atomic_and_retryable(self):
         self.scan()
@@ -360,6 +527,91 @@ class ArchiveIntegration(unittest.TestCase):
         self.assertTrue(all(x['membership'] == 'active' for x in rows))
         self.assertEqual(len(self.canonical()), 1)
 
+    def test_playlist_occurrence_identity_corruption_fails_closed_and_legacy_migrates(self):
+        entry = self.plan['discovery']['entries'][0]
+        self.plan['discovery']['entries'] = [entry, dict(entry, playlist_index=2)]
+        self.write_plan(); self.scan()
+        path = self.root / 'Playlists/PLAUDIT/items.json'
+        history = self.root / 'Playlists/PLAUDIT/history.jsonl'
+
+        rows = json.loads(path.read_text())
+        rows[1]['entry_key'] = rows[0]['entry_key']
+        corrupt = json.dumps(rows)
+        path.write_text(corrupt)
+        result = self.command('scan', SOURCE_URL, expect=1)
+        self.assertIn('duplicate occurrence identity', result.stderr)
+        self.assertEqual(path.read_text(), corrupt)
+
+        # A specifically supported legacy archive has no occurrence IDs at all.
+        # It is migrated deterministically and journaled before reconciliation.
+        rows = json.loads(corrupt)
+        for row in rows:
+            row.pop('entry_key', None)
+        path.write_text(json.dumps(rows))
+        self.scan()
+        migrated = json.loads(path.read_text())
+        self.assertEqual([row['entry_key'] for row in migrated],
+                         ['youtube:' + VIDEO_ID + '#1', 'youtube:' + VIDEO_ID + '#2'])
+        self.assertIn('playlist_entry_key_migrated', history.read_text())
+
+        # Partial legacy/current mixtures are ambiguous and remain fail-closed.
+        mixed = migrated
+        mixed[0].pop('entry_key')
+        mixed_bytes = json.dumps(mixed)
+        path.write_text(mixed_bytes)
+        self.command('scan', SOURCE_URL, expect=1)
+        self.assertEqual(path.read_text(), mixed_bytes)
+
+    def test_cross_file_graph_integrity_fails_closed_and_accepts_valid_relationships(self):
+        self.scan()
+        state = self.root / 'State/ArchiveMode'
+        canonical_path = state / 'items.json'
+        sources_path = state / 'sources.json'
+        playlist_path = self.root / 'Playlists/PLAUDIT/items.json'
+
+        canonical_bytes = canonical_path.read_bytes()
+        canonical = json.loads(canonical_bytes)
+        canonical_path.write_text(json.dumps(canonical[1:]))
+        corrupt_bytes = canonical_path.read_bytes()
+        result = self.command('ingest-pending', expect=1)
+        self.assertIn('missing canonical item', result.stderr)
+        self.assertEqual(canonical_path.read_bytes(), corrupt_bytes)
+
+        # Restoring the authoritative canonical record restores graph validity.
+        canonical_path.write_bytes(canonical_bytes)
+        self.command('ingest-pending')
+
+        # A registered source that has never been scanned is legitimate and
+        # therefore does not require a playlist directory yet.
+        sources = json.loads(sources_path.read_text())
+        sources.append({'key': 'UNSCANNED', 'url': 'https://example.invalid/list',
+                        'title': 'Not scanned yet'})
+        sources_path.write_text(json.dumps(sources))
+        self.command('ingest-pending')
+        self.assertFalse((self.root / 'Playlists/UNSCANNED').exists())
+
+        # The same canonical item may legitimately be referenced by more than
+        # one registered playlist.
+        sources.append({'key': 'SECOND', 'url': 'https://example.invalid/second',
+                        'title': 'Second playlist'})
+        sources_path.write_text(json.dumps(sources))
+        second = self.root / 'Playlists/SECOND'
+        second.mkdir()
+        rows = json.loads(playlist_path.read_text())
+        second_rows = [dict(rows[0], entry_key=rows[0]['item_key'] + '#second')]
+        (second / 'items.json').write_text(json.dumps(second_rows))
+        (second / 'playlist.json').write_text(json.dumps(sources[-1]))
+        self.command('ingest-pending')
+
+        # Managed playlist state with no registered source is corruption.
+        orphan = self.root / 'Playlists/ORPHAN'
+        orphan.mkdir()
+        (orphan / 'items.json').write_text(json.dumps(second_rows))
+        orphan_bytes = (orphan / 'items.json').read_bytes()
+        result = self.command('ingest-pending', expect=1)
+        self.assertIn('no registered source', result.stderr)
+        self.assertEqual((orphan / 'items.json').read_bytes(), orphan_bytes)
+
     def test_resource_upgrade_preserves_prior_contract(self):
         self.scan()
         contract = self.root / 'ARCHIVE_AGENT.md'
@@ -382,13 +634,38 @@ class ArchiveIntegration(unittest.TestCase):
         playlist = (self.root / 'Playlists/PLAUDIT/video.m3u8').read_text()
         self.assertEqual(sum(line.startswith('#EXTINF:') for line in playlist.splitlines()), 1)
 
-    def test_valid_existing_media_is_adopted_when_source_unavailable(self):
+    def test_unbound_existing_media_is_not_adopted_when_source_unavailable(self):
         self.scan()
         shutil.copy2(self.video, self.root / 'Video' / ('backup [' + VIDEO_ID + '].mp4'))
         shutil.copy2(self.audio, self.root / 'Audio' / ('backup [' + VIDEO_ID + '].m4a'))
         self.plan['discovery']['entries'][0]['availability'] = 'private'
         self.write_plan(); self.scan()
+        self.command('sync-item', VIDEO_URL, expect=1)
+        item = self.first()
+        self.assertNotEqual(item['video']['state'], 'complete')
+        self.assertNotEqual(item['audio']['state'], 'complete')
+
+    def test_bound_existing_media_is_adopted_when_source_unavailable(self):
+        self.scan()
         self.command('sync-item', VIDEO_URL)
+        item = self.first()
+        self.assertEqual(item['video']['state'], 'complete')
+        self.assertEqual(item['audio']['state'], 'complete')
+        bindings = list((self.root / 'State/ArchiveMode/MediaBindings').glob('*.json'))
+        self.assertGreaterEqual(len(bindings), 2)
+
+        items_path = self.root / 'State/ArchiveMode/items.json'
+        items = json.loads(items_path.read_text(encoding='utf-8'))
+        target = next(x for x in items if x['key'] == 'youtube:' + VIDEO_ID)
+        target['video']['state'] = 'missing'
+        target['audio']['state'] = 'missing'
+        items_path.write_text(json.dumps(items), encoding='utf-8')
+        self.plan['discovery']['entries'][0]['availability'] = 'private'
+        self.write_plan(); self.scan()
+        self.command('sync-item', VIDEO_URL)
+        adopted = self.first()
+        self.assertEqual(adopted['video']['state'], 'complete')
+        self.assertEqual(adopted['audio']['state'], 'complete')
         self.command('verify-item', VIDEO_URL)
 
     @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell acceptance wrapper')
@@ -401,21 +678,89 @@ class ArchiveIntegration(unittest.TestCase):
         ffbin = self.package / '3rdParty/ffmpeg/bin'
         shutil.copytree(Path(FFMPEG).parent, ffbin)
         commit = 'a' * 40
-        (self.package / 'build-identity.json').write_text(json.dumps({'commit': commit, 'qualification': 'windows-ci-qualified-for-local-harness', 'run_id': 'fixture'}))
+        run_id = '123456789'
+        repository = 'example/qualified-repo'
+        release_tag = 'qualification-' + commit
+        (self.package / 'build-identity.json').write_text(json.dumps({
+            'repository': repository, 'commit': commit, 'run_id': run_id,
+            'qualification': 'windows-ci-qualified-for-local-harness'
+        }))
         (self.package / 'PORTABLE_MANIFEST.txt').write_text('deterministic fixture package')
         manifest = '\n'.join(sha(p) + '  ' + p.relative_to(self.package).as_posix() for p in self.package.rglob('*') if p.is_file()) + '\n'
         (self.package / 'SHA256SUMS.txt').write_text(manifest, encoding='ascii')
-        args = [powershell, '-NoProfile', '-File', script, '-ArchiveRoot', self.root, '-PlaylistUrl', SOURCE_URL, '-VideoUrl', VIDEO_URL, '-ExpectedCommit', commit]
+
+        artifact = self.package.parent / 'qualified-artifact.zip'
+        with zipfile.ZipFile(artifact, 'w', zipfile.ZIP_DEFLATED) as archive:
+            for path in self.package.rglob('*'):
+                if path.is_file():
+                    archive.write(path, (Path('Media-Downloader-PS') / path.relative_to(self.package)).as_posix())
+        artifact_sha = sha(artifact)
+
+        args = [
+            powershell, '-NoProfile', '-NonInteractive', '-File', script,
+            '-ArchiveRoot', self.root, '-PlaylistUrl', SOURCE_URL, '-VideoUrl', VIDEO_URL,
+            '-ExpectedCommit', commit, '-ExpectedArtifactSha256', artifact_sha,
+            '-ExpectedReleaseTag', release_tag, '-ExpectedRunId', run_id,
+            '-ExpectedRepository', repository, '-ArtifactZipPath', artifact
+        ]
         result = run(args, env=self.env, timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         receipt = list(self.root.glob('local-harness-evidence-*.json'))
         self.assertEqual(len(receipt), 1)
         evidence = json.loads(receipt[0].read_text(encoding='utf-8-sig'))
         self.assertEqual(evidence['item_key'], 'youtube:' + VIDEO_ID)
+        self.assertEqual(evidence['source_key'], 'PLAUDIT')
+        self.assertEqual(evidence['active_occurrences'], 1)
+        self.assertTrue(evidence['entry_key'])
+        self.assertEqual(evidence['release_tag'], release_tag)
+        self.assertEqual(evidence['artifact_sha256'], artifact_sha)
+        self.assertEqual(evidence['repository'], repository)
+        self.assertEqual(str(evidence['ci_run_id']), run_id)
         self.assertEqual(evidence['result'], 'PASS')
-        (self.package / 'PORTABLE_MANIFEST.txt').write_text('tampered')
-        result = run(args + ['-AllowExistingArchive'], env=self.env, timeout=120)
-        self.assertNotEqual(result.returncode, 0)
+
+        # The same anchored package must not qualify a requested video that is
+        # unrelated to the scanned playlist.
+        unrelated_args = list(args)
+        unrelated_args[unrelated_args.index('-VideoUrl') + 1] = 'https://www.youtube.com/watch?v=ZZZ999yyy88'
+        unrelated = run(unrelated_args + ['-AllowExistingArchive'], env=self.env, timeout=120)
+        self.assertNotEqual(unrelated.returncode, 0)
+        self.assertIn('not an active occurrence', unrelated.stdout + unrelated.stderr)
+        self.assertEqual(len(list(self.root.glob('local-harness-evidence-*.json'))), 1)
+
+        # A wrong artifact is rejected even if the package claims the same
+        # repository/run/commit identity.
+        wrong_artifact = self.package.parent / 'wrong-artifact.zip'
+        shutil.copy2(artifact, wrong_artifact)
+        with wrong_artifact.open('ab') as stream:
+            stream.write(b'wrong-artifact')
+        wrong = list(args)
+        wrong[wrong.index('-ArtifactZipPath') + 1] = wrong_artifact
+        wrong_result = run(wrong + ['-AllowExistingArchive'], env=self.env, timeout=120)
+        self.assertNotEqual(wrong_result.returncode, 0)
+        self.assertIn('External artifact SHA-256', wrong_result.stdout + wrong_result.stderr)
+
+        # A coherently resealed extracted package must still fail because the
+        # externally anchored ZIP is unchanged.
+        (self.package / 'PORTABLE_MANIFEST.txt').write_text('coherently tampered')
+        manifest = '\n'.join(
+            sha(p) + '  ' + p.relative_to(self.package).as_posix()
+            for p in self.package.rglob('*')
+            if p.is_file() and p.name != 'SHA256SUMS.txt'
+        ) + '\n'
+        (self.package / 'SHA256SUMS.txt').write_text(manifest, encoding='ascii')
+        resealed = run(args + ['-AllowExistingArchive'], env=self.env, timeout=120)
+        self.assertNotEqual(resealed.returncode, 0)
+        self.assertIn('differs from externally anchored artifact', resealed.stdout + resealed.stderr)
+        self.assertEqual(len(list(self.root.glob('local-harness-evidence-*.json'))), 1)
+
+        # No external digest/artifact identity means no qualified acceptance.
+        missing_anchor = [
+            powershell, '-NoProfile', '-NonInteractive', '-File', script,
+            '-ArchiveRoot', self.root, '-PlaylistUrl', SOURCE_URL, '-VideoUrl', VIDEO_URL,
+            '-ExpectedCommit', commit
+        ]
+        absent = run(missing_anchor + ['-AllowExistingArchive'], env=self.env, timeout=30)
+        self.assertNotEqual(absent.returncode, 0)
         self.assertEqual(len(list(self.root.glob('local-harness-evidence-*.json'))), 1)
 
     def test_malformed_journal_payload_is_rejected_before_any_write(self):
@@ -440,6 +785,43 @@ class ArchiveIntegration(unittest.TestCase):
         self.command('scan', SOURCE_URL, expect=1)
         self.assertEqual(history.read_bytes(), b'not-json\n')
         self.assertEqual(self.canonical(), before)
+
+    def test_external_downloader_state_leaf_links_are_refused(self):
+        self.scan()
+        state = self.root / 'State'
+        outside = self.base / 'outside-state-leaf.txt'
+        outside.write_text('outside sentinel\n')
+
+        def link_file(link: Path):
+            if link.exists() or link.is_symlink():
+                link.unlink()
+            if os.name == 'nt':
+                result = subprocess.run(['cmd', '/c', 'mklink', str(link), str(outside)], capture_output=True, text=True)
+                if result.returncode:
+                    self.skipTest('Host does not permit file symbolic-link creation')
+            else:
+                link.symlink_to(outside)
+
+        catalog = state / 'video-catalog.jsonl'
+        link_file(catalog)
+        before = outside.read_bytes()
+        result = self.command('sync-item', VIDEO_URL, expect=1)
+        self.assertIn('Unsafe external-tool state path refused', result.stderr)
+        self.assertEqual(outside.read_bytes(), before)
+        if catalog.exists() or catalog.is_symlink():
+            catalog.unlink()
+
+        archive = state / 'video-archive.txt'
+        link_file(archive)
+        before = outside.read_bytes()
+        result = self.command('sync-item', VIDEO_URL, expect=1)
+        self.assertIn('Unsafe external-tool state path refused', result.stderr)
+        self.assertEqual(outside.read_bytes(), before)
+        if archive.exists() or archive.is_symlink():
+            archive.unlink()
+
+        # Normal unlinked state leaves retain the existing sync path.
+        self.command('sync-item', VIDEO_URL)
 
     def test_linked_state_directory_is_refused(self):
         outside = self.base / 'outside'

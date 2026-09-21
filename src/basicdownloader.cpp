@@ -293,16 +293,14 @@ void basicdownloader::retranslateUi()
 	this->resetMenu() ;
 }
 
-void basicdownloader::listRequested( const QByteArray& a,int id )
+void basicdownloader::listRequested( const QByteArray& a,const engines::engine& engine,int id )
 {
 	if( a.isEmpty() ){
 
 		m_tableList.setVisible( false ) ;
 	}else{
-		auto m = m_ui.cbEngineType->currentText() ;
-
-		const auto& engine = m_ctx.Engines().defaultEngine( m,id ) ;
-
+		// Parse list output with the exact backend that produced it. URL-manager
+		// routing may intentionally differ from the visible global engine combo.
 		auto ee = engine.mediaProperties( m_ctx.logger(),a ) ;
 
 		if( ee.size() ){
@@ -331,7 +329,7 @@ void basicdownloader::list()
 
 	auto url = m_ui.lineEditURL->text() ;
 
-	const auto& backend = this->defaultEngine() ;
+	const auto& backend = this->defaultEngine( url ) ;
 
 	const auto& engine = backend.engine ;
 
@@ -404,7 +402,7 @@ void basicdownloader::setContextMenuForDirectUrl()
 
 void basicdownloader::download( const QString& url )
 {
-	if( url.isEmpty() ){
+	if( url.trimmed().isEmpty() ){
 
 		return ;
 	}
@@ -421,6 +419,14 @@ void basicdownloader::download( const QString& url )
 
 			m.removeAt( 0 ) ;
 		}
+	}
+
+	// Tokenization can legitimately yield no URL for whitespace-only input or
+	// after removing a standalone yt-dlp prefix. Never dereference last() until
+	// at least one actual argument remains.
+	if( m.isEmpty() ){
+
+		return ;
 	}
 
 	const auto& engine = this->defaultEngine( url ) ;
@@ -503,8 +509,12 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 	{
 	public:
 		events( basicdownloader& p,int id,bool l,const engines::engine& engine ) :
-			m_parent( p ),m_engine( engine ),m_id( id ),m_getList( l )
+			m_parent( p ),m_engine( engine ),m_id( id ),m_getList( l ),
+			m_downloadFolder( p.m_settings.downloadFolder() )
 		{
+			if( !m_getList && m_parent.m_hiddenTable.rowCount() > 0 ){
+				m_parent.m_hiddenTable.setDownloadFolder( 0,m_downloadFolder ) ;
+			}
 		}
 		void done( engines::ProcessExitState m,const std::vector< QByteArray >& fileNames )
 		{
@@ -514,7 +524,7 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 
 			if( m_getList ){
 
-				m_parent.listRequested( m_listData,m_id ) ;
+				m_parent.listRequested( m_listData,m_engine,m_id ) ;
 			}else{
 				auto e = reportFinished::finishedStatus::state::done ;
 
@@ -537,10 +547,11 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 					if( s.Settings().desktopNotifyOnDownloadComplete() ){
 
 						s.mainWindow().notifyOnDownloadComplete() ;
+					}
 
-					}else if( s.Settings().desktopNotifyOnAllDownloadComplete() ){
+					if( s.Settings().desktopNotifyOnAllDownloadComplete() ){
 
-						s.mainWindow().notifyOnDownloadComplete() ;
+						s.mainWindow().notifyOnAllDownloadComplete( "1 Download Complete" ) ;
 					}
 				}
 			}
@@ -594,7 +605,7 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 		}
 		QString downloadFolder()
 		{
-			return m_parent.m_settings.downloadFolder() ;
+			return m_downloadFolder ;
 		}
 		events move()
 		{
@@ -606,6 +617,7 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 		int m_id ;
 		bool m_getList ;
 		QByteArray m_listData ;
+		QString m_downloadFolder ;
 	} ;
 
 	events ev( *this,eng.id,getList,eng.engine ) ;
@@ -627,10 +639,16 @@ void basicdownloader::run( const basicdownloader::engine& eng,
 
 void basicdownloader::tabEntered()
 {
-	auto e = m_ui.cbEngineType->currentText() ;
-	auto m = m_settings.lastUsedOption( e,settings::tabName::basic ) ;
+	// Preserve an in-progress editor draft across ordinary tab navigation.
+	// Programmatic history restoration leaves isModified() false; user edits,
+	// including intentionally clearing the field, set it true.
+	if( !m_ui.lineEditOptions->isModified() ){
 
-	m_ui.lineEditOptions->setText( m ) ;
+		auto e = m_ui.cbEngineType->currentText() ;
+		auto m = m_settings.lastUsedOption( e,settings::tabName::basic ) ;
+		m_ui.lineEditOptions->setText( m ) ;
+	}
+
 	m_ui.lineEditURL->setFocus() ;
 	m_ctx.logger().updateView( true ) ;
 }

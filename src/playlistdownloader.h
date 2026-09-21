@@ -25,6 +25,8 @@
 #include "context.hpp"
 #include "reportFinished.h"
 #include "tableWidget.h"
+#include <QHash>
+#include <QLockFile>
 
 class tabManager ;
 
@@ -117,6 +119,8 @@ private:
 	void download() ;
 	void download( const engines::engine& ) ;
 	void downloadRecursively( const engines::engine&,int,bool ) ;
+	bool acquireInternalArchiveLock( const engines::engine&,int ) ;
+	void releaseInternalArchiveLocksIfIdle() ;
 
 	void showBanner() ;
 	void clearScreen() ;
@@ -135,6 +139,17 @@ private:
 	bool m_dataReceived ;
 
 	int m_networkRunning = 0 ;
+
+	// Row materialization is distinct from network-request accounting. Every
+	// accepted media item increments this counter until networkData() has
+	// actually inserted its table row, including no-thumbnail synthetic paths.
+	int m_pendingRowMaterializations = 0 ;
+	bool m_autoDownloadAfterMaterialization = false ;
+
+	// A single process may run several concurrent rows against the same yt-dlp
+	// archive. Hold one shared cross-process lock per archive for the complete
+	// local active-download window, then release all locks once the table is idle.
+	QHash< QString,std::shared_ptr< QLockFile > > m_internalArchiveLocks ;
 
 	utility::Terminator m_terminator ;
 
@@ -161,6 +176,10 @@ private:
 			entry( const QJsonArray& arr,int index )
 			{
 				this->set( arr[ index ].toObject() ) ;
+			}
+			entry( const QJsonObject& obj )
+			{
+				this->set( obj ) ;
 			}
 			template< typename Iter >
 			entry( const Iter& it )
@@ -202,11 +221,15 @@ private:
 		} ;
 		utility::vector< subscription::entry > entries() ;
 	private:
-		void save() ;
+		bool load() ;
+		bool save() ;
 		QString m_path ;
 		tableMiniWidget< int,2 >& m_table ;
 		QWidget& m_ui ;
 		QJsonArray m_array ;
+		QByteArray m_baseline ;
+		bool m_loaded = false ;
+		bool m_storeValid = true ;
 	};
 
 	class banner

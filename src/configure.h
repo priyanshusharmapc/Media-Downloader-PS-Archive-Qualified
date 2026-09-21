@@ -74,7 +74,7 @@ private:
 	{
 	public:
 		presetOptions( const Context&,settings& ) ;
-		void save() ;
+		bool save() ;
 		void clear() ;
 		void setDefaults() ;
 		QString optionsTranslated( const QString& ) ;
@@ -103,6 +103,8 @@ private:
 		QByteArray defaultData() ;
 		QString m_path ;
 		QJsonArray m_array ;
+		QByteArray m_baseline ;
+		bool m_storeValid = true ;
 	};
 	class downloadDefaultOptions
 	{
@@ -193,9 +195,10 @@ private:
 			QJsonObject m_qJsonObject ;
 		} ;
 		downloadDefaultOptions( const Context&,const QString& ) ;
-		void save() ;
+		bool save() ;
 		bool isEmpty( const QString& ) ;
 		void replace( const QString& engineName,const QString& oldOptions,const QString& newOptions ) ;
+		void replace( const QJsonObject& oldObject,const QString& newOptions ) ;
 		QJsonObject addOpt( const QString& engineName,const QString& options ) ;
 		QJsonObject add( const QString& url,const QString& opts,const QString& engineName ) ;
 		QJsonObject add( const configure::downloadDefaultOptions::opts& ) ;
@@ -361,6 +364,8 @@ private:
 	private:
 		QString m_path ;
 		QJsonArray m_array ;
+		QByteArray m_baseline ;
+		bool m_storeValid = true ;
 	};
 
 	QMenu * addExtenion() ;
@@ -413,6 +418,9 @@ private:
 	presetOptions m_presetOptions ;
 	downloadDefaultOptions m_downloadDefaultOptions ;
 	downloadDefaultOptions m_downloadEngineDefaultOptions ;
+	QString m_textEncodingEngine ;
+	QString m_editOptionEngine ;
+	QJsonObject m_editOptionIdentity ;
 	bool m_scaleButtonPressed = false ;
 };
 

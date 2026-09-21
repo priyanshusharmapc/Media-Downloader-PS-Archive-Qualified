@@ -16,6 +16,27 @@ int main(int argc,char** argv){
  const auto plan=QJsonDocument::fromJson(planFile.readAll()).object();
  QFile calls(plan.value("calls_path").toString());if(!calls.open(QIODevice::WriteOnly|QIODevice::Append))return 91;
  calls.write(QJsonDocument(QJsonArray::fromStringList(args.mid(1))).toJson(QJsonDocument::Compact)+"\n");calls.close();
+ // FFmpeg failure injection exists only in this BUILD_TESTING executable.
+ // All paths come from the disposable test plan, never from production state.
+ if(QFileInfo(app.applicationFilePath()).baseName()=="ffmpeg"){
+  if(!args.contains("-n"))return 0; // Deep decode is covered by real-tool tests.
+  const auto output=args.last();const bool audio=output.endsWith(".m4a");
+  const auto mode=plan.value("normalization_mode").toString();
+  QFile staged(output);
+  if(mode=="encode-fail"||mode=="invalid-stage"){
+   if(!staged.open(QIODevice::WriteOnly|QIODevice::NewOnly)||staged.write("partial invalid media")<0)return 94;
+   staged.close();return mode=="encode-fail"?73:0;
+  }
+  if(!QFile::copy(plan.value(audio?"normalized_audio_file":"normalized_video_file").toString(),output))return 95;
+  if(mode=="collision"){
+   const auto match=QRegularExpression("normalize-([0-9a-fA-F-]{36})").match(output);
+   if(!match.hasMatch())return 96;
+   const auto destination=QString(audio?"Audio/":"Video/")+plan.value("normalization_title").toString()+
+    " [NORMALIZED] ["+plan.value("video_id").toString()+"] ["+match.captured(1).left(8)+"]"+(audio?".m4a":".mp4");
+   QFile occupied(destination);if(!occupied.open(QIODevice::WriteOnly|QIODevice::NewOnly)||occupied.write("existing destination")<0)return 97;
+  }
+  return 0;
+ }
  const auto delay=plan.value("delay_ms").toInt();if(delay>0)QThread::msleep(static_cast<unsigned long>(delay));
  if(args.contains("--flat-playlist")){QTextStream(stdout)<<QString::fromUtf8(QJsonDocument(plan.value("discovery").toObject()).toJson(QJsonDocument::Compact))<<"\n";QTextStream(stderr)<<plan.value("discovery_stderr").toString();return plan.value("discovery_exit").toInt();}
  if(plan.value("download_exit").toInt()!=0){QTextStream(stderr)<<"fixture download failed\n";return plan.value("download_exit").toInt();}
@@ -23,7 +44,7 @@ int main(int argc,char** argv){
  if(!args.contains("--no-overwrites")||!args.contains("--"))return 92;
  const bool audio=args.contains("-x");const auto source=plan.value(audio?"audio_file":"video_file").toString();
  const auto id=plan.value("video_id").toString("abc123DEF45");
- QString suffix;const int oi=args.indexOf("-o");if(oi>=0){const auto match=QRegularExpression("\\[repair-[^\\]]+\\]").match(args.value(oi+1));if(match.hasMatch())suffix=" "+match.captured();}
+ QString suffix;const int oi=args.indexOf("-o");if(oi>=0){const auto match=QRegularExpression("\\[(?:repair|download)-[^\\]]+\\]").match(args.value(oi+1));if(match.hasMatch())suffix=" "+match.captured();}
  const auto folder=audio?"Audio":"Video";QDir().mkpath(folder);
  const auto dest=QString(folder)+"/fixture ["+id+"]"+suffix+"."+QFileInfo(source).suffix();
  if(!QFileInfo::exists(dest)&&!QFile::copy(source,dest))return 93;

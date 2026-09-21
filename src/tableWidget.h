@@ -28,6 +28,7 @@
 #include <QSize>
 #include <QHeaderView>
 #include <QMenu>
+#include <QSignalBlocker>
 
 #include "engines.h"
 
@@ -210,7 +211,7 @@ public:
 			playlist_id( media.playlist_id() ),
 			playlist_title( media.playlist_title() ),
 			playlist_uploader( media.playlist_uploader() ),
-			playlist_uploader_id( media.playlist_id() ),
+			playlist_uploader_id( media.playlist_uploader_id() ),
 			n_entries( media.n_entries() ),
 			mediaProperties( media.formats() ),
 			uiJson( media.uiJson() ),
@@ -245,6 +246,8 @@ public:
 		QJsonObject uiJson ;
 		QPixmap thumbnail ;
 		std::vector< QByteArray > fileNames ;
+		QString downloadFolder ;
+		QString stableIdentity ;
 		bool splitByChapters = false ;
 		bool banner = false ;
 		bool showFirst = false ;
@@ -271,6 +274,16 @@ public:
 
 		return -1 ;
 	}
+	int rowWithIdentity( const QString& identity )
+	{
+		if( identity.isEmpty() )return -1 ;
+		for( size_t m = 0 ; m < m_items.size() ; m++ ){
+			if( m_items[ m ].stableIdentity == identity ){
+				return static_cast< int >( m ) ;
+			}
+		}
+		return -1 ;
+	}
 	bool hasUrl( const QString& url )
 	{
 		return this->rowWithUrl( url ) != -1 ;
@@ -290,6 +303,10 @@ public:
 	void setFileNames( size_t m,const std::vector< QByteArray >& s )
 	{
 		m_items[ m ].fileNames = s ;
+	}
+	void setDownloadFolder( size_t m,QString folder )
+	{
+		m_items[ m ].downloadFolder = std::move( folder ) ;
 	}
 	enum class type{ DownloadOptions,
 			 DownloadExtendedOptions,
@@ -349,12 +366,13 @@ public:
 	bool isSelected( int ) const ;
 	std::vector< int > selectedRows() const ;
 	bool noneAreRunning() ;
+	bool allEntriesTerminal( int firstRow = 0 ) const ;
 	int numberCurrentlyRunning() ;
 	bool rowIsVisible( int ) ;
 	bool isRowHidden( int ) ;
 	bool rowIsSelected( int ) ;
 	bool containsHiddenRows() ;
-	bool allFinishedWithSuccess() ;
+	bool allFinishedWithSuccess( int firstRow = 0 ) ;
 	int finishWithSuccess() ;
 
 	tableWidget( QTableWidget& t,const QFont& font,int init,Qt::Alignment textAlignment ) ;
@@ -491,10 +509,9 @@ public:
 	}
 	void selectRow( QTableWidgetItem * current,QTableWidgetItem * previous,int s )
 	{
-		if( previous ){
-
-			m_columnClicked = previous->column() ;
-		}
+		// Clipboard/context actions must follow the cell that is current now,
+		// not the cell that was current before the selection changed.
+		m_columnClicked = current ? current->column() : -1 ;
 		tableWidget::selectRow( current,previous,s ) ;
 	}
 	bool isSelected( int row ) const
@@ -800,7 +817,19 @@ private:
 					const auto& a = this->getId( s ) ;
 					const auto& b = this->getId( e ) ;
 
-					return tableWidget::compare( a,b,m_ascending ) ;
+					bool aNumber = false ;
+					bool bNumber = false ;
+					const auto an = a.toLongLong( &aNumber ) ;
+					const auto bn = b.toLongLong( &bNumber ) ;
+
+					if( aNumber && bNumber ){
+						if( an != bn ) return m_ascending ? an < bn : an > bn ;
+						const auto tie = QString::compare( a,b,Qt::CaseSensitive ) ;
+						return m_ascending ? tie < 0 : tie > 0 ;
+					}
+
+					const auto order = QString::compare( a,b,Qt::CaseInsensitive ) ;
+					return m_ascending ? order < 0 : order > 0 ;
 				}else{
 					const auto& a = this->getSize( s ) ;
 					const auto& b = this->getSize( e ) ;
@@ -813,18 +842,51 @@ private:
 			bool m_column ;
 		} ;
 
-		auto stuff = std::move( m_stuff ) ;
+		struct sortableItem
+		{
+			sortableItem( Stuff&& s,bool selected ) :
+				stuff( std::move( s ) ),wasSelected( selected )
+			{
+			}
+			Stuff stuff ;
+			bool wasSelected ;
+		} ;
 
-		std::sort( stuff.begin(),stuff.end(),meaw( ascending,column ) ) ;
+		std::vector< sortableItem > rows ;
+		rows.reserve( m_stuff.size() ) ;
+
+		for( size_t row = 0 ; row < m_stuff.size() ; ++row ){
+
+			rows.emplace_back( std::move( m_stuff[ row ] ),
+					   this->isSelected( static_cast< int >( row ) ) ) ;
+		}
+
+		// Rebuilding the table is an implementation detail of sorting. Block
+		// transient selection signals so effective download options are not
+		// rewritten while rows temporarily disappear.
+		QSignalBlocker blocker( m_table ) ;
+
+		meaw comparer( ascending,column ) ;
+		std::sort( rows.begin(),rows.end(),[ & ]( const sortableItem& a,const sortableItem& b ){
+			return comparer( a.stuff,b.stuff ) ;
+		} ) ;
 
 		this->clear() ;
 
-		for( auto& it : stuff ){
+		for( auto& item : rows ){
 
-			int row = this->addRow( std::move( it ) ) ;
+			int row = this->addRow( std::move( item.stuff ) ) ;
 
 			this->fromStuff( this->stuffAtLast(),Forwader( row,*this ) ) ;
+
+			if( item.wasSelected ){
+
+				for( int col = 0 ; col < m_table.columnCount() ; ++col ){
+					m_table.item( row,col )->setSelected( true ) ;
+				}
+			}
 		}
+
 	}
 	template< typename Rows >
 	void filterTable( Rows& rows,int column,QMenu& m )
@@ -872,6 +934,11 @@ private:
 		m.addSeparator() ;
 
 		for( const auto& it : l ){
+
+			// Empty or whitespace-only cells cannot form a named filter bucket.
+			if( it.trimmed().isEmpty() ){
+				continue ;
+			}
 
 			auto s = it ;
 			s[ 0 ] = s[ 0 ].toUpper() ;

@@ -179,12 +179,13 @@ void tabManager::setProxy( const settings::proxySettings& proxy,const settings::
 void tabManager::clipboardEvent( QClipboard::Mode mode )
 {
 	if( mode == QClipboard::Mode::Clipboard ){
+		const auto generation = ++m_clipboardGeneration ;
 
 		if( utility::platformIsWindows() ){
 
 			if( m_ctx.Settings().backgroundClipboardMonitor() ){
 
-				this->bgThreadClipboardHandler() ;
+				this->bgThreadClipboardHandler( generation ) ;
 			}else{
 				this->mainThreadClipboardHandler() ;
 			}
@@ -200,74 +201,65 @@ void tabManager::mainThreadClipboardHandler()
 
 	if( e && e->hasText() ){
 
-		auto m = e->text() ;
+		auto m = e->text().trimmed() ;
 
-		if( m.startsWith( "http" ) || m.startsWith( "yt-dlp " ) ){
+		if( utility::isHttpUrl( m ) || m.startsWith( "yt-dlp " ) ){
 
 			m_batchdownloader.clipboardData( m,true ) ;
 		}
 	}
 }
 
-void tabManager::bgThreadClipboardHandler()
+void tabManager::bgThreadClipboardHandler( quint64 generation )
 {
-	class timeOutMonitor
+	const auto timeout = m_ctx.Settings().timeOutWaitingForClipboardData() ;
+	const auto started = timeout > 0 ? QDateTime::currentMSecsSinceEpoch() : 0 ;
+	const auto windowId = m_ctx.nativeHandleToMainWindow() ;
+
+	class clipboardTask
 	{
 	public:
-		timeOutMonitor( tabManager& parent ) :
-			m_timeOut( parent.m_ctx.Settings().timeOutWaitingForClipboardData() ),
-			m_then( m_timeOut > 0 ? QDateTime::currentMSecsSinceEpoch() : 0 )
-		{
-		}
-		bool notTimedOut() const
-		{
-			if( m_timeOut > 0 ){
-
-				auto now = QDateTime::currentMSecsSinceEpoch() ;
-
-				return ( now - m_then ) <= m_timeOut ;
-			}else{
-				return true ;
-			}
-		}
-	private:
-		qint64 m_timeOut ;
-		qint64 m_then ;
-	} ;
-
-	class meaw
-	{
-	public:
-		meaw( tabManager& parent ) :
-			m_parent( parent ),
-			m_timer( m_parent ),
-			m_id( m_parent.m_ctx.nativeHandleToMainWindow() )
+		clipboardTask( tabManager& parent,ContextWinId id,qint64 timeout,qint64 started,quint64 generation ) :
+			m_parent( &parent ),m_id( id ),m_timeout( timeout ),m_started( started ),m_generation( generation )
 		{
 		}
 		QString bg()
 		{
 			return utility::windowsGetClipBoardText( m_id ) ;
 		}
-		void fg( const QString& e )
+		void fg( QString&& text )
 		{
-			if( m_timer.notTimedOut() ){
+			// Multiple clipboard notifications may overlap. Only the newest event
+			// is allowed to publish data; older workers are deliberately coalesced
+			// instead of replaying a later global clipboard value out of order.
+			if( m_generation != m_parent->m_clipboardGeneration ){
+				return ;
+			}
 
-				if( e.startsWith( "http" ) || e.startsWith( "yt-dlp " ) ){
+			if( m_timeout > 0 &&
+		    QDateTime::currentMSecsSinceEpoch() - m_started > m_timeout ){
+				m_parent->m_batchdownloader.clipboardData(
+					QObject::tr( "Warning: Skipping Clipboard Content" ),false ) ;
+				return ;
+			}
 
-					m_parent.m_batchdownloader.clipboardData( e,true ) ;
-				}
-			}else{
-				auto a = QObject::tr( "Warning: Skipping Clipboard Content" ) ;
-				m_parent.m_batchdownloader.clipboardData( a,false ) ;
+			const auto candidate = text.trimmed() ;
+			if( utility::isHttpUrl( candidate ) || candidate.startsWith( "yt-dlp " ) ){
+				m_parent->m_batchdownloader.clipboardData( candidate,true ) ;
 			}
 		}
 	private:
-		tabManager& m_parent ;
-		timeOutMonitor m_timer ;
+		tabManager * m_parent ;
 		ContextWinId m_id ;
+		qint64 m_timeout ;
+		qint64 m_started ;
+		quint64 m_generation ;
 	} ;
 
-	utils::qthread::run( meaw( *this ) ) ;
+	// The task's background phase owns values only. The foreground phase may
+	// touch tabManager only while the main widget still exists.
+	utils::qthread::run( &m_ctx.mainWidget(),
+		clipboardTask( *this,windowId,timeout,started,generation ) ) ;
 }
 
 tabManager& tabManager::gotEvent( const QByteArray& s )

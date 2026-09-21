@@ -27,6 +27,8 @@
 #include "translator.h"
 
 #include <csignal>
+#include <iostream>
+#include <QTimer>
 
 MainWindow::MainWindow( QApplication& app,
 			settings& s,
@@ -45,9 +47,25 @@ MainWindow::MainWindow( QApplication& app,
 	m_showTrayIcon( s.showTrayIcon() ),
 	m_shortcut( this )
 {
+	// Tray residency is explicit so close-to-tray cannot trigger implicit Qt shutdown.
+	m_qApp.setQuitOnLastWindowClosed( !m_showTrayIcon ) ;
+
 	m_logger.setContext( m_tabManager.ctx() ) ;
 
 	MainWindow::setUpSignals( this ) ;
+
+	// C signal handlers may run at arbitrary instruction boundaries. They only
+	// set a sig_atomic_t flag; ordinary Qt shutdown is performed from the event
+	// loop where settings, filesystem and object access are safe.
+	auto signalTimer = new QTimer( this ) ;
+	signalTimer->setInterval( 50 ) ;
+	connect( signalTimer,&QTimer::timeout,[ this ](){
+		if( MainWindow::m_signalPending != 0 ){
+			MainWindow::m_signalPending = 0 ;
+			this->quitApp() ;
+		}
+	} ) ;
+	signalTimer->start() ;
 
 	this->setTitle( m_appName ) ;
 
@@ -76,7 +94,13 @@ MainWindow::MainWindow( QApplication& app,
 
 	connect( this,&MainWindow::processEventSignal,this,&MainWindow::processEventSlot,qe ) ;
 
-	connect( &m_trayIcon,&QSystemTrayIcon::activated,[ this ]( QSystemTrayIcon::ActivationReason ){
+	connect( &m_trayIcon,&QSystemTrayIcon::activated,[ this ]( QSystemTrayIcon::ActivationReason reason ){
+
+		// Context-menu, middle-click and platform-specific activations must not
+		// unexpectedly change main-window visibility.
+		if( !m_showTrayIcon || reason != QSystemTrayIcon::Trigger ){
+			return ;
+		}
 
 		if( this->isVisible() ){
 
@@ -126,6 +150,7 @@ MainWindow::MainWindow( QApplication& app,
 void MainWindow::showTrayIcon( bool e )
 {
 	m_showTrayIcon = e ;
+	m_qApp.setQuitOnLastWindowClosed( !e ) ;
 
 	if( e ){
 
@@ -237,27 +262,36 @@ MainWindow::~MainWindow()
 }
 
 MainWindow * MainWindow::m_mainWindow ;
+volatile std::sig_atomic_t MainWindow::m_signalPending = 0 ;
 
 void MainWindow::setUpSignals( MainWindow * m )
 {
 	m_mainWindow = m ;
-	MainWindow::setUpSignal( SIGTERM,SIGSEGV,SIGINT,SIGABRT ) ;
+
+	// Graceful termination signals are handed off to the Qt event loop.
+	// Fatal synchronous signals deliberately keep their default disposition:
+	// attempting autosave/UI work from corrupted process state is unsafe and
+	// returning from SIGSEGV/SIGABRT can immediately re-enter the fault.
+	if( !MainWindow::setUpSignal( SIGTERM,SIGINT ) ){
+		std::cerr << "Failed to install one or more graceful signal handlers" << std::endl ;
+	}
 }
 
-void MainWindow::signalHandler( int )
+void MainWindow::signalHandler( int sig )
 {
-	m_mainWindow->quitApp() ;
+	m_signalPending = sig ;
 }
 
-void MainWindow::setUpSignal( int sig )
+bool MainWindow::setUpSignal( int sig )
 {
-	std::signal( sig,MainWindow::signalHandler ) ;
+	return std::signal( sig,MainWindow::signalHandler ) != SIG_ERR ;
 }
 
-void MainWindow::closeEvent( QCloseEvent * )
+void MainWindow::closeEvent( QCloseEvent * event )
 {
 	if( m_showTrayIcon ){
 
+		event->ignore() ;
 		this->hide() ;
 	}else{
 		this->quitApp() ;

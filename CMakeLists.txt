@@ -1,8 +1,4 @@
-if(${CMAKE_VERSION} VERSION_GREATER "3.26")
-    cmake_minimum_required(VERSION 3.26.0)
-else()
-    cmake_minimum_required(VERSION 3.0.2)
-endif()
+cmake_minimum_required(VERSION 3.12.0)
 
 project(media-downloader LANGUAGES CXX)
 
@@ -10,6 +6,8 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
+# Archive widgets share the main window form with their standalone UI tests.
+set(CMAKE_AUTOUIC_SEARCH_PATHS "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -23,22 +21,17 @@ if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_definitions(-Qunused-arguments)
 endif()
 
-if(${CMAKE_VERSION} VERSION_LESS "3.1.0")
-    message("Warning your cmake version is too old(<3.1.0) and code my not compile")
-    add_definitions(-std=c++14)
-endif()
-
 option(BUILD_WITH_QT6 "Build with Qt 6" OFF)
 
 if(BUILD_WITH_QT6)
     find_package(Qt6 COMPONENTS Core Widgets Network Concurrent REQUIRED )
     message("-- Building With Qt6")
 else()
-    find_package(Qt5 COMPONENTS Core QUIET)
+    find_package(Qt5 5.10 COMPONENTS Core QUIET)
     if(Qt5_FOUND)
         message("-- Building With Qt5")
         set(BUILD_WITH_QT6 OFF)
-        find_package(Qt5 COMPONENTS Core Widgets Network Concurrent REQUIRED)
+        find_package(Qt5 5.10 COMPONENTS Core Widgets Network Concurrent REQUIRED)
     else()
         find_package(Qt6 COMPONENTS Core QUIET)
         if(Qt6_FOUND)
@@ -176,6 +169,28 @@ else()
 endif()
 
 if(BUILD_TESTING)
+    if(NOT APPLE)
+        add_test(NAME engine-proxy-secret-redaction
+            COMMAND media-downloader --media-downloader-test-engine-proxy-security)
+        set_tests_properties(engine-proxy-secret-redaction PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+        add_test(NAME engine-path-ownership
+            COMMAND media-downloader --media-downloader-test-engine-path-ownership)
+        set_tests_properties(engine-path-ownership PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+        add_test(NAME library-filesystem-boundary
+            COMMAND media-downloader --media-downloader-test-engine-library-filesystem-boundary)
+        set_tests_properties(library-filesystem-boundary PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+        if(UNIX)
+            target_compile_definitions(media-downloader PRIVATE MDPS_LIBRARY_TEST_HOOKS=1)
+            add_test(NAME library-native-mutations
+                COMMAND media-downloader --media-downloader-test-engine-library-native-mutations)
+            set_tests_properties(library-native-mutations PROPERTIES
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+        endif()
+    endif()
+
     add_executable(archive-core-tests
         tests/archive-core-tests.cpp
         src/archive/archivecore.cpp
@@ -190,16 +205,19 @@ endif()
 
 if(APPLE)
 else()
+    if(NOT WIN32 AND NOT BUILD_FLATPAK)
+        set_target_properties(media-downloader PROPERTIES OUTPUT_NAME media-downloader-ps-archive)
+    endif()
     if(BUILD_FLATPAK)
-        set_target_properties( media-downloader PROPERTIES OUTPUT_NAME io.github.mhogomchungu.media-downloader)
+        set_target_properties( media-downloader PROPERTIES OUTPUT_NAME io.github.priyanshusharmapc.MediaDownloaderPSArchive)
         install(TARGETS media-downloader RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-        install(FILES src/flatpak/io.github.mhogomchungu.media-downloader.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
-        install(FILES src/flatpak/io.github.mhogomchungu.media-downloader.png DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps)
-        install(FILES src/flatpak/io.github.mhogomchungu.media-downloader.desktop DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+        install(FILES src/flatpak/io.github.priyanshusharmapc.MediaDownloaderPSArchive.metainfo.xml DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
+        install(FILES src/flatpak/io.github.mhogomchungu.media-downloader.png DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/512x512/apps RENAME io.github.priyanshusharmapc.MediaDownloaderPSArchive.png)
+        install(FILES src/flatpak/io.github.priyanshusharmapc.MediaDownloaderPSArchive.desktop DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
     else()
         install(TARGETS media-downloader RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-        install(FILES src/media-downloader.desktop DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
-        install(FILES src/media-downloader.png DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pixmaps)
+        install(FILES src/media-downloader-ps-archive.desktop DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+        install(FILES src/media-downloader.png DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/pixmaps RENAME media-downloader-ps-archive.png)
     endif()
 endif()
 
@@ -207,7 +225,7 @@ install(DIRECTORY translations DESTINATION ${CMAKE_INSTALL_DATADIR}/media-downlo
 
 file(WRITE ${PROJECT_BINARY_DIR}/locale_path.h "\n#define TRANSLATION_PATH \"${CMAKE_INSTALL_FULL_DATADIR}/media-downloader/translations/\"\n")
 
-set( OutputBaseFilename "MediaDownloader-${PGR_VERSION}.setup" )
+set( OutputBaseFilename "MediaDownloaderPSArchive-${PGR_VERSION}.setup" )
 
 if(OUTPUT_BASE_NAME)
     set(OutputBaseFilename ${OUTPUT_BASE_NAME})
@@ -240,12 +258,12 @@ file(WRITE ${PROJECT_BINARY_DIR}/media-downloader_windows_installer_Qt6.iss
 ; Script generated by the Inno Setup Script Wizard.
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
-#define MyAppName            \"Media Downloader\"
+#define MyAppName            \"Media Downloader PS Archive\"
 #define MyAppVersion         \"${PGR_VERSION}\"
-#define MyAppPublisher       \"Francis Banyikwa\"
-#define MyAppURL             \"https://github.com/mhogomchungu/media-downloader\"
+#define MyAppPublisher       \"priyanshusharmapc\"
+#define MyAppURL             \"https://github.com/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified\"
 #define MyAppExeName         \"media-downloader.exe\"
-#define MyAppCopyright       \"${COPYRIGHT_YEARS}, Francis Banyikwa\"
+#define MyAppCopyright       \"${COPYRIGHT_YEARS}, upstream authors and PS Archive contributors\"
 #define MyEXELocation        \"${PROJECT_BINARY_DIR}\\media-downloader.exe\"
 #define MyBuildPath          \"${PROJECT_BINARY_DIR}\"
 #define MyLibrariesLocation  \"${LIBRARIES_LOCATION}\"
@@ -253,7 +271,7 @@ file(WRITE ${PROJECT_BINARY_DIR}/media-downloader_windows_installer_Qt6.iss
 #define MySourcesPath        \"${SOURCE_PATH}\"
 
 [Setup]
-AppId={{6DD595EF-ECA2-481B-B008-CB7302603A0D}
+AppId={{B6D5E5C4-3B5A-4C67-9A6C-92F27B7D4E31}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
@@ -306,7 +324,7 @@ Source: {#MySourcesPath}\\src\\media-downloader.ico; DestDir: {app}\\icons; Flag
 Name: \"{commonprograms}\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"
 ;Name: \"{commonprograms}\\Uninstall {#MyAppName}\"; Filename: \"{uninstallexe}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"
 Name: \"{commondesktop}\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"; Tasks: desktopicon
-Name: \"{userappdata}\\Microsoft\\Internet Explorer\\Quick Launch\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloade.ico\"; WorkingDir: \"{app}\"; Tasks: quicklaunchicon
+Name: \"{userappdata}\\Microsoft\\Internet Explorer\\Quick Launch\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"; Tasks: quicklaunchicon
 
 [Run]
 Filename: \"{app}\\{#MyAppExeName}\"; Description: \"{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}\"; Flags: nowait postinstall skipifsilent
@@ -342,12 +360,12 @@ file(WRITE ${PROJECT_BINARY_DIR}/media-downloader_windows_installer_Qt5.iss
 ; Script generated by the Inno Setup Script Wizard.
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
-#define MyAppName            \"Media Downloader\"
+#define MyAppName            \"Media Downloader PS Archive\"
 #define MyAppVersion         \"${PGR_VERSION}\"
-#define MyAppPublisher       \"Francis Banyikwa\"
-#define MyAppURL             \"https://github.com/mhogomchungu/media-downloader\"
+#define MyAppPublisher       \"priyanshusharmapc\"
+#define MyAppURL             \"https://github.com/priyanshusharmapc/Media-Downloader-PS-Archive-Qualified\"
 #define MyAppExeName         \"media-downloader.exe\"
-#define MyAppCopyright       \"${COPYRIGHT_YEARS}, Francis Banyikwa\"
+#define MyAppCopyright       \"${COPYRIGHT_YEARS}, upstream authors and PS Archive contributors\"
 #define MyEXELocation        \"${PROJECT_BINARY_DIR}\\media-downloader.exe\"
 #define MyBuildPath          \"${PROJECT_BINARY_DIR}\"
 #define MyLibrariesLocation  \"${LIBRARIES_LOCATION}\"
@@ -355,7 +373,7 @@ file(WRITE ${PROJECT_BINARY_DIR}/media-downloader_windows_installer_Qt5.iss
 #define MySourcesPath        \"${SOURCE_PATH}\"
 
 [Setup]
-AppId={{6DD595EF-ECA2-481B-B008-CB7302603A0D}
+AppId={{B6D5E5C4-3B5A-4C67-9A6C-92F27B7D4E31}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
@@ -406,7 +424,7 @@ Source: {#MySourcesPath}\\src\\media-downloader.ico; DestDir: {app}\\icons; Flag
 Name: \"{commonprograms}\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"
 ;Name: \"{commonprograms}\\Uninstall {#MyAppName}\"; Filename: \"{uninstallexe}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"
 Name: \"{commondesktop}\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"; Tasks: desktopicon
-Name: \"{userappdata}\\Microsoft\\Internet Explorer\\Quick Launch\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloade.ico\"; WorkingDir: \"{app}\"; Tasks: quicklaunchicon
+Name: \"{userappdata}\\Microsoft\\Internet Explorer\\Quick Launch\\{#MyAppName}\"; Filename: \"{app}\\{#MyAppExeName}\"; IconFilename: \"{app}\\icons\\media-downloader.ico\"; WorkingDir: \"{app}\"; Tasks: quicklaunchicon
 
 [Run]
 Filename: \"{app}\\{#MyAppExeName}\"; Description: \"{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}\"; Flags: nowait postinstall skipifsilent
@@ -457,20 +475,11 @@ if(APPLE)
     install( TARGETS MediaDownloader BUNDLE DESTINATION . COMPONENT Runtime )
 
     file( COPY src/media-downloader.icns DESTINATION  "MediaDownloader.app/Contents/Resources/" )
-    file( COPY translations/ar.qm DESTINATION        "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/de_DE.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/en_US.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/es_ES.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/fr_FR.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/it_IT.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/ja_JP.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/nl_NL.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/pl_PL.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/pt_BR.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/ru_RU.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/sv_SE.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/tr_TR.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
-    file( COPY translations/zh_CN.qm DESTINATION     "MediaDownloader.app/Contents/Resources/translations/" )
+    # Keep the macOS bundle in parity with the translation directory instead
+    # of maintaining a hand-written locale allow-list that can silently drift.
+    file(GLOB MD_TRANSLATION_FILES "${CMAKE_CURRENT_SOURCE_DIR}/translations/*.qm")
+    file(COPY ${MD_TRANSLATION_FILES}
+         DESTINATION "MediaDownloader.app/Contents/Resources/translations/")
 
     file( COPY changelog DESTINATION                 "MediaDownloader.app/Contents/Resources/" )
 endif()
@@ -482,9 +491,24 @@ if(BUILD_TESTING)
     else()
         target_link_libraries(archive-hardening-tests Qt5::Core)
     endif()
-    foreach(case discovery-shape discovery-null discovery-count discovery-error portable-paths reserved-device-variants reparse-policy root-symlink parent-symlink linked-state linked-media placeholder-position placeholder-reorder source-traversal state-shape source-state-corruption snapshot-identity import-identity import-id-only import-schema partial-recovery-status nested-redaction deleted-title linked-package-file)
+    foreach(case projection-commit-outcome recovery-commit-outcome)
+        add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
+        set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30)
+    endforeach()
+    add_test(NAME archive-sealed-tool-policy COMMAND archive-hardening-tests sealed-tool-policy)
+    set_tests_properties(archive-sealed-tool-policy PROPERTIES TIMEOUT 30)
+    foreach(case discovery-root-identity discovery-explicit-index discovery-position-uniqueness)
+        add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
+        set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30)
+    endforeach()
+    foreach(case discovery-shape discovery-null discovery-count discovery-error portable-paths reserved-device-variants reparse-policy root-symlink parent-symlink linked-state linked-media placeholder-position placeholder-reorder placeholder-metadata-drift placeholder-promotion source-traversal state-shape source-state-corruption snapshot-identity import-identity import-id-only import-schema partial-recovery-status nested-redaction deleted-title linked-package-file)
         add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
         set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30 SKIP_RETURN_CODE 77)
+    endforeach()
+
+    foreach(case orphan-data archive-identity legacy-admission admission-journal)
+        add_test(NAME archive-${case} COMMAND archive-hardening-tests ${case})
+        set_tests_properties(archive-${case} PROPERTIES TIMEOUT 30)
     endforeach()
 
     add_executable(archive-media-integrity-tests tests/archive-media-integrity-tests.cpp src/archive/archivecore.cpp src/archive/archive.qrc)
@@ -496,13 +520,17 @@ if(BUILD_TESTING)
     add_test(NAME archive-media-integrity COMMAND archive-media-integrity-tests)
     set_tests_properties(archive-media-integrity PROPERTIES TIMEOUT 900)
 
-    add_executable(archive-gui-settings-tests tests/archive-gui-settings-tests.cpp src/archive/archivesettings.cpp)
+    add_executable(archive-gui-settings-tests tests/archive-gui-settings-tests.cpp
+        src/archive/archivesettings.cpp src/archive/archivetab.cpp src/archive/archivetab.h
+        src/archive/archivecore.cpp src/archive/archive.qrc src/mainwindow.ui)
+    target_compile_definitions(archive-gui-settings-tests PRIVATE MDPS_ARCHIVE_TEST_HOOKS=1)
     if(BUILD_WITH_QT6)
-        target_link_libraries(archive-gui-settings-tests Qt6::Core)
+        target_link_libraries(archive-gui-settings-tests Qt6::Core Qt6::Widgets Qt6::Network Qt6::Concurrent)
     else()
-        target_link_libraries(archive-gui-settings-tests Qt5::Core)
+        target_link_libraries(archive-gui-settings-tests Qt5::Core Qt5::Widgets Qt5::Network Qt5::Concurrent)
     endif()
     add_test(NAME archive-gui-settings COMMAND archive-gui-settings-tests)
+    set_tests_properties(archive-gui-settings PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
 endif()
 
 if(BUILD_TESTING)
@@ -513,6 +541,39 @@ if(BUILD_TESTING)
         target_link_libraries(archive-fake-tool Qt5::Core)
     endif()
     find_package(Python3 3.11 COMPONENTS Interpreter REQUIRED)
+    add_test(NAME download-folder-preservation-policy COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/download-folder-preservation-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
+    set_tests_properties(download-folder-preservation-policy PROPERTIES TIMEOUT 30)
+    add_test(NAME proxy-url-parser-policy COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/proxy-url-parser-policy-tests.py --source-root ${CMAKE_SOURCE_DIR})
+    set_tests_properties(proxy-url-parser-policy PROPERTIES TIMEOUT 30)
+
+    # Remediation policy regressions are intentionally discovered from the
+    # source tree so every audit fix that adds *-policy-tests.py is exercised by
+    # CTest. Keep the two historical explicit entries above for stable names and
+    # skip them here to avoid duplicate execution.
+    file(GLOB MDPS_POLICY_TESTS CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/tests/*-policy-tests.py")
+    foreach(MDPS_POLICY_TEST IN LISTS MDPS_POLICY_TESTS)
+        get_filename_component(MDPS_POLICY_NAME "${MDPS_POLICY_TEST}" NAME_WE)
+        if(NOT MDPS_POLICY_NAME STREQUAL "download-folder-preservation-policy-tests"
+           AND NOT MDPS_POLICY_NAME STREQUAL "proxy-url-parser-policy-tests")
+            string(REPLACE "-tests" "" MDPS_POLICY_NAME "${MDPS_POLICY_NAME}")
+            add_test(NAME ${MDPS_POLICY_NAME}
+                     COMMAND ${Python3_EXECUTABLE} ${MDPS_POLICY_TEST} --source-root ${CMAKE_SOURCE_DIR})
+            set_tests_properties(${MDPS_POLICY_NAME} PROPERTIES TIMEOUT 30)
+        endif()
+    endforeach()
+    if(UNIX)
+        add_executable(library-posix-native-filename-tests
+            tests/library-posix-native-filename-tests.cpp
+            src/directoryEntries.cpp)
+        if(BUILD_WITH_QT6)
+            target_link_libraries(library-posix-native-filename-tests Qt6::Core)
+        else()
+            target_link_libraries(library-posix-native-filename-tests Qt5::Core)
+        endif()
+        add_test(NAME library-posix-native-filename COMMAND library-posix-native-filename-tests)
+        set_tests_properties(library-posix-native-filename PROPERTIES TIMEOUT 30)
+    endif()
+
     add_test(NAME archive-integration COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/archive-integration-tests.py --cli $<TARGET_FILE:archive-cli> --fake-tool $<TARGET_FILE:archive-fake-tool>)
     set_tests_properties(archive-integration PROPERTIES TIMEOUT 180)
     if(WIN32)

@@ -171,10 +171,19 @@ namespace utils
 				void result( bool timeOut )
 				{
 					QObject::disconnect( m_networkConn ) ;
+					QObject::disconnect( m_readyReadConn ) ;
 					QObject::disconnect( m_timerConn ) ;
 					m_timer.stop() ;
+
+					// A reply may still own readable bytes when finished() is emitted.
+					// Deliver that tail before the terminal callback so download
+					// consumers hash and persist the complete response body.
+					if( m_networkReply.bytesAvailable() > 0 ){
+						m_progress( { false,false,m_networkReply,m_received,m_total } ) ;
+					}
+
 					m_reply( { m_networkReply,timeOut } ) ;
-					m_progress( { true,timeOut,m_networkReply,0,0 } ) ;
+					m_progress( { true,timeOut,m_networkReply,m_received,m_total } ) ;
 				}
 				bool firstSeen()
 				{
@@ -189,14 +198,16 @@ namespace utils
 
 					return s ;
 				}
-				void start( int timeOut,QMetaObject::Connection&& nc,QMetaObject::Connection&& tc )
+				void start( int timeOut,QMetaObject::Connection&& nc,QMetaObject::Connection&& rc,QMetaObject::Connection&& tc )
 				{
 					m_networkConn = std::move( nc ) ;
+					m_readyReadConn = std::move( rc ) ;
 					m_timerConn = std::move( tc ) ;
 					#if QT_VERSION >= QT_VERSION_CHECK( 5,15,0 )
 						Q_UNUSED( timeOut )
 					#else
-						m_timer.start( timeOut ) ;
+						m_timeOut = timeOut ;
+						m_timer.start( m_timeOut ) ;
 					#endif
 				}
 				QNetworkReply * networkReply()
@@ -207,19 +218,25 @@ namespace utils
 				{
 					return &m_timer ;
 				}
-				void stopTimer()
+				void refreshTimer()
 				{
-					if( m_stopTimer ){
-
-						m_timer.stop() ;
-						m_stopTimer = false ;
-					}
+					#if QT_VERSION < QT_VERSION_CHECK( 5,15,0 )
+						// The fallback timer is an inactivity timeout. Every transfer
+						// progress event renews it until finished()/abort wins firstSeen().
+						if( m_timeOut > 0 ){
+							m_timer.start( m_timeOut ) ;
+						}
+					#endif
 				}
-				void progress( qint64 r,qint64 t )
+				void noteProgress( qint64 r,qint64 t )
 				{
-					if( r != 0 ){
-
-						m_progress( { false,false,m_networkReply,r,t } ) ;
+					m_received = r ;
+					m_total = t ;
+				}
+				void dataReady()
+				{
+					if( m_networkReply.bytesAvailable() > 0 ){
+						m_progress( { false,false,m_networkReply,m_received,m_total } ) ;
 					}
 				}
 				~handle()
@@ -228,13 +245,16 @@ namespace utils
 				}
 			private:
 				bool m_firstSeen = true ;
-				bool m_stopTimer = true ;
+				int m_timeOut = 0 ;
 				QTimer m_timer ;
 				Reply m_reply ;
 				Progress m_progress ;
 				QMutex& m_mutex ;
 				QNetworkReply& m_networkReply ;
+				qint64 m_received = 0 ;
+				qint64 m_total = -1 ;
 				QMetaObject::Connection m_networkConn ;
+				QMetaObject::Connection m_readyReadConn ;
 				QMetaObject::Connection m_timerConn ;
 			} ;
 			template< typename Reply,typename Progress,typename Function >
@@ -244,8 +264,8 @@ namespace utils
 
 				QObject::connect( s,&QNetworkReply::downloadProgress,[ &h = *hdl,function = std::move( function ) ]( qint64 r,qint64 t ){
 
-					h.stopTimer() ;
-
+					h.refreshTimer() ;
+					h.noteProgress( r,t ) ;
 					function( h,r,t ) ;
 				} ) ;
 
@@ -260,6 +280,9 @@ namespace utils
 							   hdl->result( false ) ;
 						   }
 					#endif
+				} ),QObject::connect( hdl->networkReply(),&QIODevice::readyRead,[ hdl ](){
+					hdl->refreshTimer() ;
+					hdl->dataReady() ;
 				} ),QObject::connect( hdl->timer(),&QTimer::timeout,[ hdl ](){
 
 					if( hdl->firstSeen() ){
@@ -275,9 +298,11 @@ namespace utils
 			{
 				using handle_t = handle< Reply,Progress > ;
 
-				this->setupReply( s,std::move( reply ),std::move( progress ),[]( handle_t& h,qint64 r,qint64 t ){
-
-					h.progress( r,t ) ;
+				this->setupReply( s,std::move( reply ),std::move( progress ),[]( handle_t&,qint64,qint64 ){
+					// downloadProgress only updates counters in setupReply(). The
+					// consumer callback is driven by readyRead/final drain so callers
+					// that use progress::data() cannot consume response bytes from a
+					// signal that does not guarantee data readiness.
 				} ) ;
 			}
 			template< typename Reply >

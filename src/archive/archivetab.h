@@ -2,14 +2,15 @@
 #define MDPS_ARCHIVETAB_H
 
 #include "archivecore.h"
-#include "../context.hpp"
-#include "../utility.h"
 
 #include <QObject>
 #include <QFutureWatcher>
 #include <QJsonObject>
 
 #include <atomic>
+
+class Context;
+namespace utility { enum class mainWindowKeyCombo; }
 
 class QLabel;
 class QLineEdit;
@@ -22,6 +23,8 @@ class QTextEdit;
 class QPlainTextEdit;
 class QComboBox;
 class QToolButton;
+class QGroupBox;
+class QAction;
 class QWidget;
 
 class ArchiveTab : public QObject
@@ -29,6 +32,12 @@ class ArchiveTab : public QObject
     Q_OBJECT
 public:
     explicit ArchiveTab(const Context& ctx);
+    // The Archive page only needs its host tabs, not the downloader engines.
+    // This constructor also permits real widget-level lifecycle qualification.
+    explicit ArchiveTab(QTabWidget& hostTabs,QWidget* owner=nullptr);
+    // Accept a user-selected root transactionally. Busy/failed selections do
+    // not change the active archive or its persisted configuration.
+    bool setRoot(const QString& candidate,QString* error=nullptr);
     ~ArchiveTab() override;
     void keyPressed(utility::mainWindowKeyCombo);
     void init_done();
@@ -42,7 +51,6 @@ public:
     void textAlignmentChanged(Qt::LayoutDirection);
 private:
     QString configuredRoot() const;
-    void persistRoot(const QString& root);
     archive::RuntimeConfig runtimeConfig() const;
     bool ensureReady(QString* error=nullptr);
     void buildUi();
@@ -54,10 +62,12 @@ private:
     void refreshDetails();
     void refreshActivity();
     void setBusy(bool busy,const QString& text={});
+    void updateActionState();
     void postOperationProgress(const QString& stage,const QString& detail,int current=0,int total=0,int failures=0);
     archive::Source selectedSource() const;
     QString selectedSourceKey() const;
     QString selectedItemKey() const;
+    QString selectedEntryKey() const;
     QVector<archive::CanonicalItem> itemsForSource(const archive::Source& source) const;
     void addPlaylist();
     void removePlaylist();
@@ -73,11 +83,17 @@ private:
     void openProjection(const QString& name);
     void runSources(const QVector<archive::Source>& sources,bool doDownloads,const QString& operationName);
     void runAsync(const QString& operationName,const std::function<QString()>& fn);
-    QString operationScanOrSync(QVector<archive::Source> sources,bool doDownloads);
+    QString operationScanOrSync(QVector<archive::Source> sources,bool doDownloads,bool requireCompleteBeforeFirstCommit=false);
+    QString operationRetryFailed(const archive::Source& source);
 
-    const Context& m_ctx;
+    QTabWidget& m_hostTabs;
     QWidget* m_page=nullptr;
+    QLabel* m_rootTitle=nullptr;
     QLabel* m_rootLabel=nullptr;
+    QGroupBox* m_systemGroup=nullptr;
+    QGroupBox* m_operationGroup=nullptr;
+    QList<QLabel*> m_systemNameLabels;
+    QLabel* m_playlistLabel=nullptr;
     QLabel* m_systemOverall=nullptr;
     QLabel* m_systemRoot=nullptr;
     QLabel* m_systemState=nullptr;
@@ -105,6 +121,7 @@ private:
     QTextEdit* m_historyDetails=nullptr;
     QTextEdit* m_recoveryDetails=nullptr;
     QPlainTextEdit* m_activity=nullptr;
+    QPushButton* m_browse=nullptr;
     QPushButton* m_add=nullptr;
     QPushButton* m_remove=nullptr;
     QPushButton* m_scan=nullptr;
@@ -113,11 +130,24 @@ private:
     QPushButton* m_stop=nullptr;
     QPushButton* m_retry=nullptr;
     QToolButton* m_more=nullptr;
+    QAction* m_openRootAction=nullptr;
+    QAction* m_openPlaylistAction=nullptr;
+    QAction* m_openCatalogAction=nullptr;
+    QAction* m_openMissingAction=nullptr;
+    QAction* m_importsAction=nullptr;
+    QAction* m_openLogsAction=nullptr;
     QPushButton* m_activityToggle=nullptr;
     QFutureWatcher<QString>* m_watcher=nullptr;
     QString m_root;
     bool m_busy=false;
+    bool m_ready=false;
+    bool m_stateReadable=true;
+    bool m_controlsEnabled=true;
     std::atomic_bool m_stopRequested{false};
+    // Separate shutdown cancellation from the user-facing "Stop After Current"
+    // queue flag. Only application teardown is allowed to terminate an active
+    // external tool in the middle of the current item.
+    std::atomic_bool m_cancelActiveProcess{false};
 };
 
 #endif

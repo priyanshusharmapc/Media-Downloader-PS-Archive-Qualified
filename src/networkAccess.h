@@ -24,6 +24,7 @@
 #include <QFile>
 #include <QStringList>
 #include <QCryptographicHash>
+#include <QUuid>
 
 #include "engines.h"
 #include "utils/network_access_manager.hpp"
@@ -300,7 +301,8 @@ private:
 	{
 		struct args
 		{
-			const networkAccess& parent ;
+			const networkAccess * parent ;
+			QObject * lifetimeContext ;
 			Function function ;
 			QByteArray userAgent ;
 			QByteArray referer ;
@@ -322,9 +324,9 @@ private:
 					}
 					void operator()()
 					{
-						auto& m = m_args.parent ;
-
-						m.get( m_args.function.move(),m_args.userAgent,m_args.referer ) ;
+						if( m_args.parent ){
+							m_args.parent->get( m_args.function.move(),m_args.userAgent,m_args.referer ) ;
+						}
 					}
 				private:
 					args m_args ;
@@ -332,7 +334,7 @@ private:
 
 				if( !reply.success() && reply.retry() && m_args.function.retry() ){
 
-					utils::qtimer::run( 1000,woof( std::move( m_args ) ) ) ;
+					utils::qtimer::run( m_args.lifetimeContext,1000,woof( std::move( m_args ) ) ) ;
 				}else{
 					m_args.function.call( reply ) ;
 				}
@@ -343,7 +345,7 @@ private:
 
 		auto m = this->networkRequest( function.url(),userAgent,referer ) ;
 
-		m_network.get( m,meaw( { *this,std::move( function ),userAgent,referer } ) ) ;
+		m_network.get( m,meaw( { this,&m_lifetimeContext,std::move( function ),userAgent,referer } ) ) ;
 	}
 
 	class File
@@ -352,18 +354,85 @@ private:
 		bool open( const QString& e )
 		{
 			m_path = e ;
+			m_writeFailed = false ;
+			m_writeError.clear() ;
 			m_file = std::make_unique< QFile >( e ) ;
 			m_file->remove() ;
 			return m_file->open( QIODevice::WriteOnly ) ;
 		}
-		void close()
+		bool close()
 		{
+			if( m_file.get() == nullptr ){
+				m_writeFailed = true ;
+				m_writeError = QStringLiteral( "Download file is not open" ) ;
+				return false ;
+			}
+
+			if( m_file->isOpen() && !m_file->flush() ){
+				m_writeFailed = true ;
+				m_writeError = m_file->errorString() ;
+			}
+
 			m_file->close() ;
+			if( m_file->error() != QFileDevice::NoError ){
+				m_writeFailed = true ;
+				m_writeError = m_file->errorString() ;
+			}
+
+			return !m_writeFailed ;
+		}
+		bool verifyPersistedHash( const QByteArray& expected )
+		{
+			if( m_writeFailed || expected.isEmpty() ){
+				return false ;
+			}
+
+			QFile persisted( m_path ) ;
+			if( !persisted.open( QIODevice::ReadOnly ) ){
+				m_writeFailed = true ;
+				m_writeError = persisted.errorString() ;
+				return false ;
+			}
+
+			QCryptographicHash hash( QCryptographicHash::Sha256 ) ;
+			if( !hash.addData( &persisted ) || persisted.error() != QFileDevice::NoError ){
+				m_writeFailed = true ;
+				m_writeError = persisted.errorString() ;
+				return false ;
+			}
+
+			if( hash.result() != expected ){
+				m_writeFailed = true ;
+				m_writeError = QStringLiteral( "Persisted download hash differs from received bytes" ) ;
+				return false ;
+			}
+			return true ;
 		}
 		QString rename( const QString& e ) ;
-		void write( const QByteArray& e )
+		bool write( const QByteArray& e )
 		{
-			m_file->write( e ) ;
+			if( m_writeFailed || m_file.get() == nullptr ){
+				return false ;
+			}
+
+			const auto written = m_file->write( e ) ;
+			if( written != e.size() ){
+				m_writeFailed = true ;
+				m_writeError = m_file->errorString() ;
+				if( m_writeError.isEmpty() ){
+					m_writeError = QStringLiteral( "Short file write: %1 of %2 bytes" ).arg( written ).arg( e.size() ) ;
+				}
+				return false ;
+			}
+			return true ;
+		}
+		bool writeFailed() const
+		{
+			return m_writeFailed ;
+		}
+		const QString& writeError() const
+		{
+			return m_writeError ;
 		}
 		QFile& handle() const
 		{
@@ -375,6 +444,8 @@ private:
 		}
 	private:
 		QString m_path ;
+		QString m_writeError ;
+		bool m_writeFailed = false ;
 		utils::misc::unique_ptr< QFile > m_file ;
 	} ;
 
@@ -434,12 +505,14 @@ private:
 		{
 			metadata = m.move() ;
 
-			filePath = tempPath + "/" + metadata.fileName() ;
+			const auto attempt = ".mdps-component-download-" +
+				QUuid::createUuid().toString( QUuid::WithoutBraces ) + "-" + metadata.fileName() ;
+			filePath = QDir( tempPath ).filePath( attempt ) ;
 
-			isArchive = filePath.endsWith( ".zip" ) || filePath.contains( ".tar." ) ;
+			isArchive = metadata.fileName().endsWith( ".zip" ) ||
+				metadata.fileName().contains( ".tar." ) ;
 
 			if( !isArchive ){
-
 				filePath += ".tmp" ;
 			}
 		}
@@ -469,6 +542,9 @@ private:
 		networkAccess::downloadSpeed speed ;
 		QString filePath ;
 		QString tempPath ;
+		// Archive updates extract here and touch the live engine tree only
+		// during the final rollback-capable promotion.
+		QString updateStagePath ;
 		cmdArgs exeArgs ;
 		class NetworkError
 		{
@@ -555,6 +631,7 @@ private:
 		QString tmpPath ;
 		QString name ;
 		QString finalPath ;
+		QString extractStagePath ;
 		QString hash ;
 		cmdArgs exeArgs ;
 		networkAccess::downloadSpeed speed ;
@@ -617,6 +694,9 @@ private:
 			     const QString& err,
 			     int id ) const ;
 
+	// Actual lifetime token for delayed retry callbacks. Child timers are
+	// destroyed before this networkAccess instance finishes destruction.
+	mutable QObject m_lifetimeContext ;
 	const Context& m_ctx ;
 	utils::network::manager m_network ;
 	basicdownloader& m_basicdownloader ;

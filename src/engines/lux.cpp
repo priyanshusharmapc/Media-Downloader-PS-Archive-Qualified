@@ -18,6 +18,7 @@
  */
 
 #include "lux.h"
+#include "json_media_size.hpp"
 #include "../utility.h"
 #include "../utils/threads.hpp"
 
@@ -103,14 +104,14 @@ lux::~lux()
 
 lux::lux( const engines& engines,const engines::engine& engine,QJsonObject& ) :
 	engines::engine::baseEngine( engines.Settings(),engine,engines.processEnvironment() ),
-	m_engine( engine ),
-	m_downloadFolder( engines.Settings().downloadFolder() + "/" )
+	m_engine( engine )
 {
 }
 
 engines::engine::baseEngine::DataFilter lux::Filter( int id )
 {
-	return { util::types::type_identity< lux::lux_dlFilter >(),m_engine,id,m_downloadFolder.toUtf8() } ;
+	const auto folder = this->downloadFolder( this->Settings().downloadFolder() ) + "/" ;
+	return { util::types::type_identity< lux::lux_dlFilter >(),m_engine,id,folder.toUtf8() } ;
 }
 
 void lux::setProxySetting( engines::engine::baseEngine::optionsEnvironment& s,QStringList&,const QString& e )
@@ -165,7 +166,7 @@ std::vector<engines::engine::baseEngine::mediaInfo> lux::mediaProperties( Logger
 			}
 
 			auto id        = obj.value( "id" ).toString() ;
-			auto sizeRaw   = obj.value( "size" ).toInt() ;
+			const qint64 sizeRaw = engineJson::nonNegativeByteCount( obj.value( "size" ) ) ;
 			auto size      = locale.formattedDataSize( sizeRaw ) ;
 			auto notes     = m.join( " " ) ;
 			auto extension = obj.value( "ext" ).toString() ;
@@ -190,27 +191,41 @@ std::vector<engines::engine::baseEngine::mediaInfo> lux::mediaProperties( Logger
 
 bool lux::foundNetworkUrl( const QString& s )
 {
+	const utility::CPU cpu ;
+
 	if( utility::platformIsWindows() ){
 
-		if( utility::CPU().x86_32() ){
-
+		if( cpu.x86_32() ){
 			return s.contains( "Windows_i386" ) ;
-		}else{
+		}else if( cpu.aarch64() ){
+			return s.contains( "Windows_arm64" ) ;
+		}else if( cpu.x86_64() ){
 			return s.contains( "Windows_x86_64" ) ;
+		}else{
+			return false ;
 		}
 
 	}else if( utility::platformIsLinux() ){
 
-		if( utility::CPU().x86_32() ){
-
+		if( cpu.x86_32() ){
 			return s.contains( "Linux_i386" ) ;
-		}else{
+		}else if( cpu.aarch64() ){
+			return s.contains( "Linux_arm64" ) ;
+		}else if( cpu.x86_64() ){
 			return s.contains( "Linux_x86_64" ) ;
+		}else{
+			return false ;
 		}
 
 	}else if( utility::platformIsOSX() ){
 
-		return s.contains( "Darwin_x86_64.tar.gz" ) ;
+		if( cpu.aarch64() ){
+			return s.contains( "Darwin_arm64.tar.gz" ) ;
+		}else if( cpu.x86_64() ){
+			return s.contains( "Darwin_x86_64.tar.gz" ) ;
+		}else{
+			return false ;
+		}
 	}else{
 		return false ;
 	}
@@ -695,12 +710,18 @@ const QByteArray& lux::lux_dlFilter::setFileName( Logger::Data& e,const QByteArr
 			m_tmp += "\n" + fileName ;
 
 			e.addFileName( fileName ) ;
-		}else{
-			utils::qthread::run( [ = ](){ QFile::rename( old,New ) ; } ) ;
+		}else if( old == New || QFile::rename( old,New ) ){
 
+			// Publish the requested filename only after the filesystem mutation
+			// is known to have completed successfully.
 			e.addFileName( fileNameCmd ) ;
-
 			m_tmp = fileNameCmd ;
+		}else{
+			m_tmp = "ERROR: Failed To Rename Downloaded File" ;
+			m_tmp += "\n" + fileName ;
+
+			// The old path is still the authoritative completed artifact.
+			e.addFileName( fileName ) ;
 		}
 
 		return m_tmp ;
