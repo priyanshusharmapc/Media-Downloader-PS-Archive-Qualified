@@ -20,6 +20,9 @@
 #include "themes.h"
 
 #include <QJsonDocument>
+#include <QJsonParseError>
+#include <QSaveFile>
+#include <QDebug>
 
 #include "util.hpp"
 
@@ -247,6 +250,51 @@ QJsonObject themes::defaultLightTheme() const
 	return obj ;
 }
 
+namespace
+{
+bool validBuiltInThemeFile( const QString& path )
+{
+	QFile file( path ) ;
+	if( !file.open( QIODevice::ReadOnly ) ){
+		return false ;
+	}
+
+	QJsonParseError error ;
+	const auto doc = QJsonDocument::fromJson( file.readAll(),&error ) ;
+	return error.error == QJsonParseError::NoError && doc.isObject() && !doc.object().isEmpty() ;
+}
+
+bool writeBuiltInThemeAtomically( const QString& path,const QJsonObject& object )
+{
+	const auto payload = QJsonDocument( object ).toJson( QJsonDocument::Indented ) ;
+	QSaveFile file( path ) ;
+
+	// Built-in themes are compiled defaults, not recovery data. Never fall
+	// back to direct writes because a short/partial first write would become
+	// authoritative merely by leaving the destination path behind.
+	file.setDirectWriteFallback( false ) ;
+	if( !file.open( QIODevice::WriteOnly ) ||
+	    file.write( payload ) != payload.size() ||
+	    !file.commit() ){
+		file.cancelWriting() ;
+		qWarning() << "Failed to atomically persist built-in theme" << path << file.errorString() ;
+		return false ;
+	}
+	return true ;
+}
+
+void ensureBuiltInTheme( const QString& path,const QJsonObject& object )
+{
+	if( validBuiltInThemeFile( path ) ){
+		return ;
+	}
+
+	// Malformed/zero-length built-ins self-heal from the compiled canonical
+	// definition. QSaveFile preserves the previous bytes if replacement fails.
+	writeBuiltInThemeAtomically( path,object ) ;
+}
+}
+
 void themes::set( QApplication& app ) const
 {
 	if( !QFile::exists( m_themePath ) ){
@@ -255,32 +303,10 @@ void themes::set( QApplication& app ) const
 	}
 
 	auto defaultDarkThemePath = this->defaultDarkthemeFullPath() ;
-
-	if( !QFile::exists( defaultDarkThemePath ) ){
-
-		QFile f( defaultDarkThemePath ) ;
-
-		if( f.open( QIODevice::WriteOnly ) ){
-
-			QJsonDocument doc( this->defaultDarkTheme() ) ;
-
-			f.write( doc.toJson( QJsonDocument::Indented ) ) ;
-		}
-	}
+	ensureBuiltInTheme( defaultDarkThemePath,this->defaultDarkTheme() ) ;
 
 	auto defaultPureDarkThemePath = this->defaultPureDarkthemeFullPath() ;
-
-	if( !QFile::exists( defaultPureDarkThemePath ) ){
-
-		QFile f( defaultPureDarkThemePath ) ;
-
-		if( f.open( QIODevice::WriteOnly ) ){
-
-			QJsonDocument doc( this->defaultPureDarkTheme() ) ;
-
-			f.write( doc.toJson( QJsonDocument::Indented ) ) ;
-		}
-	}
+	ensureBuiltInTheme( defaultPureDarkThemePath,this->defaultPureDarkTheme() ) ;
 
 	if( this->usingThemes() ){
 

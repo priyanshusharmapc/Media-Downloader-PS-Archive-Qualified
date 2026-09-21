@@ -24,6 +24,7 @@
 #include <QFile>
 #include <QStringList>
 #include <QCryptographicHash>
+#include <QUuid>
 
 #include "engines.h"
 #include "utils/network_access_manager.hpp"
@@ -300,7 +301,8 @@ private:
 	{
 		struct args
 		{
-			const networkAccess& parent ;
+			const networkAccess * parent ;
+			QObject * lifetimeContext ;
 			Function function ;
 			QByteArray userAgent ;
 			QByteArray referer ;
@@ -322,9 +324,9 @@ private:
 					}
 					void operator()()
 					{
-						auto& m = m_args.parent ;
-
-						m.get( m_args.function.move(),m_args.userAgent,m_args.referer ) ;
+						if( m_args.parent ){
+							m_args.parent->get( m_args.function.move(),m_args.userAgent,m_args.referer ) ;
+						}
 					}
 				private:
 					args m_args ;
@@ -332,7 +334,7 @@ private:
 
 				if( !reply.success() && reply.retry() && m_args.function.retry() ){
 
-					utils::qtimer::run( 1000,woof( std::move( m_args ) ) ) ;
+					utils::qtimer::run( m_args.lifetimeContext,1000,woof( std::move( m_args ) ) ) ;
 				}else{
 					m_args.function.call( reply ) ;
 				}
@@ -343,7 +345,7 @@ private:
 
 		auto m = this->networkRequest( function.url(),userAgent,referer ) ;
 
-		m_network.get( m,meaw( { *this,std::move( function ),userAgent,referer } ) ) ;
+		m_network.get( m,meaw( { this,&m_lifetimeContext,std::move( function ),userAgent,referer } ) ) ;
 	}
 
 	class File
@@ -503,12 +505,14 @@ private:
 		{
 			metadata = m.move() ;
 
-			filePath = tempPath + "/" + metadata.fileName() ;
+			const auto attempt = ".mdps-component-download-" +
+				QUuid::createUuid().toString( QUuid::WithoutBraces ) + "-" + metadata.fileName() ;
+			filePath = QDir( tempPath ).filePath( attempt ) ;
 
-			isArchive = filePath.endsWith( ".zip" ) || filePath.contains( ".tar." ) ;
+			isArchive = metadata.fileName().endsWith( ".zip" ) ||
+				metadata.fileName().contains( ".tar." ) ;
 
 			if( !isArchive ){
-
 				filePath += ".tmp" ;
 			}
 		}
@@ -690,6 +694,9 @@ private:
 			     const QString& err,
 			     int id ) const ;
 
+	// Actual lifetime token for delayed retry callbacks. Child timers are
+	// destroyed before this networkAccess instance finishes destruction.
+	mutable QObject m_lifetimeContext ;
 	const Context& m_ctx ;
 	utils::network::manager m_network ;
 	basicdownloader& m_basicdownloader ;

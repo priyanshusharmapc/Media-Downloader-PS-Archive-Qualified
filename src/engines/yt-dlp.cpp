@@ -27,6 +27,8 @@
 
 #include "../networkAccess.h"
 #include "../utility.h"
+#include <cmath>
+#include <limits>
 
 #include "../configure.h"
 #include "../settings.h"
@@ -344,6 +346,10 @@ utility::addJsonCmd::entry::args yt_dlp::entryCmdNightly( const QString& e )
 		data.emplace_back( "win7amd64",_NicolaasjanYtdlpFor64BitWin7() ) ;
 		data.emplace_back( "x86","yt-dlp_x86-nightly.exe" ) ;
 		data.emplace_back( "amd64","yt-dlp-nightly.exe" ) ;
+		// Nightly publishes the native ARM64 asset as yt-dlp_arm64.exe.
+		// Keep "-nightly" in the managed command identity so the existing
+		// nightly asset matcher removes it and selects yt-dlp_arm64.exe exactly.
+		data.emplace_back( "aarch64","yt-dlp_arm64-nightly.exe" ) ;
 
 	}else if( e == "MacOS" ){
 
@@ -997,10 +1003,15 @@ public:
 		}
 
 		if( dd.isDouble() ){
-
-			m_duration = QString::number( static_cast< int >( dd.toDouble() ) ) ;
-		}else{
-			m_duration = QString::number( dd.toInt() ) ;
+			const auto value = dd.toDouble() ;
+			if( std::isfinite( value ) && value >= 0.0 &&
+			    value <= static_cast< double >( std::numeric_limits< qint64 >::max() ) ){
+				m_duration = QString::number( static_cast< qint64 >( value ) ) ;
+			}
+		}else if( dd.isString() ){
+			bool ok = false ;
+			const auto value = dd.toString().toLongLong( &ok ) ;
+			if( ok && value >= 0 )m_duration = QString::number( value ) ;
 		}
 
 		for( const auto& it : array ){
@@ -1810,13 +1821,20 @@ const QByteArray& yt_dlp::yt_dlplFilter::parseOutput( const Logger::Data::QByteA
 		}
 		if( e.contains( " Merging formats into \"" ) ){
 
+			const auto openingQuote = e.indexOf( '"' ) ;
+			if( openingQuote < 0 ){
+				return m_tmp ;
+			}
 
-			auto m = e.mid( e.indexOf( '"' ) + 1 ) ;
-			auto s = m.lastIndexOf( '"' ) ;
+			auto m = e.mid( openingQuote + 1 ) ;
+			const auto closingQuote = m.lastIndexOf( '"' ) ;
+			if( closingQuote <= 0 ){
+				return m_tmp ;
+			}
 
-			if( s != -1 ){
-
-				m.truncate( s ) ;
+			m.truncate( closingQuote ) ;
+			if( m.trimmed().isEmpty() ){
+				return m_tmp ;
 			}
 
 			this->setFileName( m ) ;

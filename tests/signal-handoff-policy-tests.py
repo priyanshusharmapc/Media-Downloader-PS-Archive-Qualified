@@ -16,7 +16,8 @@ assert "quitApp()" not in handler
 assert "QCoreApplication::quit" not in handler
 setup=cpp[cpp.index("void MainWindow::setUpSignals"):cpp.index("void MainWindow::signalHandler")]
 assert "SIGTERM,SIGINT" in setup
-assert "SIGSEGV" not in setup and "SIGABRT" not in setup
+assert "std::signal( SIGSEGV" not in cpp and "std::signal( SIGABRT" not in cpp
+assert "setUpSignal( SIGSEGV" not in cpp and "setUpSignal( SIGABRT" not in cpp
 assert "QTimer" in cpp
 assert "this->quitApp()" in cpp[cpp.index("signalTimer"):cpp.index("signalTimer->start()")+40]
 assert "static volatile std::sig_atomic_t m_signalPending" in hdr

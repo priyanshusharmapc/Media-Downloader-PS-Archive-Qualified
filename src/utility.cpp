@@ -260,26 +260,39 @@ bool utility::platformisLegacyWindows()
 
 QString utility::windowsApplicationDirPath()
 {
-	std::array< wchar_t,4096 > buffer ;
+	// GetModuleFileNameW reports truncation by filling the supplied buffer.
+	// Never accept a prefix as the executable path: grow until the complete
+	// module path fits, with a hard bound above the Win32 extended-path limit.
+	for( DWORD capacity = 512 ; capacity <= 65536 ; capacity *= 2 ){
 
-	auto e = GetModuleFileNameW( nullptr,buffer.data(),static_cast< DWORD >( buffer.size() ) ) ;
+		std::vector< wchar_t > buffer( capacity ) ;
+		SetLastError( ERROR_SUCCESS ) ;
+		const auto e = GetModuleFileNameW( nullptr,buffer.data(),capacity ) ;
 
-	if( e > 0 ){
-
-		auto a = QString::fromWCharArray( buffer.data(),e ) ;
-
-		auto m = QDir::fromNativeSeparators( a ) ;
-		auto s = m.lastIndexOf( '/' ) ;
-
-		if( s != -1 ){
-
-			m.truncate( s ) ;
+		if( e == 0 ){
+			return {} ;
 		}
 
-		return m ;
-	}else{
-		return {} ;
+		if( e < capacity ){
+			auto m = QDir::fromNativeSeparators(
+				QString::fromWCharArray( buffer.data(),static_cast< int >( e ) ) ) ;
+			const auto s = m.lastIndexOf( '/' ) ;
+			if( s < 0 ){
+				return {} ;
+			}
+			m.truncate( s ) ;
+			return m ;
+		}
+
+		// On supported Windows versions a full buffer means the path was
+		// truncated. Retry with more space instead of deriving a directory
+		// from incomplete bytes.
+		if( GetLastError() != ERROR_INSUFFICIENT_BUFFER && capacity == 65536 ){
+			break ;
+		}
 	}
+
+	return {} ;
 }
 
 class adaptorInfo
@@ -350,7 +363,20 @@ private:
 
 QString utility::windowsGateWayAddress()
 {
-	return adaptorInfo().address() ;
+	// Adapter enumeration order is not routing priority. Ask the IPv4 routing
+	// table for the best default route and use that route's actual next hop.
+	MIB_IPFORWARDROW route{} ;
+	if( GetBestRoute( 0,0,&route ) != NO_ERROR || route.dwForwardNextHop == 0 ){
+		return {} ;
+	}
+
+	const auto nextHop = route.dwForwardNextHop ;
+	const auto * octets = reinterpret_cast< const unsigned char * >( &nextHop ) ;
+	return QString( "%1.%2.%3.%4" )
+		.arg( octets[ 0 ] )
+		.arg( octets[ 1 ] )
+		.arg( octets[ 2 ] )
+		.arg( octets[ 3 ] ) ;
 }
 
 QString utility::windowsGetClipBoardText( const ContextWinId& wId )
@@ -1544,6 +1570,15 @@ void utility::saveDownloadList( const Context& ctx,tableWidget& tableWidget,bool
 
 		auto e = ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
 
+		// Multiple supported instances share this recovery file. Serialize the
+		// complete read-merge-replace transaction, not only the final rename.
+		QLockFile autosaveLock( e + ".lock" ) ;
+		autosaveLock.setStaleLockTime( 30000 ) ;
+		if( !autosaveLock.tryLock( 10000 ) ){
+			ctx.logger().add( "Failed to acquire autosave transaction lock: " + e,utility::loggerID() ) ;
+			return ;
+		}
+
 		if( QFile::exists( e ) ){
 
 			auto prior = engines::file( e,ctx.logger() ).readAll() ;
@@ -2104,13 +2139,10 @@ static util::version _get_process_version( const QString& path,
 
 static bool _start_updated( QProcess& exe )
 {
-#if QT_VERSION >= QT_VERSION_CHECK( 5,10,0 )
+	// CMake now requires Qt >= 5.10, so every supported build has the detached
+	// instance API. The parent must never wait while holding the updater lock
+	// needed by the child during its own startup.
 	return exe.startDetached() ;
-#else
-	exe.start() ;
-	exe.waitForFinished( -1 ) ;
-	return true ;
-#endif
 }
 
 bool utility::isOwnedUpdateCleanupPath( const QString& configPath,const QString& candidate,bool runningUpdated,const QString& currentExecutable )
@@ -2530,19 +2562,30 @@ QString utility::uiIndex::toString( int index ) const
 	return s ;
 }
 
-void utility::setPermissions( QFile& qfile )
+bool utility::setPermissions( QFile& qfile )
 {
-	if( !QFileInfo( qfile ).isExecutable() ){
-
-		qfile.setPermissions( qfile.permissions() | QFileDevice::ExeOwner ) ;
+	QFileInfo info( qfile ) ;
+	if( !info.exists() || !info.isFile() ){
+		return false ;
 	}
+
+	if( !info.isExecutable() ){
+		const auto requested = qfile.permissions() | QFileDevice::ExeOwner ;
+		if( !qfile.setPermissions( requested ) ){
+			return false ;
+		}
+		info.refresh() ;
+	}
+
+	// Activation is successful only when the final promoted executable really
+	// has executable permission. Callers must treat false as update failure.
+	return info.isExecutable() ;
 }
 
-void utility::setPermissions( const QString& e )
+bool utility::setPermissions( const QString& e )
 {
 	QFile s( e ) ;
-
-	utility::setPermissions( s ) ;
+	return utility::setPermissions( s ) ;
 }
 
 void utility::networkReply::getData( const Context& ctx,const utils::network::reply& reply )
@@ -3089,29 +3132,15 @@ void utility::contextMenuForDirectUrl( std::vector< UrlLinks > links,
 
 void utility::deleteTmpFiles( const QString& df,std::vector< QByteArray > files )
 {
-	class meaw
-	{
-	public:
-		meaw( const QString& df,std::vector< QByteArray > files ) :
-			m_df( df ),m_files( std::move( files ) )
-		{
-		}
-		void operator()()
-		{
-			for( const auto& it : m_files ){
+	// Cancellation cleanup must complete before the cancelled job relinquishes
+	// its pathname ownership. A detached cleanup can wake after a retry/new job
+	// has reused the same name and delete the replacement.
+	for( const auto& it : files ){
 
-				auto m = m_df + "/" + it ;
-
-				QFile::remove( m + ".part" ) ;
-				QFile::remove( m ) ;
-			}
-		}
-	private:
-		QString m_df ;
-		std::vector< QByteArray > m_files ;
-	} ;
-
-	utils::qthread::run( meaw( df,std::move( files ) ) ) ;
+		const auto m = df + "/" + it ;
+		QFile::remove( m + ".part" ) ;
+		QFile::remove( m ) ;
+	}
 }
 
 bool utility::Qt6Version()
@@ -3417,56 +3446,79 @@ void utility::archiveData::addToHistory( QJsonObject obj )
 		void bg()
 		{
 			utility::archiveData::guardHistoryFile() ;
-			this->updateHistory() ;
+
+			QLockFile lock( m_path + ".lock" ) ;
+			lock.setStaleLockTime( 30000 ) ;
+			if( lock.tryLock( 10000 ) ){
+				this->updateHistory() ;
+			}
+
 			utility::archiveData::unGuardHistoryFile() ;
 		}
 		void fg()
 		{
 		}
 	private:
-		bool historyFound( const QString& path,const QString& url )
+		bool loadHistory( QJsonArray& entries )
 		{
-			QFile file( path ) ;
-
+			QFile file( m_path ) ;
+			if( !file.exists() ){
+				return true ;
+			}
 			if( !file.open( QIODevice::ReadOnly ) ){
 				return false ;
 			}
 
 			auto data = file.readAll().trimmed() ;
-
 			if( data.isEmpty() ){
-				return false ;
+				return true ;
 			}
 
+			// Preserve compatibility with the existing concatenated-object file
+			// while validating the complete store before any mutation.
 			data.replace( "}\n{","},{" ) ;
 			data.prepend( '[' ) ;
 			data.append( ']' ) ;
 
 			QJsonParseError error ;
 			const auto doc = QJsonDocument::fromJson( data,&error ) ;
-
 			if( error.error != QJsonParseError::NoError || !doc.isArray() ){
 				return false ;
 			}
-
-			for( const auto& value : doc.array() ){
-				if( value.toObject().value( "Url" ).toString() == url ){
-					return true ;
-				}
-			}
-			return false ;
+			entries = doc.array() ;
+			return true ;
 		}
 		void updateHistory()
 		{
+			QJsonArray entries ;
+			if( !this->loadHistory( entries ) ){
+				// Existing malformed bytes are recovery evidence. Never append
+				// through them and compound the corruption.
+				return ;
+			}
+
 			const auto url = m_obj.value( "Url" ).toString() ;
-
-			if( !this->historyFound( m_path,url ) ){
-				QFile file( m_path ) ;
-
-				if( file.open( QIODevice::WriteOnly | QIODevice::Append ) ){
-					const auto format = QJsonDocument::JsonFormat::Indented ;
-					file.write( QJsonDocument( m_obj ).toJson( format ) ) ;
+			for( const auto& value : entries ){
+				if( value.toObject().value( "Url" ).toString() == url ){
+					return ;
 				}
+			}
+			entries.append( m_obj ) ;
+
+			QByteArray serialized ;
+			for( const auto& value : entries ){
+				if( !value.isObject() ){
+					return ;
+				}
+				serialized += QJsonDocument( value.toObject() ).toJson( QJsonDocument::Indented ) ;
+			}
+
+			QSaveFile out( m_path ) ;
+			out.setDirectWriteFallback( false ) ;
+			if( !out.open( QIODevice::WriteOnly ) ||
+			    out.write( serialized ) != serialized.size() ||
+			    !out.commit() ){
+				out.cancelWriting() ;
 			}
 		}
 		QString m_path ;
@@ -3483,22 +3535,37 @@ QByteArray utility::archiveData::logHistoryData( const Context& ctx )
 
 QByteArray utility::archiveData::logHistoryData( const QString& filePath )
 {
-	QFile file( filePath ) ;
-
 	utility::archiveData::guardHistoryFile() ;
 
+	QLockFile lock( filePath + ".lock" ) ;
+	lock.setStaleLockTime( 30000 ) ;
 	QByteArray data ;
-
-	if( file.open( QIODevice::ReadOnly ) ){
-
-		data = file.readAll() ;
-
-		file.close() ;
+	if( lock.tryLock( 10000 ) ){
+		QFile file( filePath ) ;
+		if( file.open( QIODevice::ReadOnly ) ){
+			data = file.readAll() ;
+		}
 	}
 
 	utility::archiveData::unGuardHistoryFile() ;
-
 	return data ;
+}
+
+bool utility::archiveData::clearHistory( const QString& filePath )
+{
+	// Keep the thread-local mutex and cross-process transaction lock inside
+	// archiveData so callers cannot accidentally split the locking protocol.
+	utility::archiveData::guardHistoryFile() ;
+
+	QLockFile lock( filePath + ".lock" ) ;
+	lock.setStaleLockTime( 30000 ) ;
+	bool removed = false ;
+	if( lock.tryLock( 10000 ) ){
+		removed = !QFile::exists( filePath ) || QFile::remove( filePath ) ;
+	}
+
+	utility::archiveData::unGuardHistoryFile() ;
+	return removed ;
 }
 
 utility::archiveData::archiveData( QStringList opts,const engines::engine& engine,const Context& ctx ) :

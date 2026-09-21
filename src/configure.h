@@ -103,6 +103,8 @@ private:
 		QByteArray defaultData() ;
 		QString m_path ;
 		QJsonArray m_array ;
+		QByteArray m_baseline ;
+		bool m_storeValid = true ;
 	};
 	class downloadDefaultOptions
 	{
@@ -362,6 +364,8 @@ private:
 	private:
 		QString m_path ;
 		QJsonArray m_array ;
+		QByteArray m_baseline ;
+		bool m_storeValid = true ;
 	};
 
 	QMenu * addExtenion() ;

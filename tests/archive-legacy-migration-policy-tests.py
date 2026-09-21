@@ -12,9 +12,9 @@ body=source[start:end]
 
 current=body.index("if( QFile::exists( current ) )")
 legacy=body.index("if( QFile::exists( legacy ) )",current)
-rename=body.index("if( QFile::rename( legacy,current ) )",legacy)
-race=body.index("if( QFile::exists( current ) )",rename)
-fallback=body.index("return legacy",race)
-assert current < legacy < rename < race < fallback
+rename=body.index("if( QFile::rename( legacy,current ) || QFile::exists( current ) )",legacy)
+fallback=body.index("return legacy",rename)
+assert current < legacy < rename < fallback
+assert body.index("return current",rename) < fallback
 assert "QFile::rename( m,o )" not in body
 print("yt-dlp archive migration fallback policy: PASS")

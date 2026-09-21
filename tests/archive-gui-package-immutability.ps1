@@ -28,7 +28,9 @@ $settingsExists=$settingsPath -and (Test-Path -LiteralPath $settingsPath -PathTy
 if($settingsExists){throw 'Production executable honored a qualification-only Archive settings hook'}
 $missing=@();$mismatch=@();$listed=@{};foreach($entry in $entries){$listed[$entry.Path]=$true;$path=Join-Path $package ($entry.Path.Replace('/','\'));if(!(Test-Path -LiteralPath $path -PathType Leaf)){$missing+=$entry.Path}elseif((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entry.Expected){$mismatch+=$entry.Path}}
 $unsealed=@();foreach($file in Get-ChildItem -LiteralPath $package -Recurse -File -Force){$relative=$file.FullName.Substring($package.Length+1).Replace('\','/');if($relative -ne 'SHA256SUMS.txt' -and !$listed.ContainsKey($relative)){$unsealed+=$relative}}
-$report=[ordered]@{observedAt=(Get-Date -Format o);packageRoot=$package;archiveRoot=$archive;exitCode=if($process.HasExited){$process.ExitCode}else{$null};settingsExists=$settingsExists;missing=$missing;mismatches=$mismatch;unsealed=$unsealed;pass=($settingsExists -and $missing.Count -eq 0 -and $mismatch.Count -eq 0 -and $unsealed.Count -eq 0)}
+$pass = (-not $settingsExists) -and ($missing.Count -eq 0) -and ($mismatch.Count -eq 0) -and ($unsealed.Count -eq 0)
+$report=[ordered]@{observedAt=(Get-Date -Format o);packageRoot=$package;archiveRoot=$archive;exitCode=if($process.HasExited){$process.ExitCode}else{$null};settingsExists=$settingsExists;missing=$missing;mismatches=$mismatch;unsealed=$unsealed;pass=$pass}
 $report|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $OutputJson -Encoding UTF8
+Write-Host ($report | ConvertTo-Json -Depth 8)
 if(!$report.pass){throw "GUI package immutability failed: $OutputJson"}
 Write-Host "GUI package immutability PASS: $OutputJson"

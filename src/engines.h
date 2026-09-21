@@ -30,6 +30,7 @@
 #include <QProcess>
 #include <QDateTime>
 #include <QNetworkProxy>
+#include <QLockFile>
 
 #include <vector>
 #include <functional>
@@ -40,6 +41,7 @@
 #include "utils/threads.hpp"
 #include "utils/qprocess.hpp"
 #include "utils/miscellaneous.hpp"
+#include "archive/archiveprocess.h"
 
 class tableWidget ;
 class settings ;
@@ -303,6 +305,7 @@ public:
 			return this->add( m_enginePath,e ) ;
 		}
 		QString socketPath() ;
+		QString socketLockPath() const ;
 		void confirmPaths( Logger& ) const ;
 	private:
 		QString archiveFilePathByName( const QString& name,const QString& ext = ".txt" ) const
@@ -310,32 +313,23 @@ public:
 			const auto current = this->add( m_dataPath,"archiveFile-" + name + ext ) ;
 
 			if( name == "yt-dlp" ){
+				// Legacy migration mutates the same durable deduplication state used
+				// by downloads and Clear Archive. Serialize it across app instances.
+				QLockFile migrationLock( current + ".lock" ) ;
+				migrationLock.setStaleLockTime( 30000 ) ;
+				if( !migrationLock.tryLock( 10000 ) ){
+					return current ;
+				}
 
 				const auto legacy = this->add( m_dataPath,"subscriptions_archive_file.txt" ) ;
-
-				// A pre-existing current archive is already authoritative. Do
-				// not let an obsolete legacy file displace or merge into it.
 				if( QFile::exists( current ) ){
-
 					return current ;
 				}
 
 				if( QFile::exists( legacy ) ){
-
-					if( QFile::rename( legacy,current ) ){
-
+					if( QFile::rename( legacy,current ) || QFile::exists( current ) ){
 						return current ;
 					}
-
-					// A target can appear between the existence check and rename
-					// (another process/session may complete migration first). Prefer
-					// that now-authoritative current archive before falling back.
-					if( QFile::exists( current ) ){
-						return current ;
-					}
-
-					// Migration is best-effort, but deduplication state is not:
-					// keep using the known-good legacy archive if promotion fails.
 					return legacy ;
 				}
 			}
@@ -1262,31 +1256,45 @@ public:
 		public:
 			uvic( const engines::engine& engine,
 			      const Context& ctx,
-			      Function function ) :
+			      Function function,
+			      QString executable,
+			      QStringList arguments,
+			      QProcessEnvironment environment,
+			      std::shared_ptr< std::atomic_bool > cancel ) :
 				m_engine( engine ),
 				m_ctx( ctx ),
-				m_function( std::move( function ) )
+				m_function( std::move( function ) ),
+				m_executable( std::move( executable ) ),
+				m_arguments( std::move( arguments ) ),
+				m_environment( std::move( environment ) ),
+				m_cancel( std::move( cancel ) )
 			{
 			}
-			void operator()( const utils::qprocess::outPut& e )
+			archive::ProcessResult bg()
 			{
-				if( e.success() ){
-
-					m_engine.setVersionString( e.stdOut ) ;
+				// Version probes are external processes too. Run them off the GUI
+				// thread with the same finite deadline, bounded output and complete
+				// process-tree cancellation contract used by Archive operations.
+				return archive::detail::runContainedProcess(
+					m_executable,m_arguments,QString(),10000,m_cancel.get(),&m_environment ) ;
+			}
+			void fg( archive::ProcessResult result )
+			{
+				if( result.ok ){
+					m_engine.setVersionString( result.standardOutput ) ;
 				}
 
 				m_ctx.TabManager().enableAll() ;
-
 				m_function() ;
-			}
-			uvic< Context,Function > move()
-			{
-				return std::move( *this ) ;
 			}
 		private:
 			const engines::engine& m_engine ;
 			const Context& m_ctx ;
 			Function m_function ;
+			QString m_executable ;
+			QStringList m_arguments ;
+			QProcessEnvironment m_environment ;
+			std::shared_ptr< std::atomic_bool > m_cancel ;
 		} ;
 
 		template< typename Context,typename Function >
@@ -1297,23 +1305,24 @@ public:
 				const auto& engine = *this ;
 
 				if( engine.versionInfo().valid() ){
-
 					ff() ;
 				}else{
 					ctx.TabManager().disableAll() ;
 
-					const auto& exe = engine.exePath() ;
-					QStringList args{ engine.versionArgument() } ;
+					const auto exe = engine.exePath() ;
+					const engines::engine::exeArgs::cmd command(
+						exe,QStringList{ engine.versionArgument() } ) ;
+					this->setPermissions( exe.realExe() ) ;
 
-					engines::engine::exeArgs::cmd cmd( exe,args ) ;
+					auto cancel = std::make_shared< std::atomic_bool >( false ) ;
+					QObject::connect( &ctx.mainWidget(),&QObject::destroyed,
+						[ cancel ](){ cancel->store( true ) ; } ) ;
 
-					this->setPermissions( cmd.exe() ) ;
-
-					uvic< Context,Function > meaw( engine,ctx,std::move( ff ) ) ;
-
-					auto m = QProcess::SeparateChannels ;
-
-					utils::qprocess::run( cmd.exe(),cmd.args(),m,meaw.move() ) ;
+					utils::qthread::run(
+						&ctx.mainWidget(),
+						uvic< Context,Function >(
+							engine,ctx,std::move( ff ),command.exe(),command.args(),
+							engine.processEnvironment(),std::move( cancel ) ) ) ;
 				}
 			}else{
 				ff() ;

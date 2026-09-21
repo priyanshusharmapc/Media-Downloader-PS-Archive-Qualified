@@ -24,5 +24,6 @@ body=utility[start:end]
 assert 'const auto firstJobRow = tabName == "playlist" ? 1 : 0' in body
 assert "f.done() && table.allEntriesTerminal( firstJobRow )" in body
 assert body.index("table.setRunningState") < body.index("allEntriesTerminal")
-assert "if( !args.isEmpty() )" in body
+assert "args.isEmpty() || args.at( 0 ).trimmed().isEmpty()" in body
+assert body.index("args.isEmpty()") < body.index("args.takeAt( 0 )")
 print("All-finished command terminal transition policy: PASS")

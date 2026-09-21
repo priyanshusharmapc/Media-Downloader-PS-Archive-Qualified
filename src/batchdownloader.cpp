@@ -29,6 +29,8 @@
 #include <QJsonDocument>
 #include <QFile>
 #include <QSaveFile>
+#include <QLockFile>
+#include <QUuid>
 
 #include <cmath>
 #include <limits>
@@ -618,14 +620,16 @@ void batchdownloader::showCustomContext()
 
 	connect( subMenu,&QMenu::triggered,[ this,row ]( QAction * ac ){
 
-		auto m = util::split( ac->objectName(),'\n',true ) ;
+		const auto m = ac->objectName().split( '\n',Qt::KeepEmptyParts ) ;
 
 		auto u = tableWidget::type::DownloadOptions ;
 
-		if( m.size() > 1 ){
+		if( m.size() >= 2 ){
 
+			// Preserve an intentionally empty options field; the menu label is
+			// metadata and must never become backend command text.
 			m_table.setDownloadingOptions( u,row,m[ 0 ],m[ 1 ] ) ;
-		}else{
+		}else if( m.size() == 1 ){
 			m_table.setDownloadingOptions( u,row,m[ 0 ] ) ;
 		}
 	} ) ;
@@ -639,11 +643,22 @@ void batchdownloader::showCustomContext()
 
 void batchdownloader::init_done()
 {
-	auto m = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
+	const auto shared = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
 
-	if( QFile::exists( m ) ){
-
-		this->getListFromFile( m,true ) ;
+	if( QFile::exists( shared ) ){
+		// Snapshot the exact recovery generation under the same lock used by
+		// writers, but leave the shared recovery file in place until parsing
+		// succeeds. A crash during restore therefore cannot strand the only
+		// durable copy in a private pathname.
+		QLockFile lock( shared + ".lock" ) ;
+		lock.setStaleLockTime( 30000 ) ;
+		if( lock.tryLock( 10000 ) && QFile::exists( shared ) ){
+			const auto claimed = shared + ".consume-" +
+				QUuid::createUuid().toString( QUuid::WithoutBraces ) + ".json" ;
+			if( QFile::copy( shared,claimed ) ){
+				this->getListFromFile( claimed,true ) ;
+			}
+		}
 	}
 
 	m_initDone = true ;
@@ -2003,49 +2018,74 @@ void batchdownloader::getListFromFile( const QString& e,bool deleteFile )
 {
 	engines::file::readAll( this,e,m_ctx.logger(),[ this,deleteFile,e ]( bool readOk,QByteArray list ){
 
-		if( !readOk || list.isEmpty() ){
+		const auto isAutosaveSnapshot = deleteFile && e.contains( ".consume-" ) ;
+		const auto discardSnapshot = [ & ](){
+			if( isAutosaveSnapshot ){
+				QFile::remove( e ) ;
+			}
+		} ;
 
+		if( !readOk || list.isEmpty() ){
+			// The shared autosave was never removed, so a failed snapshot read
+			// leaves the canonical recovery generation available for retry.
+			discardSnapshot() ;
 			return ;
 		}
 
 		Items items ;
-
 		auto jsonCandidate = list.trimmed() ;
 
-		// JSON permits leading whitespace. Also tolerate a UTF-8 BOM from
-		// external editors before deciding whether this is structured input.
 		if( jsonCandidate.startsWith( "\xEF\xBB\xBF" ) ){
 			jsonCandidate.remove( 0,3 ) ;
 			jsonCandidate = jsonCandidate.trimmed() ;
 		}
 
 		if( jsonCandidate.startsWith( '[' ) || jsonCandidate.startsWith( '{' ) ){
-
 			this->parseDataFromFile( items,jsonCandidate ) ;
 		}else{
 			list.replace( "\r","" ) ;
-
 			for( const auto& it : util::split( list,'\n',true ) ){
-
 				const auto candidate = it.trimmed() ;
 				if( utility::isHttpUrl( candidate ) ){
-
 					items.add( candidate ) ;
 				}
 			}
 		}
 
 		if( items.size() ){
-
 			m_ui.tabWidget->setCurrentIndex( 1 ) ;
 			this->parseItems( items.move(),{ false,false } ) ;
 
-			// Preserve the only recovery artifact until its contents were
-			// successfully read, parsed and handed to the restore path.
-			if( deleteFile && !QFile::remove( e ) ){
+			if( isAutosaveSnapshot ){
+				const auto shared = m_ctx.Engines().engineDirPaths().dataPath( "autoSavedList.json" ) ;
+				QLockFile lock( shared + ".lock" ) ;
+				lock.setStaleLockTime( 30000 ) ;
+				if( lock.tryLock( 10000 ) ){
+					QFile current( shared ) ;
+					QByteArray currentBytes ;
+					if( current.open( QIODevice::ReadOnly ) ){
+						currentBytes = current.readAll() ;
+					}
 
+					// Retire the canonical file only if it is still exactly the
+					// generation that was restored. A newer shutdown save is
+					// left untouched.
+					if( currentBytes == list ){
+						if( QFile::exists( shared ) && !QFile::remove( shared ) ){
+							m_ctx.logger().add(
+								"Failed to retire restored autosave generation: " + shared,
+								utility::loggerID() ) ;
+						}
+					}
+				}
+				QFile::remove( e ) ;
+			}else if( deleteFile && !QFile::remove( e ) ){
 				m_ctx.logger().add( "Failed to remove restored autosave: " + e,utility::loggerID() ) ;
 			}
+		}else{
+			// Malformed/empty recovery evidence is never retired merely because
+			// a parser produced no jobs. Remove only the private snapshot.
+			discardSnapshot() ;
 		}
 	} ) ;
 }

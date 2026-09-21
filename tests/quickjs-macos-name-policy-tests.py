@@ -7,7 +7,7 @@ p=argparse.ArgumentParser()
 p.add_argument("--source-root",required=True,type=Path)
 source=(p.parse_args().source_root/"src/engines/quickjs_ng.cpp").read_text(encoding="utf-8")
 
-entry_start=source.index("std::vector< engines::engine::exeEntry > quickjs_ng::entryCmd")
+entry_start=source.index("utility::addJsonCmd::entry::args quickjs_ng::entryCmd")
 entry_end=source.index("void quickjs_ng::init",entry_start)
 entry=source[entry_start:entry_end]
 assert 'e == "MacOS"' in entry and 'qjs-darwin' in entry

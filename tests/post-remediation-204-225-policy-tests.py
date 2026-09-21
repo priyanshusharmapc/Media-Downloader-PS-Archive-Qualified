@@ -60,8 +60,8 @@ def main():
 
     # 205/207: FindPython3 needs CMake 3.12, and policy tests are registered once.
     require("cmake_minimum_required(VERSION 3.12.0)" in cmake, "205: CMake minimum must support FindPython3")
-    require(cmake.count('file(GLOB POLICY_TEST_SCRIPTS') == 1, "207: generic policy test discovery must be registered exactly once")
-    require(cmake.count("POLICY_TEST_NAME") >= 1, "207: policy tests must remain registered")
+    require(cmake.count('file(GLOB MDPS_POLICY_TESTS') == 1, "207: generic policy test discovery must be registered exactly once")
+    require(cmake.count("MDPS_POLICY_NAME") >= 1, "207: policy tests must remain registered")
 
     # 206: explicit exports flow through an atomic writer and report failure.
     require("QSaveFile file( m_filePath )" in engines_cpp and "file.commit()" in engines_cpp, "206: shared writer must be atomic")
@@ -86,6 +86,8 @@ def main():
     require("MDPS_ARCHIVE_TEST_HOOKS=1" in cmake, "211: test target must explicitly opt into hooks")
     require("Production executable honored a qualification-only Archive settings hook" in package_test,
             "211: packaged production isolation regression missing")
+    require("$pass = (-not $settingsExists)" in package_test,
+            "L3b: package-seal pass must treat settings isolation as success")
 
     # 004: desktop identities match the qualified fork.
     require('io.github.priyanshusharmapc.MediaDownloaderPSArchive' in main_cpp, "004: Flatpak desktop identity regressed")
@@ -176,7 +178,8 @@ def main():
 
     # 093/112/225: durations use elapsed arithmetic and checked qint64 inputs.
     duration_body = engines_cpp[engines_cpp.find("timer::duration"):engines_cpp.find("timer::toSeconds")]
-    require("QTime" not in duration_body and 'QString( "%1:%2:%3" )' in duration_body, "093: elapsed duration still uses time-of-day")
+    require("QTime::" not in duration_body and 'QString( "%1:%2:%3" )' in duration_body and "totalSeconds / 3600" in duration_body,
+            "093: elapsed duration still uses time-of-day")
     to_seconds = engines_cpp[engines_cpp.find("timer::toSeconds"):engines_cpp.find("timer::elapsedTime")]
     require("toLongLong" in to_seconds and "numeric_limits< int >::max()" in to_seconds, "112: duration parser arithmetic is not checked")
     require("qint64 m_intDuration" in utility_h and "largestSafeSeconds" in utility_cpp and "1000LL" in utility_cpp,

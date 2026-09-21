@@ -27,6 +27,7 @@
 #include <QClipboard>
 #include <QMetaObject>
 #include <QSaveFile>
+#include <QLockFile>
 #include <QMessageBox>
 
 playlistdownloader::playlistdownloader( Context& ctx ) :
@@ -84,12 +85,19 @@ playlistdownloader::playlistdownloader( Context& ctx ) :
 	connect( m_ui.pbClearArchiveFile,&QPushButton::clicked,[ this ](){
 
 		const auto& engine = this->defaultEngine() ;
+		const auto path = m_ctx.Engines().engineDirPaths().archiveFilePath( engine ) ;
 
-		auto m = m_ctx.Engines().engineDirPaths().archiveFilePath( engine ) ;
+		QLockFile lock( path + ".lock" ) ;
+		lock.setStaleLockTime( 30000 ) ;
+		if( !lock.tryLock( 0 ) ){
+			QMessageBox::warning( &m_ctx.mainWidget(),tr( "Archive In Use" ),
+				tr( "The internal download archive is being used by another application instance. It was not cleared." ) ) ;
+			return ;
+		}
 
-		if( QFile::exists( m ) ){
-
-			QFile::remove( m ) ;
+		if( QFile::exists( path ) && !QFile::remove( path ) ){
+			QMessageBox::warning( &m_ctx.mainWidget(),tr( "Clear Archive Failed" ),
+				tr( "The internal download archive could not be removed. Its previous contents were preserved." ) ) ;
 		}
 	} ) ;
 
@@ -694,14 +702,14 @@ void playlistdownloader::customContextMenuRequested()
 
 	connect( subMenu,&QMenu::triggered,[ this,row ]( QAction * ac ){
 
-		auto m = util::split( ac->objectName(),'\n',true ) ;
+		const auto m = ac->objectName().split( '\n',Qt::KeepEmptyParts ) ;
 
 		auto u = tableWidget::type::DownloadOptions ;
 
-		if( m.size() > 1 ){
+		if( m.size() >= 2 ){
 
 			m_table.setDownloadingOptions( u,row,m[ 0 ],m[ 1 ] ) ;
-		}else{
+		}else if( m.size() == 1 ){
 			m_table.setDownloadingOptions( u,row,m[ 0 ] ) ;
 		}
 	} ) ;
@@ -848,6 +856,36 @@ void playlistdownloader::download( const engines::engine& engine )
 	engine.updateVersionInfo( m_ctx,meaw( *this,engine ) ) ;
 }
 
+bool playlistdownloader::acquireInternalArchiveLock( const engines::engine& engine,int id )
+{
+	if( !m_ctx.Settings().useInternalArchiveFile() ){
+		return true ;
+	}
+
+	const auto path = m_ctx.Engines().engineDirPaths().archiveFilePath( engine ) ;
+	if( m_internalArchiveLocks.contains( path ) ){
+		return true ;
+	}
+
+	auto lock = std::make_shared< QLockFile >( path + ".lock" ) ;
+	lock->setStaleLockTime( 30000 ) ;
+	if( !lock->tryLock( 0 ) ){
+		m_ctx.logger().add(
+			QObject::tr( "Internal download archive is busy in another application instance: %1" ).arg( path ),id ) ;
+		return false ;
+	}
+
+	m_internalArchiveLocks.insert( path,std::move( lock ) ) ;
+	return true ;
+}
+
+void playlistdownloader::releaseInternalArchiveLocksIfIdle()
+{
+	if( m_table.noneAreRunning() ){
+		m_internalArchiveLocks.clear() ;
+	}
+}
+
 void playlistdownloader::downloadRecursively( const engines::engine& eng,int index,bool downloadRecursively )
 {	
 	class events
@@ -963,6 +1001,19 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 
 	auto logs   = m_settings.getLogsLimits() ;
 	auto id     = utility::loggerID() ;
+
+	// yt-dlp owns the archive file directly for the process lifetime. Hold a
+	// cross-process ownership lock for the complete local active-download
+	// window so another instance cannot clear, migrate or concurrently mutate
+	// the same deduplication state.
+	if( !this->acquireInternalArchiveLock( engine,id ) ){
+		m_table.setRunningState( reportFinished::finishedStatus::finishedWithError(),index ) ;
+		if( m_table.noneAreRunning() ){
+			this->releaseInternalArchiveLocksIfIdle() ;
+			this->enableAll() ;
+		}
+		return ;
+	}
 	auto ff     = engine.filter( id ) ;
 	auto logger = make_loggerBatchDownloader( ff.move(),m_ctx.logger(),updater,error,id,logs ) ;
 
@@ -995,7 +1046,7 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 			  m_ctx,
 			  { dopt,{ index,m_table.rowCount() },ent },
 			  m_terminator.setUp(),
-			  events( *this,engine,index,downloadRecursively ),
+			  events( *this,eng,engine,index,downloadRecursively ),
 			  logger.move() ) ;
 }
 
@@ -1482,6 +1533,8 @@ void playlistdownloader::reportFinishedStatus( const reportFinished& f,
 
 	if( m_table.noneAreRunning() ){
 
+		this->releaseInternalArchiveLocksIfIdle() ;
+
 		if( m_settings.desktopNotifyOnAllDownloadComplete() ){
 
 			auto m = m_table.finishWithSuccess() ;
@@ -1681,20 +1734,21 @@ bool playlistdownloader::subscription::load()
 
 	m_loaded = true ;
 	m_storeValid = true ;
+	m_baseline.clear() ;
 
 	if( !QFile::exists( m_path ) ){
 		return true ;
 	}
 
 	QFile f( m_path ) ;
-
 	if( !f.open( QIODevice::ReadOnly ) ){
 		m_storeValid = false ;
 	}else{
 		const auto bytes = f.readAll() ;
+		m_baseline = bytes ;
+
 		QJsonParseError error ;
 		const auto doc = QJsonDocument::fromJson( bytes,&error ) ;
-
 		if( error.error != QJsonParseError::NoError || !doc.isArray() ){
 			m_storeValid = false ;
 		}else{
@@ -1706,7 +1760,8 @@ bool playlistdownloader::subscription::load()
 				}
 				const auto object = value.toObject() ;
 				const auto options = object.value( "getListOptions" ) ;
-				if( !object.value( "uiName" ).isString() || !object.value( "url" ).isString() ||
+				if( !object.value( "uiName" ).isString() ||
+				    !object.value( "url" ).isString() ||
 				    ( !options.isUndefined() && !options.isString() ) ){
 					m_storeValid = false ;
 					break ;
@@ -1717,7 +1772,8 @@ bool playlistdownloader::subscription::load()
 	}
 
 	if( !m_storeValid ){
-		m_ui.setToolTip( QObject::tr( "Subscriptions could not be loaded. Existing subscription data was preserved and editing is disabled." ) ) ;
+		m_ui.setToolTip( QObject::tr(
+			"Subscriptions could not be loaded. Existing subscription data was preserved and editing is disabled." ) ) ;
 	}
 
 	return m_storeValid ;
@@ -1744,18 +1800,40 @@ bool playlistdownloader::subscription::save()
 		return false ;
 	}
 
-	QSaveFile f( m_path ) ;
-	if( !f.open( QIODevice::WriteOnly ) ){
+	QLockFile lock( m_path + ".lock" ) ;
+	lock.setStaleLockTime( 30000 ) ;
+	if( !lock.tryLock( 10000 ) ){
+		return false ;
+	}
+
+	QByteArray current ;
+	if( QFile::exists( m_path ) ){
+		QFile existing( m_path ) ;
+		if( !existing.open( QIODevice::ReadOnly ) ){
+			return false ;
+		}
+		current = existing.readAll() ;
+	}
+
+	// Detect a concurrent valid edit instead of overwriting a stale full
+	// snapshot. The caller already restores its local model and surfaces a
+	// save warning when this transaction returns false.
+	if( current != m_baseline ){
 		return false ;
 	}
 
 	const auto data = QJsonDocument( m_array ).toJson( QJsonDocument::Indented ) ;
-	if( f.write( data ) != data.size() ){
+	QSaveFile f( m_path ) ;
+	f.setDirectWriteFallback( false ) ;
+	if( !f.open( QIODevice::WriteOnly ) ||
+	    f.write( data ) != data.size() ||
+	    !f.commit() ){
 		f.cancelWriting() ;
 		return false ;
 	}
 
-	return f.commit() ;
+	m_baseline = data ;
+	return true ;
 }
 
 void playlistdownloader::banner::updateProgress( const QString& progress )

@@ -25,9 +25,11 @@
 #include <QByteArray>
 #include <QString>
 #include <QFile>
+#include <QDir>
 #include <QLockFile>
 #include <QLocalServer>
 #include <QLocalSocket>
+#include <QElapsedTimer>
 
 namespace utils
 {
@@ -56,7 +58,37 @@ namespace utils
 			private:
 				std::function< void() > m_function ;
 			} ;
-		}
+
+			template< typename Args >
+			auto engineLockPath( const Args& args,int ) -> decltype( args.ePaths.socketLockPath() )
+			{
+				return args.ePaths.socketLockPath() ;
+			}
+
+			template< typename Args >
+			QString engineLockPath( const Args&,long )
+			{
+				return QString() ;
+			}
+
+			inline QString fallbackLockPath( const QString& socketPath )
+			{
+				if( socketPath.startsWith( "\\\\.\\pipe\\" ) || socketPath.startsWith( "//./pipe/" ) ){
+					return QDir::tempPath() + "/MediaDownloaderIPC.lock" ;
+				}
+				return socketPath + ".lock" ;
+			}
+
+			template< typename Args >
+			QString lockPath( const Args& args,const QString& socketPath )
+			{
+				const auto fromEngine = engineLockPath( args,0 ) ;
+				if( !fromEngine.isEmpty() ){
+					return fromEngine ;
+				}
+				return fallbackLockPath( socketPath ) ;
+			}
+		} ;
 		template< typename Type,typename TypeArgs >
 		struct appInfo
 		{
@@ -122,21 +154,19 @@ namespace utils
 				m_info( std::move( info ) ),
 				m_iargs( std::move( iargs ) ),
 				m_exec( [ this ](){ this->run() ; } ),
-				m_lockFile( m_info.socketPath + ".lock" )
+				m_lockFile( details::lockPath( m_info.args,m_info.socketPath ) )
 			{
-				m_lockOwned = m_lockFile.lock() ;
-				if( !m_lockOwned ){
-					std::cerr << "Failed to acquire single-instance startup lock: "
-						  << static_cast< int >( m_lockFile.error() ) << std::endl ;
-					m_info.app.exit( 1 ) ;
-				}
+				m_lockFile.setStaleLockTime( 30000 ) ;
+				// The primary owns this lock for its entire lifetime. Failure
+				// to acquire it means this process is a secondary candidate.
+				m_lockOwned = m_lockFile.tryLock( 0 ) ;
 			}
 			~oneinstance()
 			{
-				if( m_localServer.isListening() ){
-
-					m_localServer.close() ;
-					QFile::remove( m_info.socketPath ) ;
+				if( m_localServer.isListening() )m_localServer.close() ;
+				if( m_lockOwned ){
+					QLocalServer::removeServer( m_info.socketPath ) ;
+					m_lockFile.unlock() ;
 				}
 			}
 			int exec()
@@ -146,88 +176,171 @@ namespace utils
 		private:
 			void run()
 			{
-				if( !m_lockOwned )return ;
-
-				if( QFile::exists( m_info.socketPath ) ){
-
-					QObject::connect( &m_localSocket,&QLocalSocket::connected,[ this ](){
-
-						if( !m_info.data.isEmpty() ){
-
-							m_localSocket.write( m_info.data ) ;
-							m_localSocket.waitForBytesWritten() ;
+				if( m_lockOwned ){
+					// A lock acquired while an endpoint exists can happen during
+					// upgrade from an older primary. Probe once before cleanup.
+					if( QFile::exists( m_info.socketPath ) ){
+						QLocalSocket probe ;
+						probe.connectToServer( m_info.socketPath ) ;
+						if( probe.waitForConnected( 500 ) ){
+							probe.abort() ;
+							m_lockFile.unlock() ;
+							m_lockOwned = false ;
+							this->connectToPrimary() ;
+							return ;
 						}
-
-						m_localSocket.close() ;
-
-						m_iargs.otherInstanceRunning() ;
-
-						m_lockFile.unlock() ;
-
-						m_info.app.quit() ;
-					} ) ;
-
-				#if QT_VERSION < QT_VERSION_CHECK( 5,15,0 )
-					using cs = void( QLocalSocket::* )( QLocalSocket::LocalSocketError ) ;
-
-					QObject::connect( &m_localSocket,static_cast< cs >( &QLocalSocket::error ),[ this ]( QLocalSocket::LocalSocketError ){
-
 						m_iargs.otherInstanceCrashed() ;
-						QFile::remove( m_info.socketPath ) ;
-						this->start() ;
-					} ) ;
-				#else
-					QObject::connect( &m_localSocket,&QLocalSocket::errorOccurred,[ this ]( QLocalSocket::LocalSocketError ){
-
-						m_iargs.otherInstanceCrashed() ;
-						QFile::remove( m_info.socketPath ) ;
-						this->start() ;
-					} ) ;
-				#endif
-					m_localSocket.connectToServer( m_info.socketPath ) ;
-				}else{
+						QLocalServer::removeServer( m_info.socketPath ) ;
+					}
 					this->start() ;
+					return ;
 				}
+				this->connectToPrimary() ;
+			}
+			bool staleEndpointError( QLocalSocket::LocalSocketError error ) const
+			{
+				return error == QLocalSocket::ServerNotFoundError ||
+				       error == QLocalSocket::ConnectionRefusedError ;
+			}
+			void socketError( QLocalSocket::LocalSocketError error )
+			{
+				if( m_handoffComplete )return ;
+				m_localSocket.abort() ;
+				// A transient error never promotes this process. Stale cleanup
+				// requires a stale-class socket error and ownership of the
+				// lifetime lock, followed by a second failed endpoint probe.
+				if( !this->staleEndpointError( error ) || !m_lockFile.tryLock( 0 ) ){
+					std::cerr << "Single-instance handoff failed while primary ownership remains live" << std::endl ;
+					m_info.app.exit( 1 ) ;
+					return ;
+				}
+				QLocalSocket probe ;
+				probe.connectToServer( m_info.socketPath ) ;
+				if( probe.waitForConnected( 500 ) ){
+					probe.abort() ;
+					m_lockFile.unlock() ;
+					std::cerr << "Single-instance endpoint is still live; refusing stale cleanup" << std::endl ;
+					m_info.app.exit( 1 ) ;
+					return ;
+				}
+				if( !this->staleEndpointError( probe.error() ) ){
+					m_lockFile.unlock() ;
+					std::cerr << "Single-instance endpoint state is ambiguous; refusing stale cleanup" << std::endl ;
+					m_info.app.exit( 1 ) ;
+					return ;
+				}
+				m_lockOwned = true ;
+				m_iargs.otherInstanceCrashed() ;
+				QLocalServer::removeServer( m_info.socketPath ) ;
+				this->start() ;
+			}
+			void connectToPrimary()
+			{
+				QObject::connect( &m_localSocket,&QLocalSocket::connected,[ this ](){
+					const auto payload = m_info.data ;
+					const auto frame = QByteArray::number( payload.size() ) + "\n" + payload ;
+					qint64 offset = 0 ;
+					while( offset < frame.size() ){
+						const auto written = m_localSocket.write( frame.constData() + offset,frame.size() - offset ) ;
+						if( written <= 0 ){
+							std::cerr << "Failed to deliver complete single-instance event" << std::endl ;
+							m_localSocket.abort() ;
+							m_info.app.exit( 1 ) ;
+							return ;
+						}
+						offset += written ;
+					}
+					if( !m_localSocket.waitForBytesWritten( 5000 ) ){
+						std::cerr << "Timed out delivering single-instance event" << std::endl ;
+						m_localSocket.abort() ;
+						m_info.app.exit( 1 ) ;
+						return ;
+					}
+					QByteArray acknowledgement ;
+					QElapsedTimer deadline ;
+					deadline.start() ;
+					while( acknowledgement.size() < 3 && deadline.elapsed() < 5000 ){
+						if( m_localSocket.bytesAvailable() == 0 )m_localSocket.waitForReadyRead( 250 ) ;
+						acknowledgement += m_localSocket.readAll() ;
+					}
+					if( !acknowledgement.startsWith( "OK\n" ) ){
+						std::cerr << "Primary instance did not acknowledge the complete event" << std::endl ;
+						m_localSocket.abort() ;
+						m_info.app.exit( 1 ) ;
+						return ;
+					}
+					m_handoffComplete = true ;
+					m_localSocket.disconnectFromServer() ;
+					m_iargs.otherInstanceRunning() ;
+					m_info.app.quit() ;
+				} ) ;
+#if QT_VERSION < QT_VERSION_CHECK( 5,15,0 )
+				using cs = void( QLocalSocket::* )( QLocalSocket::LocalSocketError ) ;
+				QObject::connect( &m_localSocket,static_cast< cs >( &QLocalSocket::error ),
+					[ this ]( QLocalSocket::LocalSocketError error ){ this->socketError( error ) ; } ) ;
+#else
+				QObject::connect( &m_localSocket,&QLocalSocket::errorOccurred,
+					[ this ]( QLocalSocket::LocalSocketError error ){ this->socketError( error ) ; } ) ;
+#endif
+				m_localSocket.connectToServer( m_info.socketPath ) ;
 			}
 			void start()
 			{
 				QObject::connect( &m_localServer,&QLocalServer::newConnection,[ this ](){
 
 					auto s = m_localServer.nextPendingConnection() ;
-					auto data = std::make_shared< QByteArray >() ;
-					auto overflow = std::make_shared< bool >( false ) ;
+					auto bytes = std::make_shared< QByteArray >() ;
+					auto expected = std::make_shared< qint64 >( -1 ) ;
+					auto delivered = std::make_shared< bool >( false ) ;
 					const qint64 maxEventBytes = 1024 * 1024 ;
 
-					// QLocalSocket is a byte stream. readyRead is not a message
-					// boundary, so accumulate every fragment and deliver the event
-					// only after the secondary instance closes its write side. Bound
-					// the local IPC payload so a stuck/rogue peer cannot grow memory
-					// indefinitely while keeping the connection open.
-					QObject::connect( s,&QLocalSocket::readyRead,[ s,data,overflow,maxEventBytes ](){
+					auto consume = [ this,s,bytes,expected,delivered,maxEventBytes ](){
+						if( *delivered )return ;
 
-						const auto chunk = s->readAll() ;
-						if( data->size() + chunk.size() > maxEventBytes ){
-							*overflow = true ;
+						bytes->append( s->readAll() ) ;
+
+						if( *expected < 0 ){
+							const auto separator = bytes->indexOf( '\n' ) ;
+							if( separator < 0 ){
+								if( bytes->size() > 32 )s->abort() ;
+								return ;
+							}
+
+							bool ok = false ;
+							const auto value = bytes->left( separator ).toLongLong( &ok ) ;
+							if( !ok || value < 0 || value > maxEventBytes ){
+								s->abort() ;
+								return ;
+							}
+							*expected = value ;
+							bytes->remove( 0,separator + 1 ) ;
+						}
+
+						if( bytes->size() > *expected ){
 							s->abort() ;
 							return ;
 						}
-						data->append( chunk ) ;
-					} ) ;
 
-					QObject::connect( s,&QLocalSocket::disconnected,[ this,s,data,overflow,maxEventBytes ](){
-
-						const auto tail = s->readAll() ;
-						if( data->size() + tail.size() > maxEventBytes )*overflow = true ;
-						else data->append( tail ) ;
-
-						if( !*overflow && !data->isEmpty() && m_mainApp ){
-							m_mainApp->hasEvent( *data ) ;
+						if( bytes->size() == *expected ){
+							if( m_mainApp && *expected > 0 ){
+								m_mainApp->hasEvent( *bytes ) ;
+							}
+							*delivered = true ;
+							s->write( "OK\n",3 ) ;
+							s->flush() ;
+							s->disconnectFromServer() ;
 						}
+					} ;
 
+					QObject::connect( s,&QLocalSocket::readyRead,consume ) ;
+					QObject::connect( s,&QLocalSocket::disconnected,[ s,consume,delivered ](){
+						consume() ;
+						if( !*delivered ){
+							// Incomplete frames are discarded and never surfaced as events.
+						}
 						s->deleteLater() ;
 					} ) ;
 				} ) ;
-
 				// The single-instance contract is not established until the IPC
 				// endpoint is actually listening. Keep the startup lock held and
 				// fail startup rather than exposing a full GUI with no listener.
@@ -241,7 +354,7 @@ namespace utils
 				m_mainApp = std::make_unique< typename AppInfo::appType >( std::move( m_info.args ) ) ;
 				m_mainApp->start( std::move( m_info.data ) ) ;
 
-				m_lockFile.unlock() ;
+				// Keep the ownership lock for the full primary lifetime.
 			}
 			QLocalServer m_localServer ;
 			QLocalSocket m_localSocket ;
@@ -251,6 +364,7 @@ namespace utils
 			details::exec m_exec ;
 			QLockFile m_lockFile ;
 			bool m_lockOwned = false ;
+			bool m_handoffComplete = false ;
 		} ;
 
 		class AppTypeInterface

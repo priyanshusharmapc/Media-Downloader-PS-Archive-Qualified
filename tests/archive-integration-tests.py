@@ -680,7 +680,7 @@ class ArchiveIntegration(NormalizationCleanupCases, unittest.TestCase):
         commit = 'a' * 40
         run_id = '123456789'
         repository = 'example/qualified-repo'
-        artifact_id = '987654321'
+        release_tag = 'qualification-' + commit
         (self.package / 'build-identity.json').write_text(json.dumps({
             'repository': repository, 'commit': commit, 'run_id': run_id,
             'qualification': 'windows-ci-qualified-for-local-harness'
@@ -700,7 +700,7 @@ class ArchiveIntegration(NormalizationCleanupCases, unittest.TestCase):
             powershell, '-NoProfile', '-NonInteractive', '-File', script,
             '-ArchiveRoot', self.root, '-PlaylistUrl', SOURCE_URL, '-VideoUrl', VIDEO_URL,
             '-ExpectedCommit', commit, '-ExpectedArtifactSha256', artifact_sha,
-            '-ExpectedArtifactId', artifact_id, '-ExpectedRunId', run_id,
+            '-ExpectedReleaseTag', release_tag, '-ExpectedRunId', run_id,
             '-ExpectedRepository', repository, '-ArtifactZipPath', artifact
         ]
         result = run(args, env=self.env, timeout=120)
@@ -712,7 +712,7 @@ class ArchiveIntegration(NormalizationCleanupCases, unittest.TestCase):
         self.assertEqual(evidence['source_key'], 'PLAUDIT')
         self.assertEqual(evidence['active_occurrences'], 1)
         self.assertTrue(evidence['entry_key'])
-        self.assertEqual(evidence['artifact_id'], artifact_id)
+        self.assertEqual(evidence['release_tag'], release_tag)
         self.assertEqual(evidence['artifact_sha256'], artifact_sha)
         self.assertEqual(evidence['repository'], repository)
         self.assertEqual(str(evidence['ci_run_id']), run_id)

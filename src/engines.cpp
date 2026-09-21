@@ -764,6 +764,27 @@ const QProcessEnvironment& engines::processEnvironment() const
 	return m_processEnvironment ;
 }
 
+static bool safePluginIdentity( const QString& name,const QString& definitionFile )
+{
+	if( name.isEmpty() || name == "." || name == ".." ||
+	    name.contains( '/' ) || name.contains( '\\' ) ||
+	    name.contains( ':' ) || QDir::isAbsolutePath( name ) ){
+		return false ;
+	}
+
+	for( const auto ch : name ){
+		if( ch.unicode() < 0x20 || ch.unicode() == 0x7f ){
+			return false ;
+		}
+	}
+
+	const QFileInfo defInfo( definitionFile ) ;
+	return !definitionFile.isEmpty() &&
+	       !QDir::isAbsolutePath( definitionFile ) &&
+	       defInfo.fileName() == definitionFile &&
+	       definitionFile == name + ".json" ;
+}
+
 QString engines::addEngine( const QByteArray& data,const QString& extensionFileName,int id )
 {
 	util::Json json( data ) ;
@@ -772,7 +793,10 @@ QString engines::addEngine( const QByteArray& data,const QString& extensionFileN
 		auto object = json.toObject() ;
 		auto name = object.value( "Name" ).toString() ;
 
-		if( !name.isEmpty() ){
+		if( safePluginIdentity( name,extensionFileName ) ){
+			// The logical plugin name is also the persisted definition identity.
+			// Reject traversal, alternate filenames and special path syntax before
+			// either the definition or payload can become removal authority.
 			// Validate exactly the engine object that would be loaded after
 			// publication. Derived yt-dlp definitions are overlays on top of
 			// yt-dlp.json, so compose those in memory before touching disk.
@@ -875,9 +899,14 @@ void engines::removeEngine( const QString& ee,int id )
 
 			if( folder.exists() && folder.isDir() ){
 
-				const auto removeError = utility::removeFolder( folder.filePath() ) ;
-				if( !removeError.isEmpty() ){
-					m_logger.add( QObject::tr( "Plugin payload cleanup failed: %1: %2" ).arg( folder.filePath(),removeError ),id ) ;
+				QString treeError ;
+				if( !utility::updaterTreeIsSafe( folder.filePath(),&treeError ) ){
+					m_logger.add( QObject::tr( "Plugin payload cleanup refused: %1: %2" ).arg( folder.filePath(),treeError ),id ) ;
+				}else{
+					const auto removeError = utility::removeFolder( folder.filePath() ) ;
+					if( !removeError.isEmpty() ){
+						m_logger.add( QObject::tr( "Plugin payload cleanup failed: %1: %2" ).arg( folder.filePath(),removeError ),id ) ;
+					}
 				}
 			}
 		}else if( engines::executableOwnedByBinRoot( exe,binPath ) ){
@@ -1040,30 +1069,25 @@ engines::engine::cmd engines::engine::getCommands( const QString& engineName,con
 		url = obj.value( "DownloadUrl" ).toString() ;
 	}
 
+	QJsonObject selected ;
+
 	if( cpu.x86_32() ){
-
-		auto m = this->getCmd( cmd,"x86" ) ;
-
-		if( !m.isEmpty() ){
-
-			return { m,url,*this } ;
-		}
-
+		selected = this->getCmd( cmd,"x86" ) ;
 	}else if( cpu.x86_64() ){
-
-		return { this->getCmd( cmd,"amd64" ),url,*this } ;
-
+		selected = this->getCmd( cmd,"amd64" ) ;
 	}else if( cpu.aarch64() ){
-
-		auto m = this->getCmd( cmd,"aarch64" ) ;
-
-		if( !m.isEmpty() ){
-
-			return { m,url,*this } ;
-		}
+		selected = this->getCmd( cmd,"aarch64" ) ;
+	}else if( cpu.aarch32() ){
+		// ARM32 is an explicitly recognized host architecture. Never silently
+		// reinterpret it as amd64 when an engine has no ARM32 payload.
+		selected = this->getCmd( cmd,"aarch32" ) ;
+		if( selected.isEmpty() )selected = this->getCmd( cmd,"arm" ) ;
 	}
 
-	return { this->getCmd( cmd,"amd64" ),url,*this } ;
+	// Unknown or unsupported architectures fail closed. Individual engines
+	// that intentionally support emulation must declare that mapping explicitly
+	// in their command metadata (for example QuickJS-ng Windows ARM64).
+	return { selected,url,*this } ;
 }
 
 engines::engine::cmd::cmd( const QJsonObject& obj,
@@ -1445,12 +1469,12 @@ QString engines::engine::versionString( const QString& data ) const
 {
 	auto a = util::split( data,'\n',true ) ;
 
-	if( m_line < a.size() ){
+	if( m_line >= 0 && m_line < a.size() ){
 
 		auto b = a[ m_line ] ;
 		auto c = util::split( b,' ',true ) ;
 
-		if( m_position < c.size() ){
+		if( m_position >= 0 && m_position < c.size() ){
 
 			auto m = c[ m_position ] ;
 
@@ -1530,6 +1554,12 @@ QString engines::enginePaths::socketPath()
 		QDir().mkpath( m ) ;
 		return m  + "/ipc" ;
 	}
+}
+
+QString engines::enginePaths::socketLockPath() const
+{
+	QDir().mkpath( m_dataPath ) ;
+	return this->add( m_dataPath,"single-instance.lock" ) ;
 }
 
 void engines::enginePaths::confirmPaths( Logger& logger ) const

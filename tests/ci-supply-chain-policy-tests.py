@@ -14,10 +14,10 @@ uses=re.findall(r"uses:\s*([^\s#]+)",workflow)
 assert uses
 for ref in uses:
     assert re.search(r"@[0-9a-f]{40}$",ref), f"mutable action reference: {ref}"
-assert "linux-toolchain.txt" in workflow
-assert "windows-toolchain.txt" in workflow
-assert "dpkg-query -W" in workflow
-assert "runner_image=$env:ImageOS" in workflow
-assert "linux-qt6-development-inputs-${{ github.sha }}" in workflow
+assert "python3 -m compileall -q tests" in workflow
+assert "python -m compileall -q tests" in workflow
+assert "actions/upload-artifact@" not in workflow
+assert "cache: false" in workflow
+assert "artifact-gc:" in workflow and "actions: write" in workflow
 assert "refs/heads/ci/" not in workflow
 print("Immutable CI toolchain policy: PASS")

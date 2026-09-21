@@ -31,6 +31,7 @@
 #include "../util.hpp"
 #include "../utility.h"
 #include "../directoryEntries.h"
+#include "../library.h"
 
 #include <iostream>
 #include <array>
@@ -125,6 +126,9 @@ public:
 			}
 			if( arg == TEST_ENGINE_PREFIX"-library-filesystem-boundary" ){
 				return this->testLibraryFilesystemBoundary() ;
+			}
+			if( arg == TEST_ENGINE_PREFIX"-library-native-mutations" ){
+				return this->testLibraryNativeMutations() ;
 			}
 		}
 
@@ -328,6 +332,97 @@ public:
 				<< " fileLinked=" << fileLinked << std::endl ;
 			m_args.app.exit( 1 ) ;
 		}
+	}
+
+
+	void testLibraryNativeMutations()
+	{
+#ifndef Q_OS_UNIX
+		std::cout << "library-native-mutations=SKIP non-posix" << std::endl ;
+		m_args.app.exit( 0 ) ;
+#else
+		QTemporaryDir temp ;
+		QTemporaryDir outsideTemp ;
+		bool ok = temp.isValid() && outsideTemp.isValid() ;
+		const auto rootText = temp.path() ;
+		const auto outsideText = outsideTemp.path() ;
+		const auto root = QFile::encodeName( rootText ) ;
+
+		auto childText = []( const QString& parent,const QString& name ){
+			return QDir( parent ).filePath( name ) ;
+		} ;
+		auto childNative = []( QByteArray parent,const QByteArray& name ){
+			if( !parent.endsWith( '/' ) )parent.append( '/' ) ;
+			parent.append( name ) ;
+			return parent ;
+		} ;
+		auto create = []( const QString& path ){
+			QFile file( path ) ;
+			return file.open( QIODevice::WriteOnly | QIODevice::NewOnly ) &&
+			       file.write( "fixture" ) == 7 ;
+		} ;
+
+		// Two rows can have the same display spelling while retaining distinct
+		// native identities. Confirmation must bind to the captured native path.
+		const QString sameDisplay = rootText + "/collision-display" ;
+		ok = ok && library::testPendingDirectoryMatches(
+			sameDisplay,sameDisplay,QByteArray( "native-a" ),QByteArray( "native-a" ) ) ;
+		ok = ok && !library::testPendingDirectoryMatches(
+			sameDisplay,sameDisplay,QByteArray( "native-a" ),QByteArray( "native-b" ) ) ;
+
+		// Route selected deletion through the library.cpp production seam and
+		// prove an adjacent native identity is untouched.
+		const QString firstText = childText( rootText,"collision-a" ) ;
+		const QString secondText = childText( rootText,"collision-b" ) ;
+		ok = ok && create( firstText ) && create( secondText ) ;
+		std::atomic_bool keepGoing{ true } ;
+		ok = ok && library::testRemoveNativeEntry(
+			root,root,QByteArray( "collision-a" ),keepGoing ) ;
+		ok = ok && !QFileInfo::exists( firstText ) && QFileInfo::exists( secondText ) ;
+
+		// Cancellation before worker mutation must leave the first selected file.
+		const QString cancelledText = childText( rootText,"cancel-before-worker" ) ;
+		ok = ok && create( cancelledText ) ;
+		keepGoing.store( false ) ;
+		ok = ok && !library::testRemoveNativeEntry(
+			root,root,QByteArray( "cancel-before-worker" ),keepGoing ) ;
+		ok = ok && QFileInfo::exists( cancelledText ) ;
+		keepGoing.store( true ) ;
+
+		// Delete All receives the confirmed native directory snapshot. Mutating a
+		// different sibling after confirmation cannot redirect the operation.
+		const QString confirmedText = childText( rootText,"confirmed" ) ;
+		const QString siblingText = childText( rootText,"sibling" ) ;
+		ok = ok && QDir().mkpath( confirmedText ) && QDir().mkpath( siblingText ) ;
+		ok = ok && create( childText( confirmedText,"victim" ) ) ;
+		ok = ok && create( childText( siblingText,"survivor" ) ) ;
+		ok = ok && library::testRemoveNativeDirectoryContents(
+			root,QFile::encodeName( confirmedText ),keepGoing ) ;
+		ok = ok && !QFileInfo::exists( childText( confirmedText,"victim" ) ) ;
+		ok = ok && QFileInfo::exists( childText( siblingText,"survivor" ) ) ;
+
+		// Replace an intermediate owned directory with a symlink after selection.
+		// Descriptor-relative re-resolution must refuse to traverse outside.
+		const QString insideText = childText( rootText,"inside" ) ;
+		const QString insideRealText = childText( rootText,"inside-real" ) ;
+		ok = ok && QDir().mkpath( insideText ) ;
+		ok = ok && create( childText( insideText,"victim" ) ) ;
+		ok = ok && create( childText( outsideText,"victim" ) ) ;
+		ok = ok && QDir( rootText ).rename( "inside","inside-real" ) ;
+		ok = ok && QFile::link( outsideText,insideText ) ;
+		ok = ok && !library::testRemoveNativeEntry(
+			root,QFile::encodeName( insideText ),QByteArray( "victim" ),keepGoing ) ;
+		ok = ok && QFileInfo::exists( childText( outsideText,"victim" ) ) ;
+		ok = ok && QFileInfo::exists( childText( insideRealText,"victim" ) ) ;
+
+		if( ok ){
+			std::cout << "library-native-mutations=PASS" << std::endl ;
+			m_args.app.exit( 0 ) ;
+		}else{
+			std::cerr << "library-native-mutations=FAIL" << std::endl ;
+			m_args.app.exit( 1 ) ;
+		}
+#endif
 	}
 
 	void testProxySecurity()

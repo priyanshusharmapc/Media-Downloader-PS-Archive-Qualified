@@ -25,6 +25,7 @@
 #include "settings.h"
 #include "utils/threads.hpp"
 #include "context.hpp"
+#include "archive/archiveprocess.h"
 
 #include <QFile>
 
@@ -34,6 +35,7 @@
 #include <QDir>
 #include <QDateTime>
 #include <QUrl>
+#include <QLockFile>
 #include <QUuid>
 #include <QPointer>
 #include <QWidget>
@@ -54,6 +56,25 @@ static QString _sslLibraryVersionString()
 
 namespace
 {
+utils::qprocess::outPut runBoundedExtractor( const QString& program,const QStringList& args )
+{
+    // Update extractors operate on untrusted archives. Give them a generous
+    // but finite deadline and reuse Archive's process-tree containment so a
+    // hung extractor or child cannot pin update state forever.
+    constexpr int extractionTimeoutMs = 5 * 60 * 1000 ;
+    const auto result = archive::detail::runContainedProcess(
+        program,args,QString(),extractionTimeoutMs ) ;
+
+    auto status = result.ok ? utils::qprocess::outPut::ExitStatus::NormalExit
+                            : utils::qprocess::outPut::ExitStatus::Crashed ;
+    auto error = result.standardError.toUtf8() ;
+    if( !result.error.isEmpty() ){
+        if( !error.isEmpty() )error += "\n" ;
+        error += result.error.toUtf8() ;
+    }
+    return { result.exitCode,status,result.standardOutput.toUtf8(),error } ;
+}
+
 bool updatePathExists( const QString& path )
 {
     const QFileInfo info( path ) ;
@@ -489,7 +510,9 @@ void networkAccess::uMediaDownloaderM( networkAccess::updateMDOptions& md,
 
 void networkAccess::updateMediaDownloader( networkAccess::updateMDOptions md ) const
 {
-	auto e = m_ctx.Engines().engineDirPaths().tmp( md.name ) ;
+	const auto attemptName = ".mdps-app-update-" +
+		QUuid::createUuid().toString( QUuid::WithoutBraces ) + "-" + md.name ;
+	auto e = m_ctx.Engines().engineDirPaths().tmp( attemptName ) ;
 
 	md.tmpFile = QDir::fromNativeSeparators( e ) ;
 
@@ -558,6 +581,23 @@ void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils:
 			return ;
 		}
 
+		QLockFile updaterLock( QDir( md.tmpPath ).filePath( ".mdps-updater-startup.lock" ) ) ;
+		updaterLock.setStaleLockTime( 30000 ) ;
+		if( !updaterLock.tryLock( 10000 ) ){
+			md.status.done() ;
+			this->post( m_appName,QObject::tr( "Application update is busy in another instance" ),md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
+
+		const auto oldStage = utility::removeFolder( md.finalPath ) ;
+		if( !oldStage.isEmpty() ){
+			md.status.done() ;
+			this->failedToRemove( m_appName,md.finalPath,oldStage,md.id ) ;
+			cleanupStage() ;
+			return ;
+		}
+
 		auto e = utility::rename( extractedPath,md.finalPath ) ;
 
 		if( e.isEmpty() ){
@@ -585,6 +625,7 @@ void networkAccess::emDownloader( networkAccess::updateMDOptions md,const utils:
 
 		this->failedToExtract( md.exeArgs,result,md.id ) ;
 		cleanupStage() ;
+        m_tabManager.enableAll() ;
 	}
 }
 
@@ -661,13 +702,9 @@ void networkAccess::extractMediaDownloader( networkAccess::updateMDOptions md ) 
 		}
 		QString bg()
 		{
-			// Background work owns only update paths. It must not dereference the
-			// networkAccess/Context owner while application shutdown can tear it down.
-			const auto oldStage = utility::removeFolder( m_md.finalPath ) ;
-			if( !oldStage.isEmpty() ){
-				return oldStage ;
-			}
-
+			// Background work touches only this attempt's private extraction path.
+			// Shared update_new replacement happens later under the same updater
+			// lock used by restart-time promotion.
 			const QFileInfo attemptInfo( m_md.extractStagePath ) ;
 			if( attemptInfo.exists() || attemptInfo.isSymLink() ){
 				return QObject::tr( "Updater extraction path unexpectedly already exists: %1" ).arg( m_md.extractStagePath ) ;
@@ -701,19 +738,19 @@ void networkAccess::extractMediaDownloader( networkAccess::updateMDOptions md ) 
 			}
 
 			auto args = QStringList{ "-x","-f",m_md.tmpFile,"-C",m_md.extractStagePath } ;
-			auto mode = QProcess::MergedChannels ;
 			m_md.exeArgs = { exe,args } ;
 
 			QPointer< QWidget > guard( &m_parent->m_ctx.mainWidget() ) ;
 			const auto * parent = m_parent ;
 			auto moved = m_md.move() ;
 
-			utils::qprocess::run( exe,args,mode,
-				[ guard,parent,md = std::move( moved ) ]( const utils::qprocess::outPut& output ) mutable {
-					if( guard ){
-						parent->emDownloader( std::move( md ),output ) ;
-					}
-				} ) ;
+            utils::qthread::run(
+                [ exe,args ](){ return runBoundedExtractor( exe,args ) ; },
+                [ guard,parent,md = std::move( moved ) ]( utils::qprocess::outPut&& output ) mutable {
+                    if( guard ){
+                        parent->emDownloader( std::move( md ),output ) ;
+                    }
+                } ) ;
 		}
 	private:
 		const networkAccess * m_parent ;
@@ -925,20 +962,32 @@ void networkAccess::downloadP( networkAccess::Opts& opts,const utils::network::p
 			opts.networkError.add( QObject::tr( "Download Failed: persisted payload integrity check failed: %1" ).arg( opts.file.writeError() ) ) ;
 		}else if( p.success() ){
 
-			if( opts.metadata.hash().isEmpty() ){
+			auto expected = opts.metadata.hash().trimmed().toLower() ;
+			// Specialized release parsers can bypass the generic normalizer.
+			// Accept only the explicit GitHub sha256: algorithm prefix, strip it,
+			// then validate the canonical 64 hexadecimal digits.
+			if( expected.startsWith( "sha256:",Qt::CaseInsensitive ) ){
+				expected = expected.mid( 7 ).trimmed().toLower() ;
+			}
+			bool digestValid = expected.size() == 64 ;
+			for( const auto ch : expected ){
+				const auto lc = ch.toLower() ;
+				if( !( ( lc >= QLatin1Char( '0' ) && lc <= QLatin1Char( '9' ) ) ||
+				       ( lc >= QLatin1Char( 'a' ) && lc <= QLatin1Char( 'f' ) ) ) ){
+					digestValid = false ;
+					break ;
+				}
+			}
 
-				auto m = QObject::tr( "Skipping Remote Download Hash Check" ) ;
-
-				this->post( m_appName,m,opts.id ) ;
+			if( !digestValid ){
+				opts.reportFailed() ;
+				opts.networkError.add( QObject::tr(
+					"Download Failed: release asset is missing a valid trusted SHA-256 digest" ) ) ;
 			}else{
-				auto m = receivedHash.toHex().toLower() ;
-
-				if( opts.metadata.hash() != m ){
-
-					this->hashDoNotMatch( opts.metadata.hash(),m,opts.id ) ;
-
+				const auto actual = receivedHash.toHex().toLower() ;
+				if( expected != actual ){
+					this->hashDoNotMatch( expected,actual,opts.id ) ;
 					opts.reportFailed() ;
-
 					opts.networkError.setbadDownload() ;
 				}
 			}
@@ -998,14 +1047,38 @@ void networkAccess::finished( networkAccess::Opts opts ) const
 
 			this->post( engine.name(),mm,opts.id ) ;
 
+            QLockFile updateLock( QDir( opts.tempPath ).filePath( ".mdps-component-update.lock" ) ) ;
+            updateLock.setStaleLockTime( 30000 ) ;
+            if( !updateLock.tryLock( 10000 ) ){
+                opts.reportFailed() ;
+                opts.networkError.add( QObject::tr( "Component update is busy in another application instance" ) ) ;
+                engine.setBroken() ;
+                this->printVersion( opts.move(),true ) ;
+                return ;
+            }
+
+            // Prove the staged payload can be activated before the live
+            // destination is touched. Rename preserves mode bits on POSIX.
+            if( !utility::setPermissions( opts.file.src() ) ){
+                opts.reportFailed() ;
+                opts.networkError.add( QObject::tr( "Downloaded engine could not be made executable" ) ) ;
+                engine.setBroken() ;
+                this->printVersion( opts.move(),true ) ;
+                return ;
+            }
+
             QString cleanupWarning ;
             const auto m = promoteUpdatePath( opts.file.src(),opts.exeBinPath,&cleanupWarning ) ;
 
             if( m.isEmpty() ){
 
-                // Promotion is the commit point. A failure restores the prior
-                // destination before this update attempt is reported as bad.
-                utility::setPermissions( opts.exeBinPath ) ;
+                if( !utility::setPermissions( opts.exeBinPath ) ){
+                    opts.reportFailed() ;
+                    opts.networkError.add( QObject::tr( "Promoted engine is not executable" ) ) ;
+                    engine.setBroken() ;
+                    this->printVersion( opts.move(),true ) ;
+                    return ;
+                }
 
                 engine.updateCmdPath( m_ctx.logger(),opts.exeBinPath ) ;
 
@@ -1038,7 +1111,7 @@ void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
     if( engine.archiveContainsFolder() ){
         // Normalize a versioned top-level folder entirely inside staging. The
         // previously working engine is still untouched at this point.
-        auto rename = engine.renameArchiveFolder( opts.filePath,opts.updateStagePath ) ;
+        auto rename = engine.renameArchiveFolder( opts.metadata.fileName(),opts.updateStagePath ) ;
         if( !rename.success() ){
             removeUpdatePath( opts.updateStagePath ) ;
             this->failedToRename( engine.name(),rename.src(),rename.dst(),rename.err(),opts.id ) ;
@@ -1063,6 +1136,36 @@ void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
         return ;
     }
 
+    if( !utility::setPermissions( stagedExecutable ) ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Extracted engine executable could not be made executable" ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
+
+    QString treeError ;
+    if( !utility::updaterTreeIsSafe( opts.updateStagePath,&treeError ) ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Extracted component tree is unsafe: %1" ).arg( treeError ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
+
+    QLockFile updateLock( QDir( opts.tempPath ).filePath( ".mdps-component-update.lock" ) ) ;
+    updateLock.setStaleLockTime( 30000 ) ;
+    if( !updateLock.tryLock( 10000 ) ){
+        removeUpdatePath( opts.updateStagePath ) ;
+        this->post( engine.name(),QObject::tr( "Component update is busy in another application instance" ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
+    }
+
     QString cleanupWarning ;
     const auto promotion = promoteUpdateDirectoryContents( opts.updateStagePath,opts.tempPath,&cleanupWarning ) ;
     if( !promotion.isEmpty() ){
@@ -1075,13 +1178,15 @@ void networkAccess::extractArchiveOuput( networkAccess::Opts opts,
 
     if( !cleanupWarning.isEmpty() )this->post( engine.name(),cleanupWarning,opts.id ) ;
 
-    if( engine.archiveContainsFolder() ){
-        auto exe = engine.updateCmdPath( m_ctx.logger(),opts.tempPath ) ;
-        QFile file( exe ) ;
-        file.setPermissions( file.permissions() | QFileDevice::ExeOwner ) ;
-    }else{
-        QFile file( opts.exeBinPath ) ;
-        file.setPermissions( file.permissions() | QFileDevice::ExeOwner ) ;
+    const auto finalExecutable = engine.archiveContainsFolder()
+        ? engine.updateCmdPath( m_ctx.logger(),opts.tempPath )
+        : opts.exeBinPath ;
+    if( !utility::setPermissions( finalExecutable ) ){
+        this->post( engine.name(),QObject::tr( "Promoted engine failed executable-permission verification" ),opts.id ) ;
+        engine.setBroken() ;
+        opts.reportFailed() ;
+        this->printVersion( opts.move(),true ) ;
+        return ;
     }
 
     // The downloaded archive is no longer required after a fully successful
@@ -1192,7 +1297,16 @@ void networkAccess::extractArchive( networkAccess::Opts opts ) const
 
 		opts.exeArgs = { exe,args } ;
 
-		utils::qprocess::run( exe,args,opts.move(),this,&networkAccess::extractArchiveOuput ) ;
+		QPointer< QWidget > guard( &m_ctx.mainWidget() ) ;
+		const auto * parent = this ;
+		auto moved = opts.move() ;
+        utils::qthread::run(
+            [ exe,args ](){ return runBoundedExtractor( exe,args ) ; },
+            [ guard,parent,opts = std::move( moved ) ]( utils::qprocess::outPut&& output ) mutable {
+                if( guard ){
+                    parent->extractArchiveOuput( std::move( opts ),output ) ;
+                }
+            } ) ;
 	}
 }
 

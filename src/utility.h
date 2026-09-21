@@ -427,27 +427,33 @@ namespace utility
 	QJsonObject parseJsonDataFromGitHub( const QJsonDocument& doc,Function function )
 	{
 		const auto array = doc.object().value( "assets" ).toArray() ;
+		QJsonObject match ;
+		int matches = 0 ;
 
 		for( const auto& it : array ){
-
+			if( !it.isObject() )continue ;
 			auto obj = it.toObject() ;
 
 			if( function( obj ) ){
-
-				auto hash = obj.value( "digest" ).toString() ;
-
-				if( hash.startsWith( "sha256:" ) ){
-
-					hash.replace( "sha256:","" ) ;
-
-					obj.insert( "digest",hash.toLower() ) ;
+				match = std::move( obj ) ;
+				if( ++matches > 1 ){
+					// Asset predicates are not ordering rules. An ambiguous release
+					// must fail closed rather than installing whichever asset GitHub
+					// happened to serialize first.
+					return {} ;
 				}
-
-				return obj ;
 			}
 		}
 
-		return {} ;
+		if( matches != 1 )return {} ;
+
+		auto hash = match.value( "digest" ).toString() ;
+		if( hash.startsWith( "sha256:",Qt::CaseInsensitive ) ){
+			hash = hash.mid( 7 ).trimmed().toLower() ;
+			match.insert( "digest",hash ) ;
+		}
+
+		return match ;
 	}
 	class cliArguments
 	{
@@ -474,6 +480,7 @@ namespace utility
 	public:
 		static QByteArray logHistoryData( const Context& ) ;
 		static QByteArray logHistoryData( const QString& filePath ) ;
+		static bool clearHistory( const QString& filePath ) ;
 		archiveData( QStringList opts,const engines::engine& engine,const Context& ctx ) ;
 		void addToHistory( QJsonObject ) ;
 		const QStringList& options() const
@@ -627,8 +634,8 @@ namespace utility
 	void wait( int time ) ;
 	void waitForOneSecond() ;
 	void openDownloadFolderPath( const QString& ) ;
-	void setPermissions( QFile& ) ;
-	void setPermissions( const QString& ) ;
+	bool setPermissions( QFile& ) ;
+	bool setPermissions( const QString& ) ;
 	void failedToParseJsonData( Logger&,const QJsonParseError& ) ;
 	bool runningGitVersion() ;
 	bool runningGitVersion( const QString& ) ;
@@ -1714,6 +1721,9 @@ namespace utility
 				} ) ;
 
 				m_events.done( state,{} ) ;
+				// FailedToStart has no later finished() callback. Mark the process
+				// log terminal here so retention/eviction remains bounded.
+				m_logger.registerDone() ;
 			}
 		}
 		void withData( QProcess::ProcessChannel channel,const QByteArray& data )

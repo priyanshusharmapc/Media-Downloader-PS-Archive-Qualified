@@ -6,11 +6,12 @@ from pathlib import Path
 p=argparse.ArgumentParser()
 p.add_argument("--source-root",required=True,type=Path)
 source=(p.parse_args().source_root/"src/settings.cpp").read_text(encoding="utf-8")
-start=source.index('auto duration = m_obj.value( "duration" )')
+start=source.index('const auto durationValue = m_obj.value( "duration" )')
 end=source.index('QDesktopServices::openUrl',start)
 body=source[start:end]
 
 assert "title.replace( '\\r',' ' )" in body
 assert "title.replace( '\\n',' ' )" in body
-assert 'aa += "#EXTINF:" + duration + ", " + title + "\\n"' in body
+assert 'payload += "#EXTINF:" + duration + ", " + title + "\\n"' in body
+assert "durationOk && durationValue >= 0" in body
 print("Flatpak M3U metadata neutralization policy: PASS")

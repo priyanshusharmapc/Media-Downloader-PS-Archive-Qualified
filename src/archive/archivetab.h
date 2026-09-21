@@ -23,6 +23,8 @@ class QTextEdit;
 class QPlainTextEdit;
 class QComboBox;
 class QToolButton;
+class QGroupBox;
+class QAction;
 class QWidget;
 
 class ArchiveTab : public QObject

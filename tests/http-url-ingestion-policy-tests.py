@@ -21,6 +21,5 @@ print("HTTP URL ingestion policy: PASS")
 assert "utility::clipboardText().trimmed()" in b
 assert "const auto candidate = it.trimmed()" in b
 assert "items.add( candidate )" in b
-assert "e->text().trimmed()" in t
-assert "const auto candidate = e.trimmed()" in t
+assert "const auto candidate = text.trimmed()" in t
 assert "clipboardData( candidate,true )" in t

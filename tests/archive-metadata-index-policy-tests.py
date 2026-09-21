@@ -13,9 +13,11 @@ assert "m_paths.isSafeRelative(metadataPath)" in update
 assert "detail::noLinks(absoluteMetadata)" in update
 assert "item.metadataPath=metadataPath" in update
 video=cpp[cpp.index("bool MediaExecutor::downloadVideo"):cpp.index("bool MediaExecutor::downloadAudio")]
-assert 'info.fileName().contains("["+item.providerId+"]")' in video
-assert 'metadataPath="Metadata/"+info.fileName()' in video
-assert 'updateRepresentation(item.key,"video",done,error,metadataPath)' in video
+assert "QTemporaryDir metadataStaging" in video
+assert 'metadataPathCandidate="Metadata/youtube-"+item.providerId+"-"' in video
+assert "validateOwnedStagingTree" in video
+assert "metadataPath=metadataPathCandidate" in video
+assert 'updateRepresentation(item.key,"video",done,&finalizationError,metadataPath)' in video
 safety=(root/"src/archive/archivesafety.h").read_text(encoding="utf-8")
 assert 'metadataPath.startsWith("Metadata/")' in safety
 assert '"Invalid canonical metadata path"' in safety

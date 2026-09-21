@@ -449,13 +449,18 @@ void versionInfo::printVersion( versionInfo::printVinfo vInfo ) const
 		}
 	} ;
 
-	auto done = [ this,v = v.move() ]( archive::ProcessResult&& result ) mutable {
+	// probeTask stores the completion hook in std::function, so the hook must
+	// be copy-constructible. pVInfo is intentionally move-only; share exactly
+	// one instance across any std::function copies and consume it once when the
+	// guarded foreground callback runs.
+	auto state = std::make_shared< versionInfo::pVInfo >( v.move() ) ;
+	auto done = [ this,state ]( archive::ProcessResult&& result ) mutable {
 		const auto status = result.ok ? utils::qprocess::outPut::ExitStatus::NormalExit
 		                              : utils::qprocess::outPut::ExitStatus::Crashed ;
 		utils::qprocess::outPut output{
 			result.exitCode,status,result.standardOutput.toUtf8(),result.standardError.toUtf8()
 		} ;
-		this->printVersionP( std::move( v ),output ) ;
+		this->printVersionP( state->move(),output ) ;
 	} ;
 
 	Q_UNUSED( mm )

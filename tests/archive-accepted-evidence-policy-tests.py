@@ -9,13 +9,13 @@ source=(p.parse_args().source_root/"src/archive/archivecore.cpp").read_text(enco
 
 assert "bool verifyAcceptedEvidence" in source
 assert 'receipt.value("file_sha256").isObject()' in source
-assert "QDirIterator files(packageDir" in source
+assert "QDirIterator entries(packageDir" in source
 assert "Unrecorded file in Accepted recovery package" in source
 assert "Accepted recovery evidence hash mismatch" in source
 assert "Accepted recovery evidence file is missing" in source
 init=source[source.index("bool Store::initialize"):source.index("QVector<Source> Store::loadSources")]
 assert "verifyAcceptedEvidence(m_paths,error)" in init
-assert init.index("verifyAcceptedEvidence(m_paths,error)") < init.index("recoverStaleRunning")
+assert init.index("if(!verifyAcceptedEvidence(m_paths,error))") < init.index("if(recoverStaleRunning)")
 print("Accepted recovery evidence integrity policy: PASS")
 
 # Post-acceptance integrity must inspect directory/link/special entries too, not

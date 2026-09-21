@@ -16,9 +16,13 @@ assert "!priorDoc.isArray()" in us
 assert "out.write( m ) != m.size()" in us and "!out.commit()" in us
 
 bs=batch[batch.index("void batchdownloader::getListFromFile( const QString& e,bool deleteFile )"):batch.index("void batchdownloader::getListFromFile( QMenu& m )")]
-read_guard=bs.index("if( !readOk || list.isEmpty() )")
-items_guard=bs.index("if( items.size() )")
-remove=bs.index("QFile::remove( e )")
-assert read_guard < items_guard < remove
-assert "if( deleteFile && !QFile::remove( e ) )" in bs
+assert 'const auto isAutosaveSnapshot = deleteFile && e.contains( ".consume-" )' in bs
+assert "if( !readOk || list.isEmpty() )" in bs
+assert "discardSnapshot()" in bs
+assert "if( items.size() )" in bs
+assert 'QLockFile lock( shared + ".lock" )' in bs
+assert "if( currentBytes == list )" in bs
+assert "QFile::exists( shared ) && !QFile::remove( shared )" in bs
+assert "else if( deleteFile && !QFile::remove( e ) )" in bs
+assert bs.index("if( items.size() )") < bs.index("if( currentBytes == list )")
 print("Batch autosave durability policy: PASS")

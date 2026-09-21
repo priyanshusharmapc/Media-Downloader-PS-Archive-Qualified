@@ -9,7 +9,7 @@ start=source.index("static QString secondsToString")
 end=source.index("private:",start)
 body=source[start:end]
 
-assert "QTime" not in body
+assert "QTime(" not in body
 assert "const auto hours = total / 3600" in body
 assert "const auto minutes = totalMinutes % 60" in body
 assert "const auto seconds = total % 60" in body

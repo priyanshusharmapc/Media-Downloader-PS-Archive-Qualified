@@ -532,11 +532,14 @@ void gallery_dl::openLocalFile( const engines::engine::baseEngine::localFile& s 
 	}
 }
 
-void gallery_dl::runCommandOnDownloadedFile( const std::vector< QByteArray >& e )
+void gallery_dl::runCommandOnDownloadedFile( const std::vector< QByteArray >& e,
+					      const QString& downloadFolder )
 {
 	auto& s = engines::engine::baseEngine::Settings() ;
-	auto df = s.downloadFolder() + "/" + this->engine().name() + "/" ;
-	s.runCommandOnSuccessfulDownload( this->engine().name(),df,e ) ;
+	const auto folder = downloadFolder.isEmpty() ?
+		s.downloadFolder() + "/" + this->engine().name() :
+		downloadFolder ;
+	s.runCommandOnSuccessfulDownload( this->engine().name(),folder + "/",e ) ;
 }
 
 void gallery_dl::setProxySetting( engines::engine::baseEngine::optionsEnvironment&,QStringList& e,const QString& s )
