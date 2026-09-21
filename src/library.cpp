@@ -331,6 +331,7 @@ void library::tabEntered()
 void library::tabExited()
 {
 	m_continue = false ;
+	++m_populationGeneration ;
 	if( m_scanContinue ){
 		*m_scanContinue = false ;
 	}
@@ -641,6 +642,12 @@ void library::addItem( const directoryEntries::iter& s )
 
 void library::addEntrySlot( const directoryEntries::iter& s )
 {
+	// A queued event from an older scan/sort must never be re-armed merely
+	// because m_continue became true for a replacement population.
+	if( s.generation() != m_populationGeneration ){
+		return ;
+	}
+
 	if( s.hasNext() && m_continue ){
 
 		this->addItem( s ) ;
@@ -796,7 +803,8 @@ void library::arrangeAndShow()
 
 	m_directoryEntries.join( m_settings.libraryShowFolderFirst() ) ;
 
-	this->addEntrySlot( m_directoryEntries.Iter() ) ;
+	const auto generation = ++m_populationGeneration ;
+	this->addEntrySlot( m_directoryEntries.Iter( generation ) ) ;
 }
 
 static void _set_option( QMenu& m,const QString& tr,const QString& utr,bool o )
@@ -863,6 +871,9 @@ void library::arrangeEntries( int )
 
 void library::showContents( const QString& path )
 {
+	// Invalidate already queued row events immediately, before the replacement
+	// background scan has had time to publish its new snapshot.
+	++m_populationGeneration ;
 	m_continue = true ;
 
 	auto safePath = QDir::cleanPath( path ) ;
