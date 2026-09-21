@@ -88,8 +88,10 @@ def main():
             "nativePathAt" in library and
             "renameNativeEntry" in library and
             "removeDirectoryNative" in library and
-            "readAllNative" in library,
-            "251: Library actions are not routed through retained native identity")
+            "readAllNative" in library and
+            "m_pendingActionNativeDirectory" in library_h and
+            "m_pendingActionNativeDirectory == m_currentNativePath" in library,
+            "251: Library actions/confirmations are not routed through retained native identity")
     require("void openUrl( const QByteArray& nativePath )" in settings_h and
             "QUrl::fromEncoded( encoded,QUrl::StrictMode )" in settings,
             "251: exact native POSIX file open path is missing")
