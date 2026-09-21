@@ -86,6 +86,8 @@ def main():
     require("MDPS_ARCHIVE_TEST_HOOKS=1" in cmake, "211: test target must explicitly opt into hooks")
     require("Production executable honored a qualification-only Archive settings hook" in package_test,
             "211: packaged production isolation regression missing")
+    require("$pass = (-not $settingsExists)" in package_test,
+            "L3b: package-seal pass must treat settings isolation as success")
 
     # 004: desktop identities match the qualified fork.
     require('io.github.priyanshusharmapc.MediaDownloaderPSArchive' in main_cpp, "004: Flatpak desktop identity regressed")
