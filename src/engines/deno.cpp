@@ -27,7 +27,8 @@ util::version deno::version( const QString& m )
 
 	if( result.ok ){
 
-		return result.standardOutput.replace( "deno","" ).trimmed() ;
+		auto output = result.standardOutput ;
+		return output.replace( "deno","" ).trimmed() ;
 	}else{
 		return {} ;
 	}
