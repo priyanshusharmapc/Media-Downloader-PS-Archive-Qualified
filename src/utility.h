@@ -633,8 +633,8 @@ namespace utility
 	void wait( int time ) ;
 	void waitForOneSecond() ;
 	void openDownloadFolderPath( const QString& ) ;
-	void setPermissions( QFile& ) ;
-	void setPermissions( const QString& ) ;
+	bool setPermissions( QFile& ) ;
+	bool setPermissions( const QString& ) ;
 	void failedToParseJsonData( Logger&,const QJsonParseError& ) ;
 	bool runningGitVersion() ;
 	bool runningGitVersion( const QString& ) ;
