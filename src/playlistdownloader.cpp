@@ -1046,7 +1046,7 @@ void playlistdownloader::downloadRecursively( const engines::engine& eng,int ind
 			  m_ctx,
 			  { dopt,{ index,m_table.rowCount() },ent },
 			  m_terminator.setUp(),
-			  events( *this,engine,index,downloadRecursively ),
+			  events( *this,eng,engine,index,downloadRecursively ),
 			  logger.move() ) ;
 }
 
