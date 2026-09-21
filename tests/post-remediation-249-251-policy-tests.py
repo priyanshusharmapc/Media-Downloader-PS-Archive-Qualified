@@ -61,7 +61,7 @@ def main():
             "250: an unbounded direct extractor launch remains")
 
     # 137: queued Library row chains own immutable snapshots and generations.
-    require("std::vector< snapshot > m_entries" in entries_h and
+    require("std::shared_ptr< std::vector< snapshot > > m_entries" in entries_h and
             "quint64 m_generation" in entries_h and
             "Iter( quint64 generation" in entries_h,
             "137: queued iterator still aliases mutable directory storage")
@@ -90,7 +90,8 @@ def main():
             "removeDirectoryNative" in library and
             "readAllNative" in library and
             "m_pendingActionNativeDirectory" in library_h and
-            "m_pendingActionNativeDirectory == m_currentNativePath" in library,
+            "m_pendingActionNativeDirectory == m_currentNativePath" in library and
+            "showContents( m_currentPath,m_currentNativePath )" in library,
             "251: Library actions/confirmations are not routed through retained native identity")
     require("void openUrl( const QByteArray& nativePath )" in settings_h and
             "QUrl::fromEncoded( encoded,QUrl::StrictMode )" in settings,
