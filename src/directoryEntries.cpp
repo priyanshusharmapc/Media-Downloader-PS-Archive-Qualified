@@ -454,6 +454,11 @@ directoryEntries directoryManager::readAllNative( const QByteArray& e,std::atomi
 	return dManager( e,s ).readAll() ;
 }
 
+void directoryManager::removeDirectoryContentsNative( const QByteArray& e,std::atomic_bool& s )
+{
+	return dManager( e,s ).removeDirectoryContents() ;
+}
+
 void directoryManager::removeDirectoryNative( const QByteArray& e,std::atomic_bool& s )
 {
 	return dManager( e,s ).removeDirectory() ;
