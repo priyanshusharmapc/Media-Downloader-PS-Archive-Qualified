@@ -108,6 +108,9 @@ private:
 	settings& m_settings ;
 	std::atomic_bool m_continue ;
 	std::shared_ptr< std::atomic_bool > m_scanContinue ;
+	// Every queued row-population chain is stamped with this generation. A new
+	// scan, sort or tab exit increments it before old queued events can resume.
+	quint64 m_populationGeneration = 0 ;
 	// Destructive workers own this cancellation token independently of the
 	// Library QObject so shutdown never leaves a thread dereferencing m_continue.
 	std::shared_ptr< std::atomic_bool > m_deleteContinue ;
