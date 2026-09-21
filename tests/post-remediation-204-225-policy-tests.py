@@ -60,8 +60,8 @@ def main():
 
     # 205/207: FindPython3 needs CMake 3.12, and policy tests are registered once.
     require("cmake_minimum_required(VERSION 3.12.0)" in cmake, "205: CMake minimum must support FindPython3")
-    require(cmake.count('file(GLOB POLICY_TEST_SCRIPTS') == 1, "207: generic policy test discovery must be registered exactly once")
-    require(cmake.count("POLICY_TEST_NAME") >= 1, "207: policy tests must remain registered")
+    require(cmake.count('file(GLOB MDPS_POLICY_TESTS') == 1, "207: generic policy test discovery must be registered exactly once")
+    require(cmake.count("MDPS_POLICY_NAME") >= 1, "207: policy tests must remain registered")
 
     # 206: explicit exports flow through an atomic writer and report failure.
     require("QSaveFile file( m_filePath )" in engines_cpp and "file.commit()" in engines_cpp, "206: shared writer must be atomic")
