@@ -3551,6 +3551,23 @@ QByteArray utility::archiveData::logHistoryData( const QString& filePath )
 	return data ;
 }
 
+bool utility::archiveData::clearHistory( const QString& filePath )
+{
+	// Keep the thread-local mutex and cross-process transaction lock inside
+	// archiveData so callers cannot accidentally split the locking protocol.
+	utility::archiveData::guardHistoryFile() ;
+
+	QLockFile lock( filePath + ".lock" ) ;
+	lock.setStaleLockTime( 30000 ) ;
+	bool removed = false ;
+	if( lock.tryLock( 10000 ) ){
+		removed = !QFile::exists( filePath ) || QFile::remove( filePath ) ;
+	}
+
+	utility::archiveData::unGuardHistoryFile() ;
+	return removed ;
+}
+
 utility::archiveData::archiveData( QStringList opts,const engines::engine& engine,const Context& ctx ) :
 	m_options( std::move( opts ) ),
 	m_ctx( ctx )

@@ -140,17 +140,9 @@ bool Logger::clearDownloadHistory()
 
 		const auto& e = m_ctx->Engines().engineDirPaths().downloadHistoryFilePath() ;
 
-		// Serialize across both threads and supported application instances.
-		utility::archiveData::guardHistoryFile() ;
-		QLockFile lock( e + ".lock" ) ;
-		lock.setStaleLockTime( 30000 ) ;
-		bool removed = false ;
-		if( lock.tryLock( 10000 ) ){
-			removed = QFile::exists( e ) && QFile::remove( e ) ;
-		}
-		utility::archiveData::unGuardHistoryFile() ;
-
-		return removed ;
+		// archiveData owns the complete intra-process + cross-process locking
+		// transaction; Logger never reaches into its private lock primitives.
+		return utility::archiveData::clearHistory( e ) ;
 	}else{
 		return false ;
 	}
