@@ -182,6 +182,13 @@ if(BUILD_TESTING)
             COMMAND media-downloader --media-downloader-test-engine-library-filesystem-boundary)
         set_tests_properties(library-filesystem-boundary PROPERTIES
             ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+        if(UNIX)
+            target_compile_definitions(media-downloader PRIVATE MDPS_LIBRARY_TEST_HOOKS=1)
+            add_test(NAME library-native-mutations
+                COMMAND media-downloader --media-downloader-test-engine-library-native-mutations)
+            set_tests_properties(library-native-mutations PROPERTIES
+                ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 30)
+        endif()
     endif()
 
     add_executable(archive-core-tests
