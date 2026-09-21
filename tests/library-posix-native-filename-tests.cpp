@@ -60,6 +60,15 @@ int main()
     entries.join( false ) ;
 
     auto iter = entries.Iter( 73 ) ;
+
+    // The queued iterator must own its row snapshot. Replacing the source
+    // directory model must not invalidate or alter this already queued chain.
+    entries.clear() ;
+    entries.addFile( 1,QStringLiteral( "replacement" ),QByteArray( "replacement" ) ) ;
+    entries.sortByNameAscending() ;
+    entries.join( false ) ;
+    if( iter.generation() != 73 )return 12 ;
+
     bool foundInvalid = false ;
     bool foundLiteral = false ;
     QString invalidDisplay ;
