@@ -114,7 +114,7 @@ def main():
     require("Unknown or unsupported architectures fail closed" in commands,
             "234: unsupported CPUs can still fall through to amd64")
     version = section(engines_cpp, "QString engines::engine::versionString",
-                      "QString engines::engine::setVersionString")
+                      "bool engines::engine::validDownloadUrl")
     require("m_line >= 0" in version and "m_position >= 0" in version,
             "237: negative version indices remain accepted")
 
