@@ -18,7 +18,7 @@ sync=src[src.index("bool MediaExecutor::syncItem"):src.index("bool MediaExecutor
 assert "verifiedRepresentationUnchanged" in sync
 assert sync.index("verifiedRepresentationUnchanged") < sync.index("check(representation.path)")
 assert "duration*2000.0" in src
-assert "24LL*60*60*1000" in src
+assert "24.0*60.0*60.0*1000.0" in src
 assert "10*60*1000" in src
 print("Media verification fingerprint policy: PASS")
 
