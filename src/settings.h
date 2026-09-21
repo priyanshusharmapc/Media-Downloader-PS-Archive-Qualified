@@ -316,6 +316,9 @@ public:
 	void setTabNumber( int ) ;
 	void saveMainWindowDimensions( const QRect& ) ;
 	void openUrl( const QString& ) ;
+#ifdef Q_OS_UNIX
+	void openUrl( const QByteArray& nativePath ) ;
+#endif
 	void setEnableLibraryTab( bool ) ;
 	void setMonitorClipboardUrl( bool,settings::tabName ) ;
 	void setShowMetaDataInBatchDownloader( bool ) ;
