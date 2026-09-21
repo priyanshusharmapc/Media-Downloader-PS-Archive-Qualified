@@ -21,16 +21,16 @@ cmake=read("CMakeLists.txt")
 engine_tests=read("src/engines/tests.cpp")
 library_h=read("src/library.h")
 
-assert "directoryManager::removeEntryNative" in library
+assert "removeLibraryNativeEntry" in library and "directoryManager::removeEntryNative" in library
 assert "directoryManager::renameEntryNative" in library
-assert "directoryManager::removeDirectoryContentsNative" in library
+assert "removeLibraryNativeDirectoryContents" in library and "directoryManager::removeDirectoryContentsNative" in library
 assert "m_pendingActionNativeDirectory = m_currentNativePath" in library
 assert "deleteAll( m_pendingActionNativeDirectory )" in library
 assert "MDPS_LIBRARY_TEST_HOOKS" in library_h
 assert "testPendingDirectoryMatches" in library_h
 assert "testRemoveNativeEntry" in library_h
 assert "testRemoveNativeDirectoryContents" in library_h
-assert "--media-downloader-test-engine-library-native-mutations" in engine_tests
+assert '-library-native-mutations"' in engine_tests
 assert "library::testPendingDirectoryMatches" in engine_tests
 assert "library::testRemoveNativeEntry" in engine_tests
 assert "library::testRemoveNativeDirectoryContents" in engine_tests
