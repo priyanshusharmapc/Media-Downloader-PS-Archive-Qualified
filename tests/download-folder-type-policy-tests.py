@@ -11,10 +11,13 @@ start=source.index("QString settings::downloadFolder( const QString& defaultPath
 end=source.index("QString settings::downloadFolderImp",start)
 body=source[start:end]
 
-assert "QFileInfo( m ).isDir()" in body, (
+assert "QFileInfo( resolved ).isDir()" in body, (
     "download-folder validation must require a directory")
 assert "if( QFile::exists( m ) )" not in body, (
     "generic existence must not admit a regular file as a directory root")
-assert 'm_settings.setValue( "DownloadFolder",mm )' in body, (
-    "existing invalid-path fallback behavior must remain explicit")
+assert 'const auto configured = m_settings.value( "DownloadFolder" ).toString()' in body
+assert 'if( configured.startsWith( defaultMarker ) )' in body
+assert 'return defaultPath' in body
+assert 'm_settings.setValue( "DownloadFolder"' not in body.split("const auto configured",1)[1], (
+    "offline configured destinations must not be overwritten by fallback")
 print("download-folder filesystem type policy: PASS")
