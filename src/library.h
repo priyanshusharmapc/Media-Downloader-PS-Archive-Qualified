@@ -54,6 +54,11 @@ public:
 	void tabEntered() ;
 	void tabExited() ;
 	void textAlignmentChanged( Qt::LayoutDirection ) ;
+#ifdef MDPS_LIBRARY_TEST_HOOKS
+	static bool testPendingDirectoryMatches( const QString&,const QString&,const QByteArray&,const QByteArray& ) ;
+	static bool testRemoveNativeEntry( const QByteArray&,const QByteArray&,const QByteArray&,std::atomic_bool& ) ;
+	static bool testRemoveNativeDirectoryContents( const QByteArray&,const QByteArray&,std::atomic_bool& ) ;
+#endif
 private:
 signals:
 	void addEntrySignal( const directoryEntries::iter& ) ;
