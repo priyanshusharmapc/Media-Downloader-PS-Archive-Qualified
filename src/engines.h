@@ -1309,8 +1309,9 @@ public:
 					ctx.TabManager().disableAll() ;
 
 					const auto exe = engine.exePath() ;
-					QStringList args{ engine.versionArgument() } ;
-					this->setPermissions( exe ) ;
+					const engines::engine::exeArgs::cmd command(
+						exe,QStringList{ engine.versionArgument() } ) ;
+					this->setPermissions( exe.realExe() ) ;
 
 					auto cancel = std::make_shared< std::atomic_bool >( false ) ;
 					QObject::connect( &ctx.mainWidget(),&QObject::destroyed,
@@ -1319,7 +1320,7 @@ public:
 					utils::qthread::run(
 						&ctx.mainWidget(),
 						uvic< Context,Function >(
-							engine,ctx,std::move( ff ),exe,args,
+							engine,ctx,std::move( ff ),command.exe(),command.args(),
 							engine.processEnvironment(),std::move( cancel ) ) ) ;
 				}
 			}else{

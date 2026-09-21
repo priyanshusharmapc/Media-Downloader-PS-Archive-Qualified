@@ -42,14 +42,20 @@ require("publish-qualification-evidence:" in workflow,
         "durable evidence publication job is missing")
 require("contents: write" in workflow,
         "durable publication job cannot create a release")
-require("qualification-evidence-manifest-" in workflow,
-        "workflow does not create a digest-bearing evidence manifest")
-require("gh release upload" in workflow,
-        "workflow does not publish evidence as release assets")
+require("qualification-${GITHUB_SHA}.json" in workflow,
+        "workflow does not create a commit-specific compact evidence manifest")
+require("'commit': os.environ['GITHUB_SHA']" in workflow and
+        "'run_id': os.environ['GITHUB_RUN_ID']" in workflow,
+        "compact evidence manifest is not bound to commit and workflow run")
+require("gh release create" in workflow,
+        "workflow does not publish durable evidence as a commit-specific release")
 require("--clobber" not in workflow,
-        "qualification assets are overwriteable")
-require("qualification evidence bundle SHA-256 mismatch" in workflow,
-        "rerun does not verify the existing durable bundle digest")
+        "qualification evidence is overwriteable")
+require("actions/upload-artifact@" not in workflow,
+        "workflow still stores transient qualification bundles in Actions artifacts")
+require("artifact-gc:" in workflow and
+        "/actions/artifacts/" in workflow and "/actions/caches" in workflow,
+        "workflow lacks automatic Actions artifact/cache garbage collection")
 require("ordinary Actions artifact expiry" in policy,
         "retention policy does not distinguish transient artifacts")
 
