@@ -568,13 +568,13 @@ bool library::hasMultipleSelections()
 	return multipleSelections > 1 ;
 }
 
-QByteArray library::nativeNameAt( int row ) const
+QByteArray library::nativeNameAt( int row )
 {
 	if( row < 0 || row >= m_table.rowCount() )return {} ;
 	return m_table.item( row,1 ).data( Qt::UserRole ).toByteArray() ;
 }
 
-QByteArray library::nativePathAt( int row ) const
+QByteArray library::nativePathAt( int row )
 {
 #ifdef Q_OS_UNIX
 	const auto name = this->nativeNameAt( row ) ;
