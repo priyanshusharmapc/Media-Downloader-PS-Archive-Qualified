@@ -17,12 +17,25 @@ quickjs=read("src/engines/quickjs.cpp")
 svt=read("src/engines/svtplay-dl.cpp")
 single=read("src/utils/single_instance.hpp")
 workflow=read(".github/workflows/archive-qt6.yml")
+cmake=read("CMakeLists.txt")
+engine_tests=read("src/engines/tests.cpp")
+library_h=read("src/library.h")
 
 assert "directoryManager::removeEntryNative" in library
 assert "directoryManager::renameEntryNative" in library
 assert "directoryManager::removeDirectoryContentsNative" in library
 assert "m_pendingActionNativeDirectory = m_currentNativePath" in library
 assert "deleteAll( m_pendingActionNativeDirectory )" in library
+assert "MDPS_LIBRARY_TEST_HOOKS" in library_h
+assert "testPendingDirectoryMatches" in library_h
+assert "testRemoveNativeEntry" in library_h
+assert "testRemoveNativeDirectoryContents" in library_h
+assert "--media-downloader-test-engine-library-native-mutations" in engine_tests
+assert "library::testPendingDirectoryMatches" in engine_tests
+assert "library::testRemoveNativeEntry" in engine_tests
+assert "library::testRemoveNativeDirectoryContents" in engine_tests
+assert "library-native-mutations" in cmake
+assert "MDPS_LIBRARY_TEST_HOOKS=1" in cmake
 for token in ("openat(", "O_NOFOLLOW", "fstatat(", "AT_SYMLINK_NOFOLLOW", "unlinkat(", "renameat("):
     assert token in entries
 assert "if( !keepGoing.load() )return false" in entries
