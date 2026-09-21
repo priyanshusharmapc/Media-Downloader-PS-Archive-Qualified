@@ -1198,7 +1198,8 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             record(historyEvent("observation_changed",p.itemKey,{{"entry_key",p.entryKey},{"position",p.position},{"title",p.title},{"availability",p.availability},{"previous_position",previous.position},{"previous_title",previous.title},{"previous_availability",previous.availability}}));
 
         int ci=canonicalIndex.value(p.itemKey,-1);
-        if(promotedPrior>=0){
+        const bool identityPromoted = promotedPrior>=0;
+        if(identityPromoted){
             const auto oldKey=prior[promotedPrior].itemKey;
             const int oldCi=canonicalIndex.value(oldKey,-1);
             if(oldCi<0){summary.error="Placeholder promotion lost canonical history";return summary;}
@@ -1231,7 +1232,11 @@ ReconcileSummary Store::reconcile(Source& source,const Snapshot& snapshot,Activi
             if(!p.url.isEmpty()) c.originalUrl=p.url;
             c.availability=p.availability; c.lastSeen=scanTime;
             if(c.firstSeen.isEmpty()) c.firstSeen=p.firstSeen;
-            updateRecoveryStatus(c);
+            // Identity promotion is a key migration, not new recovery evidence.
+            // Preserve the historical recovery state that moved with the
+            // canonical record. Later representation/metadata operations can
+            // recompute recovery status from fresh evidence normally.
+            if(!identityPromoted) updateRecoveryStatus(c);
         }
         if(isUnavailable(p.availability)) ++summary.unavailable;
         result.append(p);
