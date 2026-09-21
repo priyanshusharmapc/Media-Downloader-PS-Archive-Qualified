@@ -1521,13 +1521,14 @@ bool settings::portableVersion()
 	return m_options.portableVersion() ;
 }
 
-settings::options::options( const utility::cliArguments& args,const QString& appPath )
+settings::options::options( const utility::cliArguments& args,const QString& appPath ) :
+	m_runningUpdated( args.runningUpdated() )
 {
 	if( utility::platformIsWindows() ){
 
 		m_exePath = utility::windowsApplicationDirPath() ;
 
-		if( args.runningUpdated() ){
+		if( m_runningUpdated ){
 
 			m_pathToOldUpdatedVersion = args.pathToOldUpdatedVersion() ;
 

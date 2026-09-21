@@ -509,6 +509,10 @@ private:
 		{
 			return m_portableVersion ;
 		}
+		bool runningUpdated() const
+		{
+			return m_runningUpdated ;
+		}
 		const QString& pathToOldUpdatedVersion() const
 		{
 			return m_pathToOldUpdatedVersion ;
@@ -519,7 +523,8 @@ private:
 		QString m_exe3PartyBinPath ;
 		QString m_defaultPortableVersionDownloadFolder ;
 		QString m_pathToOldUpdatedVersion ;
-		bool m_portableVersion ;
+		bool m_portableVersion = false ;
+		bool m_runningUpdated = false ;
 	} ;
 
 	bool m_EnableHighDpiScaling ;
