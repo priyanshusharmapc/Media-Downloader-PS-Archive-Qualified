@@ -50,6 +50,7 @@ assert "m_lockFile.tryLock( 0 )" in single
 assert "staleEndpointError" in single
 assert "QLocalServer::removeServer" in single
 assert "QFile::remove( m_info.socketPath )" not in single
+assert 'm_info.socketPath + ".lock"' not in single
 start=single[single.index("void start()"):]
 assert "m_lockFile.unlock()" not in start.split("QLocalServer m_localServer",1)[0]
 

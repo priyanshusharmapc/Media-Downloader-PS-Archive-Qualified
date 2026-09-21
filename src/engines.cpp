@@ -1556,6 +1556,12 @@ QString engines::enginePaths::socketPath()
 	}
 }
 
+QString engines::enginePaths::socketLockPath() const
+{
+	QDir().mkpath( m_dataPath ) ;
+	return this->add( m_dataPath,"single-instance.lock" ) ;
+}
+
 void engines::enginePaths::confirmPaths( Logger& logger ) const
 {
 	QFileInfo fileInfo ;

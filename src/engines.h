@@ -305,6 +305,7 @@ public:
 			return this->add( m_enginePath,e ) ;
 		}
 		QString socketPath() ;
+		QString socketLockPath() const ;
 		void confirmPaths( Logger& ) const ;
 	private:
 		QString archiveFilePathByName( const QString& name,const QString& ext = ".txt" ) const

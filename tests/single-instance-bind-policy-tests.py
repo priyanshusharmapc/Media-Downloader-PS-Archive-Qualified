@@ -19,7 +19,10 @@ print("Single-instance listener binding policy: PASS")
 
 ctor=source[source.index("oneinstance( AppInfo info"):source.index("~oneinstance()",source.index("oneinstance( AppInfo info"))]
 assert "m_lockOwned = m_lockFile.tryLock( 0 )" in ctor
+assert 'm_info.socketPath + ".lock"' not in ctor
+assert "details::lockPath( m_info.args,m_info.socketPath )" in ctor
 assert "bool m_lockOwned = false" in source
 assert "staleEndpointError" in source
 assert "if( !this->staleEndpointError( error ) || !m_lockFile.tryLock( 0 ) )" in source
 assert "refusing stale cleanup" in source
+assert "socketLockPath" in source

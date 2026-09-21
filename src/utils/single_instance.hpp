@@ -25,6 +25,7 @@
 #include <QByteArray>
 #include <QString>
 #include <QFile>
+#include <QDir>
 #include <QLockFile>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -57,7 +58,37 @@ namespace utils
 			private:
 				std::function< void() > m_function ;
 			} ;
-		}
+
+			template< typename Args >
+			auto engineLockPath( const Args& args,int ) -> decltype( args.ePaths.socketLockPath() )
+			{
+				return args.ePaths.socketLockPath() ;
+			}
+
+			template< typename Args >
+			QString engineLockPath( const Args&,long )
+			{
+				return QString() ;
+			}
+
+			inline QString fallbackLockPath( const QString& socketPath )
+			{
+				if( socketPath.startsWith( "\\\\.\\pipe\\" ) || socketPath.startsWith( "//./pipe/" ) ){
+					return QDir::tempPath() + "/MediaDownloaderIPC.lock" ;
+				}
+				return socketPath + ".lock" ;
+			}
+
+			template< typename Args >
+			QString lockPath( const Args& args,const QString& socketPath )
+			{
+				const auto fromEngine = engineLockPath( args,0 ) ;
+				if( !fromEngine.isEmpty() ){
+					return fromEngine ;
+				}
+				return fallbackLockPath( socketPath ) ;
+			}
+		} ;
 		template< typename Type,typename TypeArgs >
 		struct appInfo
 		{
@@ -123,7 +154,7 @@ namespace utils
 				m_info( std::move( info ) ),
 				m_iargs( std::move( iargs ) ),
 				m_exec( [ this ](){ this->run() ; } ),
-				m_lockFile( m_info.socketPath + ".lock" )
+				m_lockFile( details::lockPath( m_info.args,m_info.socketPath ) )
 			{
 				m_lockFile.setStaleLockTime( 30000 ) ;
 				// The primary owns this lock for its entire lifetime. Failure
