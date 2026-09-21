@@ -23,6 +23,8 @@
 #include "context.hpp"
 #include <QString>
 #include <QStringList>
+#include <QByteArray>
+#include <QList>
 #include <QDir>
 
 #include "settings.h"
@@ -101,7 +103,9 @@ private:
 	void cxMenuRequested( QPoint ) ;
 	void arrangeAndShow() ;
 	void arrangeEntries( int ) ;
-	void showContents( const QString& ) ;
+	void showContents( const QString&,const QByteArray& nativePath = {} ) ;
+	QByteArray nativeNameAt( int row ) const ;
+	QByteArray nativePathAt( int row ) const ;
 	void moveUp() ;
 	void addItem( const directoryEntries::iter& ) ;
 	const Context& m_ctx ;
@@ -118,10 +122,16 @@ private:
 	tableMiniWidget< directoryEntries::ICON,2 > m_table ;
 	QString m_downloadFolder ;
 	QString m_currentPath ;
+	// Display paths remain QString, but POSIX filesystem authority is carried
+	// independently as native bytes so undecodable names never round-trip
+	// through Unicode before open/rename/delete/navigation.
+	QByteArray m_downloadNativePath ;
+	QByteArray m_currentNativePath ;
 	// Confirmation actions are bound to this immutable view/identity snapshot,
 	// never to the table's mutable current row at confirmation time.
 	QString m_pendingActionDirectory ;
 	QStringList m_pendingActionNames ;
+	QList< QByteArray > m_pendingActionNativeNames ;
 	QPixmap m_folderIcon ;
 	QPixmap m_videoIcon ;
 	directoryEntries m_directoryEntries ;
