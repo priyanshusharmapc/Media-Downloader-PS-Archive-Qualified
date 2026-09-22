@@ -26,7 +26,7 @@ The compact JSON and `current-release.json` record the repository, exact commit,
 
 A release for a commit is append-once from the qualification workflow's perspective. The workflow never uses an overwrite/clobber operation for existing qualification assets. On a rerun it downloads existing assets, verifies that identity matches the commit and that the ZIP hashes to the recorded SHA-256, and succeeds only when those checks match.
 
-Current product Release `qualification-bb949284c15a2ce1128e94d41a931fe407358e64` (`C_main` / `R_main` `35613369266`) must not be retagged or clobbered. Sibling `qualification-77caa99e421ce6d9476d02c3d34c927d963b2528` is not the gold product.
+Historical product Release `qualification-bb949284c15a2ce1128e94d41a931fe407358e64` must not be retagged or clobbered. Every later candidate has its own immutable `qualification-<full-source-commit>` release. A release is not Gold merely because its CI qualification succeeded.
 
 ## Retention
 
@@ -38,7 +38,7 @@ Qualification release assets are retained until an explicit repository release d
 
 The historical record is preserved for provenance. It must not be used as current-candidate evidence. Historical `4c720544` / run `35116148963` is not current qualification.
 
-The qualified product commit is `bb949284c15a2ce1128e94d41a931fe407358e64`. GitHub Release `qualification-bb949284c15a2ce1128e94d41a931fe407358e64` holds the portable ZIP (`payload_sha256=8704235825ab2b5f9a3c6fe5eadd052ec08402214f7225d3e040b94f6b0e1cfd`) from run `35613369266`. Commit `77caa99e421ce6d9476d02c3d34c927d963b2528` is a verifier-only follow-up (`GH_REPO` on the ubuntu publisher). Sibling Release `qualification-77caa99e421ce6d9476d02c3d34c927d963b2528` is not the gold product. Gold 4 (endurance and low-memory) is **paused**: `GOLD-4-PAUSED-LOWMEM` (no cmake/ninja/Qt on the L16 host) and `GOLD-4-PAUSED-ENDURANCE` (no operator PlaylistUrl/VideoUrl). This is not a complete gold-state release.
+The current candidate is always resolved from the latest commit-specific GitHub Release and its `current-release.json`. Historical `bb949284...`, verifier `77caa99...`, documentation `659f6bb...` and operational baseline `53e9c845...` remain separate provenance records. Gold status requires the repository-defined mandatory gates and is not implied by ordinary CI qualification.
 
 ## Validation
 

@@ -1,8 +1,8 @@
 # Media Downloader PS Archive Mode
 
-The qualified product commit is `bb949284c15a2ce1128e94d41a931fe407358e64`. GitHub Release `qualification-bb949284c15a2ce1128e94d41a931fe407358e64` holds the portable ZIP (`payload_sha256=8704235825ab2b5f9a3c6fe5eadd052ec08402214f7225d3e040b94f6b0e1cfd`) from run `35613369266`. Commit `77caa99e421ce6d9476d02c3d34c927d963b2528` is a verifier-only follow-up (`GH_REPO` on the ubuntu publisher). Sibling Release `qualification-77caa99e421ce6d9476d02c3d34c927d963b2528` is not the gold product. Gold 4 (endurance and low-memory) is **paused**: `GOLD-4-PAUSED-LOWMEM` (no cmake/ninja/Qt on the L16 host) and `GOLD-4-PAUSED-ENDURANCE` (no operator PlaylistUrl/VideoUrl). This is not a complete gold-state release.
+The current qualification release is resolved from the latest commit-specific GitHub Release named `qualification-<full-source-commit>`, whose `current-release.json` binds the exact source commit, workflow run, package and SHA-256. The historical documented product is `bb949284c15a2ce1128e94d41a931fe407358e64`, released as `qualification-bb949284c15a2ce1128e94d41a931fe407358e64`. The latest operational baseline at this normalization is `53e9c8458298ba3396031f2342fd9f4807559311`, released as `qualification-53e9c8458298ba3396031f2342fd9f4807559311`. Neither identity is a Gold product until all mandatory Gold gates pass.
 
-A later documentation commit on `main` is not the product. Do not retag `qualification-bb949284c15a2ce1128e94d41a931fe407358e64`.
+Historical releases must not be retagged or clobbered. A later documentation, verifier or qualification commit is a new candidate when it changes the source tree.
 
 The portable application directory is sealed and should not be modified. Archive Root is separate writable operator data. The GUI initializes Archive Root automatically; CLI or scripted use may run `archive-cli.exe preflight <archive-root>` before the first operation.
 

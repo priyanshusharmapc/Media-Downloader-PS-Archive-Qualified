@@ -1,5 +1,11 @@
 # GOLD-STATE EXECUTION PLAN
 
+> Bootstrap facts and packet history in this document are execution records,
+> not a permanent current-release identity. Resolve the live candidate from
+> the latest commit-specific GitHub Release and `current-release.json` before
+> taking any action. Historical SHAs in the packet history must not be
+> treated as the current candidate.
+
 Document status: planning artifact only. Not qualification evidence. Not a release claim.
 Author role: Grok 4.6 High (architect / planner / orchestrator).
 Executor role after this plan is accepted: Luna Max 5.6 under Grok review gates.

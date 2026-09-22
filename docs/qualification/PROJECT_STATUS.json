@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "repository": "priyanshusharmapc/Media-Downloader-PS-Archive-Qualified",
+  "historical_product": {
+    "commit": "bb949284c15a2ce1128e94d41a931fe407358e64",
+    "release": "qualification-bb949284c15a2ce1128e94d41a931fe407358e64",
+    "status": "historical"
+  },
+  "operational_baseline": {
+    "commit": "53e9c8458298ba3396031f2342fd9f4807559311",
+    "release": "qualification-53e9c8458298ba3396031f2342fd9f4807559311",
+    "run_id": "35652404033",
+    "payload_sha256": "0a3ae5de8f9f38bc8bd1d1e123007737c0824ce049f204a105e8e6311381965c",
+    "status": "current_operational_baseline"
+  },
+  "current_qualification_release": {
+    "resolution": "latest qualification-<full-source-commit> GitHub Release for main",
+    "commit": null,
+    "release": null,
+    "run_id": null,
+    "payload_sha256": null
+  },
+  "gold_candidate": null,
+  "gold_product": null,
+  "gold": false,
+  "audit2": {
+    "tail": "MDPS-AUDIT2-251",
+    "source_remediation": "claimed_complete",
+    "qualification": "in_progress",
+    "formal_closure": false
+  },
+  "qualification": {
+    "linux": "PASS_ON_OPERATIONAL_BASELINE",
+    "windows": "PASS_ON_OPERATIONAL_BASELINE",
+    "sanitizer": "PASS_ON_OPERATIONAL_BASELINE",
+    "portable_package": "PASS_ON_OPERATIONAL_BASELINE",
+    "real_provider_endurance": "NOT_RUN_FOR_CURRENT_FINAL_CANDIDATE",
+    "constrained_resource": "NOT_RUN_FOR_CURRENT_FINAL_CANDIDATE",
+    "target_host": "NOT_RUN_FOR_CURRENT_FINAL_CANDIDATE",
+    "clean_machine_uat": "NOT_RUN"
+  },
+  "known_release_blockers": null,
+  "known_non_blocking_limitations": [
+    "Current operational baseline documentation is being normalized before final candidate freeze.",
+    "Formal current-candidate provider endurance, constrained-resource, target-host and clean-machine evidence is not yet present."
+  ]
+}
