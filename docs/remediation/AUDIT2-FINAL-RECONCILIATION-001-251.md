@@ -1,7 +1,8 @@
 # Audit2 Final Reconciliation Index
 
 This document is the source-remediation reconciliation index for the complete
-Audit2 numeric range. It does not close Audit2 and it does not replace the
+Audit2 numeric range. Audit2 is now formally closed at the frozen C_final Gold
+baseline under Final Release Policy v2. This document does not replace the
 immutable GitHub issue #2 evidence ledger.
 
 ## Scope and accounting
@@ -62,10 +63,19 @@ commit mapping that the existing ledger did not record per identifier.
 | 250 | Confirmed at discovery; remediation integrated | `9b80c3bfda72d31cd4c594274f43029737329276` and final bundle `4f6bf2e` | `post-remediation-249-251-policy-tests.py` | Updater extraction and activation are bounded and verified |
 | 251 | Confirmed at discovery; remediation integrated | `3bdb2c3fa0ef732e93f67ba3b9d1f9018065e9ba` and related native-identity commits | `post-remediation-249-251-policy-tests.py`, `tests/library-posix-native-filename-tests.cpp` | Raw POSIX filename identity is preserved through asynchronous Library operations |
 
-## Current disposition
+## Final disposition
 
-The source tree and current qualification run support the repository claim that
-Audit2 source remediation is integrated through `251`. The immutable ledger
-does not itself encode final disposition, and the detailed reconciliation for
-226-248 is grouped rather than individually mapped to source commits. Audit2
-therefore remains formally open pending final release closure.
+The source tree and final qualification evidence support the repository claim that Audit2 source remediation is integrated through `251`.
+
+Audit2 is formally closed under Final Release Policy v2 at:
+
+- C_final: `2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- release: `qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- qualification run: `35679575106`
+- package SHA-256: `c11f21de897db6f3727fdfc8c3bdd585cd1979530864c586df824d5d8b38dd07`
+- issue #2: CLOSED / completed
+- issue #3: CLOSED / completed
+
+Q25 remains BLOCKED / advisory with archive safety PASS. Q26 remains BLOCKED / advisory. Q27 is PASS / mandatory. These results are preserved without reinterpretation.
+
+Future defects belong to post-release maintenance or a new audit generation.

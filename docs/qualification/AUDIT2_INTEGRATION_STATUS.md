@@ -1,44 +1,63 @@
-# Audit2 canonical integration status
+# Audit2 Final Integration and Closure Status
 
-## Canonical source of truth
+> **FINAL STATE.** Final Release Policy v2 is authoritative and is documented in GitHub issue #219 and `docs/qualification/FINAL_RELEASE_POLICY_V2.md`.
 
-- Evidence ledger: GitHub issue #2
-- Coordination ledger: GitHub issue #3
-- Ledger tail at this integration: `MDPS-AUDIT2-251`
-- Integration base: `audit2-remediation`
-- Canonical combined pull request: #213 (merged)
-- Canonical working branch until qualification and merge: `audit2-remediation-all-251`
-- Historical qualified product commit: `bb949284c15a2ce1128e94d41a931fe407358e64`
-- Current operational baseline: `53e9c8458298ba3396031f2342fd9f4807559311`
-- Final candidate: unresolved until pre-freeze normalization and baseline qualification complete.
-- `main` is not rewritten. Every later source candidate has its own commit-specific qualification release.
+## Final product baseline
 
-Older remediation branches are historical inputs only. The 226-248 branch is a strict subset of the combined branch; the 204-225, pre-final, and conflict-reconciliation branches are behind `audit2-remediation`.
+- `C_final`: `2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Qualification run: `35679575106`
+- Release: `qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Portable ZIP: `Media-Downloader-PS-Windows-Qt6-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2.zip`
+- ZIP SHA-256: `c11f21de897db6f3727fdfc8c3bdd585cd1979530864c586df824d5d8b38dd07`
+- Release level: **GOLD under Release Policy v2**
 
-## Product identity (gold incomplete)
+A later documentation-only/control-plane commit is not a new product candidate.
 
-The current product identity is resolved from the latest commit-specific GitHub Release and its `current-release.json`. Historical product `bb949284...` and operational baseline `53e9c845...` remain explicitly distinguished. Gold is unset; endurance, constrained-resource, target-host and final-candidate qualification remain separate gate states.
+## Audit2 closure
 
-## Final integration hardening
+- Evidence ledger: GitHub issue #2, CLOSED / completed
+- Coordination ledger: GitHub issue #3, CLOSED / completed
+- Canonical tail: `MDPS-AUDIT2-251`
+- Explicit retractions: `068`, `146`, `163`
+- Non-retracted numeric IDs: 248
+- Retained historical collision records: 2
+- Legitimate non-retracted technical records: 250
+- Combined remediation PR: #213, merged
+- Open remediation PRs: 0
+- Source remediation: COMPLETE
+- Formal closure: **true**
 
-The combined branch preserves prior audit2 remediation and adds the final cross-cutting fixes required before qualification:
+Original finding comments remain immutable historical evidence.
 
-1. POSIX Library destructive operations resolve every path component descriptor-relatively using `openat` and `O_NOFOLLOW`.
-2. Selected deletion checks cancellation before resolution and immediately before mutation.
-3. Delete All confirmation captures and passes the exact native directory identity shown to the user.
-4. Component SHA-256 verification normalizes the explicit `sha256:` prefix at the download trust boundary.
-5. QuickJS and svtplay-dl update actions are disabled until their upstream metadata can provide trusted SHA-256 values.
-6. Archive-folder normalization receives the original release asset filename rather than the randomized private download filename.
-7. Unix single-instance startup keeps the ownership lock for the primary lifetime. Socket cleanup requires stale-class failure, successful lock acquisition, and a verification probe.
-8. Policy files are valid Python and qualification compiles the complete test tree before build/test execution.
-9. Runtime POSIX regression coverage includes invalid-byte display collisions, confirmation-bound Delete All, cancel-before-worker, and intermediate symlink substitution.
+## Final mandatory qualification
 
-## Qualification and Actions storage policy
+- Linux: PASS
+- Linux tests: 205 passed
+- Linux sanitizer: PASS
+- Windows: PASS
+- Windows tests: 204 passed
+- Portable package: PASS
+- CLI preflight: PASS
+- GUI launch: PASS
+- Packaged yt-dlp / FFmpeg / FFprobe: PASS
+- Real-media smoke: PASS
+- Package immutability: PASS
+- Release publication: PASS
+- Tag verification: PASS
+- Payload digest verification: PASS
+- Actions artifact/cache cleanup: PASS
+- Q27 target-host qualification: PASS / mandatory
 
-Source inspection is not integration. Product qualification for `C_main` is Archive Qt6 push run `35613369266` (`R_main`) with real Linux and Windows steps. That is not a runner-allocation or empty-step record.
+## Advisory qualification
 
-Actions artifacts and caches are ephemeral. The workflow does not upload source tarballs, Qt package caches, portable trees, or test-output archives. The final GC job deletes repository Actions artifacts and caches after every same-repository run, including failure/cancel paths. Repositories, branches, tags, commits, issues, pull requests, and GitHub Releases are never GC targets.
+Q25 and Q26 remain factual BLOCKED results. Release Policy v2 changes only their gate criticality.
 
-For each qualified product candidate, durable identity is its own GitHub Release `qualification-<full-source-commit>`. Releases record the exact commit and workflow run and are never deleted by Actions GC. Existing releases must not be retagged or clobbered.
+- Q25 provider endurance: BLOCKED / advisory
+- Q25 archive safety under incomplete discovery: PASS
+- Q26 constrained-resource qualification: BLOCKED / advisory
 
-Issue #3 records `C_main`, `R_main`, and gold-4 paused. This is not a complete gold-state release.
+Neither is represented as PASS.
+
+## Final disposition
+
+Audit2 is closed at the frozen C_final Gold baseline under Release Policy v2. Future defects or enhancements belong to post-release maintenance or a new audit generation.

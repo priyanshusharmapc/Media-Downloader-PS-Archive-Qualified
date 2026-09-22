@@ -1,47 +1,45 @@
-# Publication qualification identity
+# Publication Qualification Identity
 
-This document describes how a **current** candidate is qualified and how its evidence is published durably. It does not reuse the historical release-ready claim as evidence for a newer commit.
+## Frozen final product
 
-## Current candidate identity
+The final product identity for this completed release generation is:
 
-The current qualification release is the latest commit-specific GitHub Release named `qualification-<full-source-commit>`. Its `current-release.json` is the authoritative binding for the exact source commit, workflow run, package and SHA-256. Historical documented product `bb949284c15a2ce1128e94d41a931fe407358e64` and operational baseline `53e9c8458298ba3396031f2342fd9f4807559311` are preserved as provenance; neither is called Gold by this document.
+- Commit: `2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Qualification run: `35679575106`
+- Release: `qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Payload: `Media-Downloader-PS-Windows-Qt6-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2.zip`
+- Payload SHA-256: `c11f21de897db6f3727fdfc8c3bdd585cd1979530864c586df824d5d8b38dd07`
+- Release level: **GOLD under Final Release Policy v2**
 
-Do not retag or clobber any existing qualification release. A new source commit receives a new commit-specific release.
+The final policy is recorded in GitHub issue #219 and `FINAL_RELEASE_POLICY_V2.md`.
 
-For every candidate, GitHub Actions generates `current-release.json` beside the qualified Windows payload. That generated record binds:
-
-- repository
-- Git ref
-- exact source commit
-- GitHub Actions run ID and attempt
-- artifact name
-- payload ZIP name
-- SHA-256 of that exact payload ZIP
-
-The workflow validates those fields against GitHub's runtime identity before upload.
+A later documentation-only/control-plane commit is not the product.
 
 ## Durable qualification evidence
 
-Ordinary GitHub Actions artifacts are useful working evidence but have finite retention and are **not** the durable publication record.
+The commit-specific release contains:
 
-A successful qualification push to `main` must also complete the `publish-qualification-evidence` job. That job verifies a commit-specific GitHub Release tagged:
+- `qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2.json`
+- `Media-Downloader-PS-Windows-Qt6-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2.zip`
+- `current-release.json`
 
-`qualification-<full-source-commit>`
+`current-release.json` binds the exact source commit, workflow run, payload filename and SHA-256. The release/tag and payload digest were verified during run `35679575106`.
 
-The release contains these top-level assets (no second evidence zip):
+The qualification workflow does not use ordinary Actions artifacts as the durable publication record.
 
-- compact JSON `qualification-<full-source-commit>.json` — repository, commit, workflow run/attempt, linux/windows success flags
-- portable ZIP `Media-Downloader-PS-Windows-Qt6-<full-source-commit>.zip`
-- `current-release.json` — payload SHA-256 and run identity
+## Final gate state
 
-The Windows job is the single `gh release create` writer. The ubuntu `publish-qualification-evidence` job verifies tag peel, required assets, and `payload_sha256`. The publisher is fail-closed. If assets for the same commit already exist, a rerun verifies the existing identity and ZIP digest and does not overwrite them. A differing existing object fails publication.
+Mandatory baseline Linux/Windows/package/release-integrity gates passed.
 
-A candidate is not durably qualified merely because PR CI or an integration-branch workflow is green. Durable publication requires the successful commit-specific release job above.
+- Q27: PASS / mandatory
+- Q25 provider endurance: BLOCKED / advisory
+- Q25 archive safety: PASS
+- Q26 constrained-resource: BLOCKED / advisory
 
-See `EVIDENCE_POLICY.md` for the publication/retention contract.
+Q25 and Q26 are not PASS. Final Release Policy v2 makes them non-blocking for this release generation.
 
-## Historical record
+## Historical boundary
 
-The pre-publication qualification record is preserved at `history/RELEASE_QUALIFICATION_REPORT-4c720544.md`. Historical `4c720544` / run `35116148963` is not current qualification. The historical record is not evidence for a current candidate.
+Earlier release and qualification records are retained for provenance. They do not supersede C_final and must not be used to infer a different final product identity.
 
-No current qualification claim may cite unavailable historical local evidence paths as if they were directly inspectable publication evidence.
+Do not retag, clobber or rebuild the frozen final package merely to update documentation.

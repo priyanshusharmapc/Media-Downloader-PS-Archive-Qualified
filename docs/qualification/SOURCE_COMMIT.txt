@@ -1,5 +1,9 @@
-GENERATED_BY_QUALIFICATION_WORKFLOW
-Resolve the current candidate from current-release.json on the latest product GitHub Release tagged qualification-<full-source-commit>.
-This file is a workflow pointer, not a hardcoded source identity.
-Historical source identity is preserved under docs/qualification/history/.
-Gold product remains unset until every mandatory Gold gate passes.
+FINAL_PRODUCT_BASELINE=2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2
+FINAL_PRODUCT_RELEASE=qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2
+FINAL_PRODUCT_RUN=35679575106
+FINAL_PRODUCT_PACKAGE=Media-Downloader-PS-Windows-Qt6-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2.zip
+FINAL_PRODUCT_SHA256=c11f21de897db6f3727fdfc8c3bdd585cd1979530864c586df824d5d8b38dd07
+RELEASE_POLICY=v2
+RELEASE_LEVEL=GOLD
+POLICY_AUTHORITY=GitHub issue #219 and docs/qualification/FINAL_RELEASE_POLICY_V2.md
+NOTE=Later documentation-only/control-plane commits do not supersede this frozen product baseline.

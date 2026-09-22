@@ -1,28 +1,44 @@
 # Media Downloader PS Archive Mode
 
-The current qualification release is resolved from the latest commit-specific GitHub Release named `qualification-<full-source-commit>`, whose `current-release.json` binds the exact source commit, workflow run, package and SHA-256. The historical documented product is `bb949284c15a2ce1128e94d41a931fe407358e64`, released as `qualification-bb949284c15a2ce1128e94d41a931fe407358e64`. The latest operational baseline at this normalization is `53e9c8458298ba3396031f2342fd9f4807559311`, released as `qualification-53e9c8458298ba3396031f2342fd9f4807559311`. Neither identity is a Gold product until all mandatory Gold gates pass.
+## Final release identity
 
-Historical releases must not be retagged or clobbered. A later documentation, verifier or qualification commit is a new candidate when it changes the source tree.
+Frozen product baseline:
+
+- Commit: `2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Qualification run: `35679575106`
+- Release: `qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Portable ZIP SHA-256: `c11f21de897db6f3727fdfc8c3bdd585cd1979530864c586df824d5d8b38dd07`
+- Release level: **GOLD under Final Release Policy v2**
+
+Final Release Policy v2 is documented in GitHub issue #219 and `FINAL_RELEASE_POLICY_V2.md`.
+
+A later documentation-only/control-plane commit on `main` does not supersede this product identity.
+
+## Qualification status
+
+Mandatory gates passed, including Linux, Windows, sanitizer, portable package, packaged runtime, release identity verification, and Q27 target-host acceptance.
+
+- Q25 provider endurance: BLOCKED / advisory
+- Q25 archive safety: PASS
+- Q26 constrained-resource qualification: BLOCKED / advisory
+- Q27 target-host qualification: PASS / mandatory
+
+Q25 and Q26 are not PASS.
+
+Audit2 is formally closed at tail `MDPS-AUDIT2-251`.
+
+## Product use
 
 The portable application directory is sealed and should not be modified. Archive Root is separate writable operator data. The GUI initializes Archive Root automatically; CLI or scripted use may run `archive-cli.exe preflight <archive-root>` before the first operation.
 
-The portable manifest is sealed. The GitHub Release named above identifies the exact package, source and CI run selected for this product.
+Security includes traversal, symlink, junction and reparse-point rejection.
 
-Security includes traversal, symlink, junction and reparse-point rejection. The project license and third-party notices remain part of the source/package distribution.
+## Qualification documents
 
-## Contents
-
-- `INSTALLATION_AND_USER_GUIDE.md`
-- `ARCHIVE_MODE_AND_STATE.md`
-- `RECOVERY_BACKUP_SECURITY.md`
+- `FINAL_RELEASE_POLICY_V2.md`
+- `PROJECT_STATUS.json`
 - `TESTING_QUALIFICATION.md`
-- `SOURCE_MAP.md`
+- `RELEASE_QUALIFICATION_REPORT.md`
 - `RELEASE_NOTES.md`
-- `AUDIT_REMEDIATION.md`
-
-## References
-
-- https://github.com/priyanshusharmapc/Media-Downloader-PS
-- https://github.com/yt-dlp/yt-dlp
-- https://ffmpeg.org/legal.html
-- https://www.qt.io/licensing/
+- `EVIDENCE_POLICY.md`
+- `AUDIT2_INTEGRATION_STATUS.md`

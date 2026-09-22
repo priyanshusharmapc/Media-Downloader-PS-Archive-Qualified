@@ -2,44 +2,66 @@
 
 ## Purpose
 
-Release qualification must remain independently auditable after ordinary CI artifacts expire. A green workflow run by itself is not a durable evidence publication mechanism.
+Release qualification must remain independently auditable after ordinary CI artifacts expire. A green workflow run by itself is not the durable release record.
+
+## Final product identity
+
+The frozen product for the completed release generation is:
+
+- `2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- `qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- qualification run `35679575106`
+- payload SHA-256 `c11f21de897db6f3727fdfc8c3bdd585cd1979530864c586df824d5d8b38dd07`
+
+Final Release Policy v2 is authoritative for release-level gate interpretation. See GitHub issue #219 and `FINAL_RELEASE_POLICY_V2.md`.
+
+A later documentation-only/control-plane commit does not become a new product candidate merely because it is newer than C_final.
 
 ## Evidence classes
 
-1. **Committed evidence**: source, tests, workflow definitions and qualification policy stored in this repository.
-2. **Transient CI evidence**: Actions logs and ordinary workflow artifacts. These support development and integration but are not the long-term release record.
-3. **Durable release evidence**: a commit-specific GitHub Release created only after successful `main` qualification. Compact JSON, the portable ZIP, and `current-release.json` bind identity.
+1. **Committed evidence**: source, tests, workflow definitions and policy stored in the repository.
+2. **Transient CI evidence**: Actions logs and ephemeral runner state.
+3. **Durable release evidence**: the commit-specific GitHub Release, compact qualification JSON, portable ZIP and `current-release.json`.
+4. **Control-plane policy evidence**: owner-approved release-policy records, including issue #219 and the in-repository Policy v2 document.
 
 ## Durable release identity
 
-The release tag is `qualification-<full-source-commit>`.
+Qualification releases use `qualification-<full-source-commit>`.
 
-Required top-level assets are compact JSON, the portable ZIP, and `current-release.json`:
+Required top-level assets are:
 
 - `qualification-<full-source-commit>.json`
 - `Media-Downloader-PS-Windows-Qt6-<full-source-commit>.zip`
 - `current-release.json`
 
-Do not require a second evidence zip. Inside the portable ZIP: `SHA256SUMS.txt`, `PORTABLE_MANIFEST.txt`, `RUNTIME_VERSIONS.txt`, `build-identity.json`, both executables, and bundled tools.
+Inside the portable ZIP, sealed identity/runtime records include `SHA256SUMS.txt`, `PORTABLE_MANIFEST.txt`, `RUNTIME_VERSIONS.txt` and `build-identity.json`.
 
-The compact JSON and `current-release.json` record the repository, exact commit, Actions run ID and attempt, release tag, payload filename, SHA-256 digest and retention statement.
+Qualification releases are append-once from the qualification workflow's perspective. Existing release objects must not be retagged or clobbered.
 
-A release for a commit is append-once from the qualification workflow's perspective. The workflow never uses an overwrite/clobber operation for existing qualification assets. On a rerun it downloads existing assets, verifies that identity matches the commit and that the ZIP hashes to the recorded SHA-256, and succeeds only when those checks match.
+## Final gate interpretation
 
-Historical product Release `qualification-bb949284c15a2ce1128e94d41a931fe407358e64` must not be retagged or clobbered. Every later candidate has its own immutable `qualification-<full-source-commit>` release. A release is not Gold merely because its CI qualification succeeded.
+Ordinary CI qualification alone does not imply Gold. Gold is determined by the current controlling release policy.
+
+Under Final Release Policy v2:
+
+- Q25 real-provider endurance is advisory/non-blocking and currently BLOCKED;
+- Q25 archive safety under incomplete discovery is PASS;
+- Q26 constrained-resource qualification is advisory/non-blocking and currently BLOCKED;
+- Q27 target-host media qualification is mandatory and PASS;
+- all other mandatory baseline release gates passed.
+
+The factual Q25/Q26 results are preserved. Only gate criticality changed.
 
 ## Retention
 
-Qualification release assets are retained until an explicit repository release deletion. They are not governed by ordinary Actions artifact expiry. Deleting a qualification release removes durable evidence and therefore invalidates any release-readiness statement that depends on it until equivalent evidence is republished and requalified.
+Qualification release assets are retained until explicit release deletion. Deleting a relied-upon qualification release invalidates the durable evidence chain until equivalent evidence is restored and requalified.
 
 ## Historical evidence boundary
 
-`history/RELEASE_QUALIFICATION_REPORT-4c720544.md` is a historical record. Local evidence objects from that earlier qualification environment are not present in this publication repository and must be treated as **unavailable for direct independent inspection** unless separately supplied by their custodian.
+Historical `4c720544`, `bb949284`, `77caa99`, `659f6bb` and `53e9c845` records remain provenance. They are not the final product baseline for this release generation.
 
-The historical record is preserved for provenance. It must not be used as current-candidate evidence. Historical `4c720544` / run `35116148963` is not current qualification.
+Historical planning documents may contain superseded Gold-gate requirements and must be read as historical when they conflict with Final Release Policy v2.
 
-The current candidate is always resolved from the latest commit-specific GitHub Release and its `current-release.json`. Historical `bb949284...`, verifier `77caa99...`, documentation `659f6bb...` and operational baseline `53e9c845...` remain separate provenance records. Gold status requires the repository-defined mandatory gates and is not implied by ordinary CI qualification.
+## Resolution rule
 
-## Validation
-
-`scripts/validate-qualification-publication.py` runs in CI. It fails when the current report regresses to dangling local evidence references, when the historical availability warning disappears, or when the durable-release workflow contract is removed.
+Current product identity is resolved from the explicit frozen C_final baseline and its commit-specific release, not from the newest documentation-only commit on `main`.

@@ -1,11 +1,55 @@
 # Testing And Qualification
 
-Qualification always applies to the exact commit named by the current commit-specific GitHub Release. The historical documented product was `bb949284c15a2ce1128e94d41a931fe407358e64`; the current operational baseline before final-candidate normalization is `53e9c8458298ba3396031f2342fd9f4807559311`. Gold remains unset until every mandatory Gold gate passes.
+## Final qualification identity
 
-The latest operational baseline was qualified by Archive Qt6 push run `35652404033` on `53e9c8458298ba3396031f2342fd9f4807559311`; Linux, Windows, sanitizer, packaged runtime, release publication and verification all succeeded. Earlier `bb949284...`, `77caa99...` and `659f6bb...` records remain historical candidate records and are not silently promoted to the final candidate.
+Qualification for the completed release generation is bound to:
 
-The media suite uses real FFmpeg-generated fast-start MP4/M4A fixtures. Metadata-readable truncation is rejected, corrupted canonical media is repaired by sync, valid media passes, and full stream consumption is required.
+- Product commit: `2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Run: `35679575106`
+- Release: `qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Package SHA-256: `c11f21de897db6f3727fdfc8c3bdd585cd1979530864c586df824d5d8b38dd07`
 
-CI YouTube discovery remains advisory (`exit 0`) and is not endurance evidence. Historical `4c720544` / run `35116148963` numbers are not current qualification.
+Release level is **GOLD under Final Release Policy v2**.
 
-`GOLD-4-PAUSED-LOWMEM` and `GOLD-4-PAUSED-ENDURANCE` are operator gaps, not PASS. A 60-minute identity-bound endurance run and serial low-memory CTest were not executed for this product. Any unavailable provider or host-specific operation is recorded as blocked, not inferred as PASS.
+## Mandatory results
+
+- Linux: PASS
+- Linux CTest: 205 passed
+- Linux sanitizer: PASS
+- Windows: PASS
+- Windows CTest: 204 passed
+- Portable package: PASS
+- CLI preflight: PASS
+- GUI launch: PASS
+- Packaged yt-dlp / FFmpeg / FFprobe: PASS
+- Real-media smoke: PASS
+- Package immutability: PASS
+- Release publication: PASS
+- Tag verification: PASS
+- Payload digest verification: PASS
+- Actions artifact/cache cleanup: PASS
+- Q27 target-host media qualification: PASS
+
+The jobs executed real product/test steps.
+
+## Advisory results
+
+Final Release Policy v2 makes Q25 and Q26 advisory/non-blocking:
+
+- Q25 provider endurance: BLOCKED
+- Q25 archive safety under incomplete discovery: PASS
+- Q26 constrained-resource qualification: BLOCKED
+
+Neither advisory gate is represented as PASS.
+
+The Q25 run requested 60 minutes but stopped after approximately 7 minutes / 75 iterations when provider discovery became incomplete. MDH failed closed and disabled removal inference.
+
+The Q26 attempt could not establish the declared symlink-capable environment on the available Windows 11 host.
+
+## Test interpretation
+
+Policy/static tests and executable behavioral tests are distinct evidence classes. The final CI also exercised real packaged runtime behavior, while Q27 provided exact-package target-host acceptance.
+
+Historical `4c720544`, `bb949284`, `77caa99`, `659f6bb` and `53e9c845` evidence remains provenance and must not be silently substituted for final C_final evidence.
+
+See `FINAL_RELEASE_POLICY_V2.md` for the controlling gate definition.

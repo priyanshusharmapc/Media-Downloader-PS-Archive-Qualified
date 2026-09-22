@@ -1,47 +1,63 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "repository": "priyanshusharmapc/Media-Downloader-PS-Archive-Qualified",
-  "historical_product": {
-    "commit": "bb949284c15a2ce1128e94d41a931fe407358e64",
-    "release": "qualification-bb949284c15a2ce1128e94d41a931fe407358e64",
-    "status": "historical"
+  "product_baseline": {
+    "commit": "2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2",
+    "release": "qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2",
+    "qualification_run": 35679575106,
+    "package": "Media-Downloader-PS-Windows-Qt6-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2.zip",
+    "package_size": 191282972,
+    "package_sha256": "c11f21de897db6f3727fdfc8c3bdd585cd1979530864c586df824d5d8b38dd07",
+    "frozen": true
   },
-  "operational_baseline": {
-    "commit": "53e9c8458298ba3396031f2342fd9f4807559311",
-    "release": "qualification-53e9c8458298ba3396031f2342fd9f4807559311",
-    "run_id": "35652404033",
-    "payload_sha256": "0a3ae5de8f9f38bc8bd1d1e123007737c0824ce049f204a105e8e6311381965c",
-    "status": "current_operational_baseline"
+  "release_policy": {
+    "version": 2,
+    "authority": "GitHub issue #219 and docs/qualification/FINAL_RELEASE_POLICY_V2.md",
+    "status": "FINAL_SUPERSEDING"
   },
-  "current_qualification_release": {
-    "resolution": "latest qualification-<full-source-commit> GitHub Release for main",
-    "commit": null,
-    "release": null,
-    "run_id": null,
-    "payload_sha256": null
+  "release_level": "GOLD",
+  "gold": true,
+  "qualification": {
+    "baseline": "PASS",
+    "linux": "PASS",
+    "linux_tests": 205,
+    "linux_sanitizer": "PASS",
+    "windows": "PASS",
+    "windows_tests": 204,
+    "portable_package": "PASS",
+    "gui_launch": "PASS",
+    "packaged_runtime": "PASS",
+    "release_publication": "PASS",
+    "tag_verification": "PASS",
+    "payload_digest_verification": "PASS",
+    "q25": {
+      "criticality": "ADVISORY",
+      "result": "BLOCKED",
+      "archive_safety": "PASS"
+    },
+    "q26": {
+      "criticality": "ADVISORY",
+      "result": "BLOCKED"
+    },
+    "q27": {
+      "criticality": "MANDATORY",
+      "result": "PASS"
+    }
   },
-  "gold_candidate": null,
-  "gold_product": null,
-  "gold": false,
   "audit2": {
     "tail": "MDPS-AUDIT2-251",
-    "source_remediation": "claimed_complete",
-    "qualification": "in_progress",
-    "formal_closure": false
+    "issue_2": "CLOSED",
+    "issue_3": "CLOSED",
+    "source_remediation": "COMPLETE",
+    "formal_closure": true,
+    "open_remediation_prs": 0
   },
-  "qualification": {
-    "linux": "PASS_ON_OPERATIONAL_BASELINE",
-    "windows": "PASS_ON_OPERATIONAL_BASELINE",
-    "sanitizer": "PASS_ON_OPERATIONAL_BASELINE",
-    "portable_package": "PASS_ON_OPERATIONAL_BASELINE",
-    "real_provider_endurance": "NOT_RUN_FOR_CURRENT_FINAL_CANDIDATE",
-    "constrained_resource": "NOT_RUN_FOR_CURRENT_FINAL_CANDIDATE",
-    "target_host": "NOT_RUN_FOR_CURRENT_FINAL_CANDIDATE",
-    "clean_machine_uat": "NOT_RUN"
-  },
-  "known_release_blockers": null,
+  "known_release_blocking_product_defects": 0,
+  "further_execution_required": false,
+  "post_release_documentation_rule": "Documentation-only/control-plane commits after C_final do not supersede the frozen product baseline.",
   "known_non_blocking_limitations": [
-    "Current operational baseline documentation is being normalized before final candidate freeze.",
-    "Formal current-candidate provider endurance, constrained-resource, target-host and clean-machine evidence is not yet present."
+    "Q25 60-minute real-provider endurance was not completed; provider endurance remains BLOCKED while archive safety under incomplete discovery is PASS.",
+    "Q26 constrained-resource qualification remains BLOCKED because the attempted host lacked required symlink capability.",
+    "Provider availability, network behavior, authentication/region behavior and future extractor changes remain external dependencies."
   ]
 }

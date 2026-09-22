@@ -1,26 +1,39 @@
 # Release Notes
 
-The current product release is resolved from the latest commit-specific GitHub Release and its `current-release.json`. The historical documented product is `bb949284c15a2ce1128e94d41a931fe407358e64`; the operational baseline before final-candidate normalization is `53e9c8458298ba3396031f2342fd9f4807559311`. Neither is called Gold until every mandatory Gold gate passes.
+## Final release
 
-## Candidate
+- Product commit: `2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Qualification run: `35679575106`
+- Release: `qualification-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2`
+- Portable ZIP: `Media-Downloader-PS-Windows-Qt6-2b658b3ff02ad49831b6c5fed14a6f8e3c8c79c2.zip`
+- ZIP SHA-256: `c11f21de897db6f3727fdfc8c3bdd585cd1979530864c586df824d5d8b38dd07`
+- Release level: **GOLD under Final Release Policy v2**
+- Audit2: **CLOSED**
+- Further execution required: **no**
 
-- Historical product commit: `bb949284c15a2ce1128e94d41a931fe407358e64`
-- Current operational baseline: `53e9c8458298ba3396031f2342fd9f4807559311`
-- Current candidate identity: resolved from `qualification-<full-source-commit>/current-release.json`
-- Gold product: `null` until mandatory Gold gates pass
-- Historical `4c720544` / run `35116148963` is not current qualification
+A later documentation-only/control-plane commit does not replace this product baseline.
 
-## Fixed
+## Qualification summary
 
-- Full FFmpeg stream-integrity validation rejects metadata-readable truncation and corruption.
-- Archive Root and parent paths are checked before canonicalization.
-- C++ Windows reparse policy is tag-aware and fail-closed.
-- GUI settings are outside the sealed application directory.
-- Unresolved placeholder identity excludes mutable playlist position.
-- Windows reserved-device variants are rejected.
-- Inherited upstream publisher workflows were removed.
-- Audit2 remediation through `MDPS-AUDIT2-251` is on the product commit.
+The final product passed Linux, Windows, Linux sanitizer, full required CTest, portable package assembly, CLI preflight, GUI launch, packaged yt-dlp/FFmpeg/FFprobe checks, real-media smoke, package immutability, release publication, tag verification, payload digest verification, Actions cleanup, and Q27 target-host media qualification.
 
-## Limitations
+### Advisory gates
 
-Provider availability, network behavior and future extractor changes remain external dependencies. Native file-dialog click automation is not used; the packaged executable settings path and package seal are tested through the guarded qualification smoke. Endurance and low-memory are paused as named above; they are not PASS.
+Final Release Policy v2 reclassifies Q25 and Q26 as advisory/non-blocking.
+
+- Q25 provider endurance: **BLOCKED / advisory**
+- Q25 archive safety under incomplete discovery: **PASS**
+- Q26 constrained-resource qualification: **BLOCKED / advisory**
+- Q27 target-host media qualification: **PASS / mandatory**
+
+Q25 and Q26 are not PASS.
+
+## Major hardened areas
+
+The release incorporates Audit2 remediation through `MDPS-AUDIT2-251`, including archive integrity, filesystem safety, transaction/recovery behavior, process lifecycle hardening, updater/component safety, native filename identity, single-instance behavior, packaged runtime integrity, and qualification provenance.
+
+## Permanent limitations
+
+Provider availability, network conditions, authentication/region behavior and future extractor changes remain external dependencies. A complete current-package 60-minute provider-endurance run was not achieved. The attempted Q25 run failed closed and preserved archive safety. A formal symlink-capable constrained-resource Q26 environment was not available for the final attempt.
+
+See `FINAL_RELEASE_POLICY_V2.md` and GitHub issue #219 for the controlling final policy.
