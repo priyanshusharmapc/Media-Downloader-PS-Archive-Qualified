@@ -1,0 +1,54 @@
+{
+  "title": "Media Downloader PS AI-generated UI/UX mockups",
+  "status": "inspiration-only",
+  "branch": "uiux-overhaul-v1",
+  "google_drive_folder": "https://drive.google.com/drive/folders/1v6rEYf1-S1h2D61u45NH_OUWe9tHyeCm",
+  "images": [
+    {
+      "order": 1,
+      "name": "01-home.png",
+      "surface": "Home"
+    },
+    {
+      "order": 2,
+      "name": "02-basic-downloader.png",
+      "surface": "Basic Downloader"
+    },
+    {
+      "order": 3,
+      "name": "03-batch-downloader.png",
+      "surface": "Batch Downloader"
+    },
+    {
+      "order": 4,
+      "name": "04-playlist-downloader.png",
+      "surface": "Playlist Downloader"
+    },
+    {
+      "order": 5,
+      "name": "05-archive.png",
+      "surface": "Archive"
+    },
+    {
+      "order": 6,
+      "name": "06-archive-data-explorer.png",
+      "surface": "Archive Data Explorer"
+    },
+    {
+      "order": 7,
+      "name": "07-library.png",
+      "surface": "Library"
+    },
+    {
+      "order": 8,
+      "name": "08-settings-portability.png",
+      "surface": "Settings & Portability"
+    },
+    {
+      "order": 9,
+      "name": "09-about.png",
+      "surface": "About"
+    }
+  ],
+  "note": "AI-generated inspiration only. Final implementation must be grounded in actual repository functionality and approved product changes."
+}
