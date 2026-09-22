@@ -4,9 +4,9 @@ This document describes how a **current** candidate is qualified and how its evi
 
 ## Current candidate identity
 
-The qualified product commit is `bb949284c15a2ce1128e94d41a931fe407358e64`. GitHub Release `qualification-bb949284c15a2ce1128e94d41a931fe407358e64` holds the portable ZIP (`payload_sha256=8704235825ab2b5f9a3c6fe5eadd052ec08402214f7225d3e040b94f6b0e1cfd`) from run `35613369266`. Commit `77caa99e421ce6d9476d02c3d34c927d963b2528` is a verifier-only follow-up (`GH_REPO` on the ubuntu publisher). Sibling Release `qualification-77caa99e421ce6d9476d02c3d34c927d963b2528` is not the gold product. Gold 4 (endurance and low-memory) is **paused**: `GOLD-4-PAUSED-LOWMEM` (no cmake/ninja/Qt on the L16 host) and `GOLD-4-PAUSED-ENDURANCE` (no operator PlaylistUrl/VideoUrl). This is not a complete gold-state release.
+The current qualification release is the latest commit-specific GitHub Release named `qualification-<full-source-commit>`. Its `current-release.json` is the authoritative binding for the exact source commit, workflow run, package and SHA-256. Historical documented product `bb949284c15a2ce1128e94d41a931fe407358e64` and operational baseline `53e9c8458298ba3396031f2342fd9f4807559311` are preserved as provenance; neither is called Gold by this document.
 
-Do not retag `qualification-bb949284c15a2ce1128e94d41a931fe407358e64`. A later docs commit on `main` is not the product.
+Do not retag or clobber any existing qualification release. A new source commit receives a new commit-specific release.
 
 For every candidate, GitHub Actions generates `current-release.json` beside the qualified Windows payload. That generated record binds:
 

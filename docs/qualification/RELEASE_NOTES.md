@@ -1,14 +1,13 @@
 # Release Notes
 
-The qualified product commit is `bb949284c15a2ce1128e94d41a931fe407358e64`. GitHub Release `qualification-bb949284c15a2ce1128e94d41a931fe407358e64` holds the portable ZIP (`payload_sha256=8704235825ab2b5f9a3c6fe5eadd052ec08402214f7225d3e040b94f6b0e1cfd`) from run `35613369266`. Commit `77caa99e421ce6d9476d02c3d34c927d963b2528` is a verifier-only follow-up (`GH_REPO` on the ubuntu publisher). Sibling Release `qualification-77caa99e421ce6d9476d02c3d34c927d963b2528` is not the gold product. Gold 4 (endurance and low-memory) is **paused**: `GOLD-4-PAUSED-LOWMEM` (no cmake/ninja/Qt on the L16 host) and `GOLD-4-PAUSED-ENDURANCE` (no operator PlaylistUrl/VideoUrl). This is not a complete gold-state release.
+The current product release is resolved from the latest commit-specific GitHub Release and its `current-release.json`. The historical documented product is `bb949284c15a2ce1128e94d41a931fe407358e64`; the operational baseline before final-candidate normalization is `53e9c8458298ba3396031f2342fd9f4807559311`. Neither is called Gold until every mandatory Gold gate passes.
 
 ## Candidate
 
-- Product commit `C_main`: `bb949284c15a2ce1128e94d41a931fe407358e64`
-- Product Release: `qualification-bb949284c15a2ce1128e94d41a931fe407358e64`
-- `R_main`: `35613369266`
-- Payload SHA-256: `8704235825ab2b5f9a3c6fe5eadd052ec08402214f7225d3e040b94f6b0e1cfd`
-- Verifier-only commit `C_verify`: `77caa99e421ce6d9476d02c3d34c927d963b2528` — not the qualified product
+- Historical product commit: `bb949284c15a2ce1128e94d41a931fe407358e64`
+- Current operational baseline: `53e9c8458298ba3396031f2342fd9f4807559311`
+- Current candidate identity: resolved from `qualification-<full-source-commit>/current-release.json`
+- Gold product: `null` until mandatory Gold gates pass
 - Historical `4c720544` / run `35116148963` is not current qualification
 
 ## Fixed
